@@ -1,0 +1,237 @@
+{
+  "$schema": "./arena_config.schema.json",
+  "version": "1.0.0",
+  "notes": "Single source of truth untuk arena CHAIN RIDER. Dipakai oleh tools/blueprint_gen.py, prototype web, dan importer ScriptableObject di Unity. Koordinat dunia: X = -10..+10 (lebar 20), Z = 0..40 (panjang 40), Y = up. Origin (0,0,0) = tengah dinding bawah.",
+
+  "arena": {
+    "width": 20.0,
+    "height": 40.0,
+    "origin": "bottom-center",
+    "xMin": -10.0,
+    "xMax": 10.0,
+    "zMin": 0.0,
+    "zMax": 40.0,
+    "playerZone": { "zMin": 0.0, "zMax": 5.0, "size": 5.0 },
+    "combatZone": { "zMin": 5.0, "zMax": 30.0, "size": 25.0 },
+    "spawnZone":  { "zMin": 30.0, "zMax": 40.0, "size": 10.0 },
+    "defenseLineZ": 5.0,
+    "nearMissBandZ": 0.5,
+    "playerSpawn": { "x": 0.0, "y": 0.0, "z": 2.0 },
+    "muzzleOffset": { "x": 0.0, "y": 0.6, "z": 0.8 },
+    "walls": {
+      "left":   { "type": "ricochet_bumper", "x": -10.0, "restitution": 0.95, "friction": 0.10, "reflectsEnemies": false },
+      "right":  { "type": "ricochet_bumper", "x":  10.0, "restitution": 0.95, "friction": 0.10, "reflectsEnemies": false },
+      "top":    { "type": "spawn_gate",      "z":  40.0, "restitution": 0.00, "absorbsBullet": true },
+      "bottom": { "type": "defense_line",    "z":   0.0, "restitution": 0.00, "absorbsBullet": true }
+    }
+  },
+
+  "bullet": {
+    "baseSpeed": 25.0,
+    "maxBounce": 15,
+    "maxBounceUpgraded": 50,
+    "damageBase": 10.0,
+    "damagePerBounce": 1.15,
+    "speedPerBounce": 1.02,
+    "speedMultiplierCap": 1.50,
+    "steerAnglePerSwipe": 15.0,
+    "steerMaxAnglePerSecond": 90.0,
+    "steerMeterDuration": 3.0,
+    "radius": 0.18,
+    "pierceEnemies": true,
+    "trailMaxPoints": 20,
+    "simulationSubsteps": 4,
+    "skinWidth": 0.01,
+    "magazine": 5,
+    "autoReloadDelay": 0.35
+  },
+
+  "slowMo": {
+    "crowdTimeScale": 0.30,
+    "finalBounceTimeScale": 0.15,
+    "finalBounceThreshold": 3,
+    "transitionDuration": 0.20,
+    "fovNormal": 60.0,
+    "fovBulletTime": 40.0,
+    "chromaticAberrationMax": 0.45,
+    "vignetteMax": 0.42,
+    "audioDuckDb": -6.0,
+    "minFixedDeltaScale": 0.15
+  },
+
+  "camera": {
+    "pitchDegrees": 40.0,
+    "yawDegrees": 0.0,
+    "distance": 18.0,
+    "heightOffset": 12.0,
+    "lookAheadZ": 6.0,
+    "followLerp": 8.0,
+    "bulletFollowLerp": 14.0,
+    "shake": {
+      "bounceSmall":  { "amplitude": 0.08, "frequency": 22.0, "duration": 0.10 },
+      "bounceBig":    { "amplitude": 0.22, "frequency": 18.0, "duration": 0.18 },
+      "explosion":    { "amplitude": 0.35, "frequency": 14.0, "duration": 0.28 },
+      "comboMilestone": { "amplitude": 0.18, "frequency": 20.0, "duration": 0.22 }
+    }
+  },
+
+  "obstacleDefaults": {
+    "barrel":      { "hp": 1, "explosionRadius": 3.0, "explosionDamage": 50.0, "falloff": "linear", "chainDelay": 0.08, "radius": 0.6 },
+    "pillar":      { "radius": 1.5, "restitution": 0.98, "friction": 0.05 },
+    "bumper":      { "radius": 0.9, "restitution": 0.95, "friction": 0.10, "bounceBonusDamage": 0.05 },
+    "gravityWell": { "radius": 4.0, "force": 5.0, "duration": 3.0, "maxCurveDegPerSec": 120.0 },
+    "shieldWall":  { "hp": 3, "width": 3.0, "thickness": 0.4, "vulnerableFrom": "back" },
+    "movingPlatform": { "width": 4.0, "thickness": 0.8, "speed": 2.0, "blocksEnemies": true, "blocksBullet": false }
+  },
+
+  "spawn": {
+    "waveCount": 5,
+    "enemiesPerWave": [30, 50, 80, 120, 200],
+    "spawnInterval": [10, 12, 15, 18, 20],
+    "formation": ["rect", "vshape", "diamond", "rect", "circle"],
+    "columnsRange": [5, 12],
+    "spacing": 0.8,
+    "descendSpeedRange": [0.5, 1.5],
+    "swayAmplitude": 0.35,
+    "swayFrequency": 0.6,
+    "separationRadius": 0.7,
+    "separationWeight": 1.0,
+    "alignmentWeight": 0.25,
+    "cohesionWeight": 0.10,
+    "maxActiveEnemies": 260,
+    "poolSize": 500
+  },
+
+  "enemyTypes": [
+    { "id": "grunt",    "hp": 10,  "speed": 1.2, "tris": 180, "score": 10,  "color": "#FF4D3D", "note": "Musuh dasar, mati 1 hit." },
+    { "id": "runner",   "hp": 6,   "speed": 2.2, "tris": 190, "score": 15,  "color": "#FF8A2B", "note": "Cepat, memecah formasi." },
+    { "id": "brute",    "hp": 60,  "speed": 0.6, "tris": 290, "score": 50,  "color": "#C2341F", "note": "Tank, butuh bounce ber-stack." },
+    { "id": "shielder", "hp": 25,  "speed": 0.9, "tris": 260, "score": 40,  "color": "#FFC93C", "note": "Shield depan, hanya rusak dari samping/belakang." },
+    { "id": "splitter", "hp": 20,  "speed": 1.0, "tris": 240, "score": 35,  "color": "#FF5FA2", "note": "Pecah jadi 3 grunt saat mati." },
+    { "id": "bomber",   "hp": 12,  "speed": 1.4, "tris": 220, "score": 45,  "color": "#FFE04D", "note": "Meledak saat mati, radius 2.5, chain kill." }
+  ],
+
+  "scoring": {
+    "baseKill": 10,
+    "bounceMultiplierStep": 0.15,
+    "comboMilestones": [10, 20, 50, 100],
+    "killMilestones": [50, 100, 200],
+    "bounceMilestoneEvery": 5,
+    "perfectClearBonusCoins": 50,
+    "lastBulletZoomDuration": 1.2
+  },
+
+  "player": {
+    "lives": 3,
+    "invulnerabilityAfterHit": 1.0,
+    "damagePerLeakedEnemy": 1
+  },
+
+  "determinism": {
+    "fixedDeltaTime": 0.0166666667,
+    "maxSubstepsPerFrame": 4,
+    "rng": "xorshift128",
+    "defaultSeed": 20260929,
+    "replayRecordsInputOnly": true
+  },
+
+  "variants": [
+    {
+      "id": "classic_pit",
+      "index": 1,
+      "name": "Classic Pit",
+      "theme": { "primary": "#00E5FF", "enemy": "#FF4D3D", "bumper": "#B14DFF", "bgTop": "#0A1030", "bgBottom": "#03060F", "grid": "#1FD3E8" },
+      "musicLayer": "base_synth",
+      "specialEnemy": "runner",
+      "boss": "colossus",
+      "description": "Arena dasar, 4 bumper simetris. Mengajarkan sudut pantul 45 derajat.",
+      "obstacles": [
+        { "type": "bumper", "x": -5.5, "z": 13.0, "radius": 0.9 },
+        { "type": "bumper", "x":  5.5, "z": 13.0, "radius": 0.9 },
+        { "type": "bumper", "x": -5.5, "z": 23.0, "radius": 0.9 },
+        { "type": "bumper", "x":  5.5, "z": 23.0, "radius": 0.9 }
+      ]
+    },
+    {
+      "id": "twin_towers",
+      "index": 2,
+      "name": "Twin Towers",
+      "theme": { "primary": "#00E5FF", "enemy": "#FF6A1F", "bumper": "#FF3DBE", "bgTop": "#170B2E", "bgBottom": "#05020C", "grid": "#C24DFF" },
+      "musicLayer": "base_synth+arp",
+      "specialEnemy": "brute",
+      "boss": "twin_warden",
+      "description": "Dua pilar besar di tengah membentuk 3 lorong sempit. Peluru mudah terjebak zig-zag bernilai tinggi.",
+      "obstacles": [
+        { "type": "pillar", "x": -3.6, "z": 20.0, "radius": 2.4 },
+        { "type": "pillar", "x":  3.6, "z": 20.0, "radius": 2.4 },
+        { "type": "bumper", "x": -7.5, "z": 11.0, "radius": 0.9 },
+        { "type": "bumper", "x":  7.5, "z": 11.0, "radius": 0.9 },
+        { "type": "bumper", "x": -7.5, "z": 28.0, "radius": 0.9 },
+        { "type": "bumper", "x":  7.5, "z": 28.0, "radius": 0.9 }
+      ]
+    },
+    {
+      "id": "gravity_chamber",
+      "index": 3,
+      "name": "Gravity Chamber",
+      "theme": { "primary": "#4DFFD2", "enemy": "#FF3D6E", "bumper": "#8A5CFF", "bgTop": "#04182B", "bgBottom": "#01070E", "grid": "#3DF0FF" },
+      "musicLayer": "base_synth+pad",
+      "specialEnemy": "splitter",
+      "boss": "singularity",
+      "description": "Dua gravity well membelokkan peluru jadi kurva. Lintasan non-linear, reward tinggi.",
+      "obstacles": [
+        { "type": "gravityWell", "x": -4.0, "z": 15.0, "radius": 4.0, "force": 5.0 },
+        { "type": "gravityWell", "x":  4.0, "z": 26.0, "radius": 4.0, "force": 5.0 },
+        { "type": "bumper", "x": -6.0, "z": 21.0, "radius": 0.9 },
+        { "type": "bumper", "x":  6.0, "z": 21.0, "radius": 0.9 }
+      ]
+    },
+    {
+      "id": "explosive_yard",
+      "index": 4,
+      "name": "Explosive Yard",
+      "theme": { "primary": "#00E5FF", "enemy": "#FF8A2B", "bumper": "#FF2D55", "bgTop": "#2B0C05", "bgBottom": "#0A0301", "grid": "#FF7A3D" },
+      "musicLayer": "base_synth+percussion",
+      "specialEnemy": "bomber",
+      "boss": "pyro_baron",
+      "description": "Ladang barrel. Satu pantulan tepat memicu chain explosion sepanjang arena.",
+      "obstacles": [
+        { "type": "barrel", "x": -6.0, "z": 12.0 },
+        { "type": "barrel", "x": -4.0, "z": 14.0 },
+        { "type": "barrel", "x":  4.0, "z": 14.0 },
+        { "type": "barrel", "x":  6.0, "z": 12.0 },
+        { "type": "barrel", "x":  0.0, "z": 18.0 },
+        { "type": "barrel", "x": -5.0, "z": 24.0 },
+        { "type": "barrel", "x":  5.0, "z": 24.0 },
+        { "type": "barrel", "x": -2.0, "z": 27.0 },
+        { "type": "barrel", "x":  2.0, "z": 27.0 },
+        { "type": "pillar", "x":  0.0, "z": 22.0, "radius": 1.5 }
+      ]
+    },
+    {
+      "id": "moving_maze",
+      "index": 5,
+      "name": "Moving Maze",
+      "theme": { "primary": "#7CFF4D", "enemy": "#FF4D3D", "bumper": "#B14DFF", "bgTop": "#06220F", "bgBottom": "#010A04", "grid": "#6BFF9E" },
+      "musicLayer": "base_synth+glitch",
+      "specialEnemy": "shielder",
+      "boss": "shifter",
+      "description": "Tiga platform bergerak memaksa timing. Formasi musuh pecah dinamis saat tertahan.",
+      "obstacles": [
+        { "type": "movingPlatform", "x": 0.0, "z": 12.0, "width": 5.0, "travel": 6.0, "speed": 2.0, "phase": 0.0 },
+        { "type": "movingPlatform", "x": 0.0, "z": 20.0, "width": 5.0, "travel": 6.0, "speed": 2.5, "phase": 0.5 },
+        { "type": "movingPlatform", "x": 0.0, "z": 28.0, "width": 5.0, "travel": 6.0, "speed": 1.8, "phase": 0.25 },
+        { "type": "shieldWall", "x": -6.5, "z": 16.0, "width": 3.0 },
+        { "type": "shieldWall", "x":  6.5, "z": 24.0, "width": 3.0 }
+      ]
+    }
+  ],
+
+  "bosses": [
+    { "id": "colossus",    "hp": 1200, "pattern": "slow_descend_slam",    "shieldFacing": "front", "variant": "classic_pit" },
+    { "id": "twin_warden", "hp": 900,  "pattern": "mirror_pair_sidestep", "shieldFacing": "front", "variant": "twin_towers" },
+    { "id": "singularity", "hp": 1000, "pattern": "orbit_pull_pulse",     "shieldFacing": "rotating", "variant": "gravity_chamber" },
+    { "id": "pyro_baron",  "hp": 1100, "pattern": "barrel_drop_charge",   "shieldFacing": "none", "variant": "explosive_yard" },
+    { "id": "shifter",     "hp": 1400, "pattern": "teleport_lane_swap",   "shieldFacing": "back_weak", "variant": "moving_maze" }
+  ]
+}

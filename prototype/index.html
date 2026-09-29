@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>CHAIN RIDER — Arena Prototype 2.5D</title>
+<style>
+  :root {
+    --cyan:#00E5FF; --magenta:#B14DFF; --gold:#FFD54F; --danger:#FF1744;
+    --bg0:#05070F; --panel:#0B1120;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg0); overflow:hidden;
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:#E8F0FF; }
+  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; gap:24px; padding:12px; }
+  #stage { position:relative; height:100%; aspect-ratio:9/16; max-width:100%;
+    border-radius:18px; overflow:hidden; box-shadow:0 0 60px rgba(0,229,255,.12), 0 0 0 1px rgba(255,255,255,.07); }
+  canvas { display:block; width:100%; height:100%; touch-action:none; }
+
+  /* ---------- HUD ---------- */
+  .hud { position:absolute; inset:0; pointer-events:none; font-variant-numeric:tabular-nums; }
+  .top { position:absolute; top:0; left:0; right:0; padding:16px 18px;
+    display:flex; align-items:flex-start; justify-content:space-between; }
+  .score { font-size:34px; font-weight:800; letter-spacing:-.5px; line-height:1; text-shadow:0 2px 12px #000; }
+  .score small { display:block; font-size:11px; font-weight:700; color:#8A9BB8; letter-spacing:2px; margin-top:4px; }
+  .combo { font-size:38px; font-weight:900; color:var(--gold); text-shadow:0 0 18px rgba(255,213,79,.55);
+    transition:transform .08s ease-out; }
+  .wave { font-size:14px; font-weight:800; letter-spacing:1.5px; padding:7px 13px; border-radius:999px;
+    border:2px solid rgba(0,229,255,.55); color:var(--cyan); }
+  .bottom { position:absolute; left:0; right:0; bottom:0; padding:14px 18px 18px; }
+  .steerRow { display:flex; align-items:center; gap:10px; margin-bottom:12px; opacity:.28; transition:opacity .15s; }
+  .steerRow.on { opacity:1; }
+  .steerLbl { font-size:10px; font-weight:800; letter-spacing:2px; color:var(--cyan); }
+  .steerTrack { flex:1; height:12px; border-radius:999px; background:#12233A; overflow:hidden; }
+  .steerFill { height:100%; width:0%; border-radius:999px;
+    background:linear-gradient(90deg,#00E5FF,#7CFFEA); box-shadow:0 0 14px rgba(0,229,255,.8); }
+  .steerSec { font-size:12px; font-weight:800; color:#9FE8FF; min-width:34px; text-align:right; }
+  .row { display:flex; align-items:center; justify-content:space-between; }
+  .ammo { display:flex; gap:6px; }
+  .ammo i { width:8px; height:20px; border-radius:3px; background:#1B2C46; display:block; }
+  .ammo i.f { background:var(--cyan); box-shadow:0 0 10px rgba(0,229,255,.7); }
+  .hp { display:flex; gap:7px; font-size:20px; }
+  .hp span { filter:drop-shadow(0 0 6px rgba(255,23,68,.7)); }
+  .hp span.e { opacity:.2; filter:none; }
+  .center { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  .popup { font-size:64px; font-weight:900; color:var(--gold); opacity:0;
+    text-shadow:0 0 30px rgba(255,213,79,.8), 0 4px 0 rgba(0,0,0,.4); }
+  .hint { position:absolute; left:0; right:0; bottom:26%; text-align:center; font-size:13px;
+    color:#9FB3CF; letter-spacing:.4px; line-height:1.7; }
+  .banner { position:absolute; left:0; right:0; top:46%; text-align:center; font-size:30px;
+    font-weight:900; letter-spacing:1px; opacity:0; }
+  #flash { position:absolute; inset:0; background:var(--danger); opacity:0; }
+  #vig { position:absolute; inset:0; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at center, transparent 42%, rgba(0,52,77,.85) 100%); }
+
+  /* ---------- Panel ---------- */
+  #panel { width:280px; max-height:100%; overflow:auto; background:var(--panel); border-radius:16px;
+    padding:18px; box-shadow:0 0 0 1px rgba(255,255,255,.06); font-size:13px; }
+  #panel h1 { font-size:16px; margin:0 0 3px; letter-spacing:1px; }
+  #panel h1 b { color:var(--cyan); }
+  #panel .sub { color:#7E90AC; font-size:11px; margin-bottom:16px; line-height:1.6; }
+  #panel h2 { font-size:10px; letter-spacing:2px; color:#7E90AC; margin:18px 0 8px; font-weight:800; }
+  .vbtn { display:block; width:100%; text-align:left; padding:9px 11px; margin-bottom:6px; border-radius:9px;
+    border:1px solid rgba(255,255,255,.08); background:#111A2C; color:#D6E4F7; cursor:pointer;
+    font-size:12px; font-weight:600; transition:.12s; }
+  .vbtn:hover { border-color:rgba(0,229,255,.45); }
+  .vbtn.sel { background:rgba(0,229,255,.13); border-color:var(--cyan); color:#fff; }
+  .vbtn em { display:block; font-style:normal; font-size:10px; color:#7E90AC; margin-top:3px; font-weight:500; }
+  .stat { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.05); }
+  .stat b { color:var(--cyan); font-weight:700; }
+  .keys { color:#7E90AC; font-size:11px; line-height:1.9; }
+  .keys kbd { background:#1B2740; border-radius:4px; padding:1px 6px; font-size:10px; color:#C6D8F0; }
+  @media (max-width:820px) { #panel { display:none; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div class="hud">
+      <div id="vig"></div>
+      <div class="top">
+        <div class="score"><span id="score">0</span><small>SCORE</small></div>
+        <div class="combo" id="combo"></div>
+        <div class="wave" id="wave">WAVE 1/5</div>
+      </div>
+      <div class="center"><div class="popup" id="popup"></div></div>
+      <div class="banner" id="banner"></div>
+      <div class="hint" id="hint">TAP / KLIK untuk menembak<br>GESER untuk membelokkan peluru saat bullet-riding</div>
+      <div class="bottom">
+        <div class="steerRow" id="steerRow">
+          <span class="steerLbl">STEER</span>
+          <div class="steerTrack"><div class="steerFill" id="steerFill"></div></div>
+          <span class="steerSec" id="steerSec">0.0s</span>
+        </div>
+        <div class="row">
+          <div class="ammo" id="ammo"></div>
+          <div class="hp" id="hp"></div>
+        </div>
+      </div>
+      <div id="flash"></div>
+    </div>
+  </div>
+
+  <div id="panel">
+    <h1>CHAIN <b>RIDER</b></h1>
+    <div class="sub">Prototipe arena 2.5D. Menjalankan aturan yang sama dengan spec:
+      fixed-step 60 Hz, ricochet analitik (tanpa physics engine), bullet riding + slow-mo.</div>
+
+    <h2>ARENA VARIANT</h2>
+    <div id="variants"></div>
+
+    <h2>LIVE STATS</h2>
+    <div class="stat"><span>FPS</span><b id="sFps">—</b></div>
+    <div class="stat"><span>Sim tick</span><b id="sTick">0</b></div>
+    <div class="stat"><span>Musuh aktif</span><b id="sEnemies">0</b></div>
+    <div class="stat"><span>Bounce</span><b id="sBounce">0</b></div>
+    <div class="stat"><span>Damage ×</span><b id="sDmg">1.00</b></div>
+    <div class="stat"><span>Speed ×</span><b id="sSpd">1.00</b></div>
+    <div class="stat"><span>timeScale</span><b id="sTs">1.00</b></div>
+    <div class="stat"><span>Total kill</span><b id="sKills">0</b></div>
+
+    <h2>KONTROL</h2>
+    <div class="keys">
+      <kbd>tap</kbd> tembak / rem<br>
+      <kbd>drag</kbd> belokkan peluru (maks 15°/swipe)<br>
+      <kbd>←</kbd> <kbd>→</kbd> steer via keyboard<br>
+      <kbd>R</kbd> restart · <kbd>1-5</kbd> ganti arena
+    </div>
+  </div>
+</div>
+
+<script>
+// =============================================================================
+// CHAIN RIDER — Prototipe arena 2.5D
+//
+// Port ringkas dari skeleton C#:
+//   SimClock          -> fixed-step accumulator 1/60
+//   DeterministicRng  -> xorshift128
+//   RicochetSolver    -> reflect + swept-circle (TANPA physics engine)
+//   BulletController  -> ricochet, steer, bullet riding, slow-mo intent
+//   CrowdManager      -> formasi, sway, separation, damage
+//   SlowMoSystem      -> timeScale tunggal
+//   CameraRig         -> proyeksi 2.5D + shake + zoom
+// =============================================================================
+
+// ---------- DeterministicRng (xorshift128) ----------
+function Rng(seed){
+  let s = seed >>> 0;
+  const mix = () => { s = (s + 0x9E3779B9) >>> 0; let z = s;
+    z = Math.imul(z ^ (z>>>16), 0x85EBCA6B) >>> 0;
+    z = Math.imul(z ^ (z>>>13), 0xC2B2AE35) >>> 0;
+    return (z ^ (z>>>16)) >>> 0; };
+  let x = mix(), y = mix(), z2 = mix(), w = mix();
+  if ((x|y|z2|w) === 0) x = 0x9E3779B9;
+  const next = () => { const t = (x ^ (x<<11)) >>> 0; x=y; y=z2; z2=w;
+    w = (w ^ (w>>>19) ^ t ^ (t>>>8)) >>> 0; return w; };
+  return {
+    next,
+    f: () => (next() >>> 8) * (1/16777216),
+    range(a,b){ return a + (b-a)*this.f(); },
+    int(a,b){ return a + (next() % (b-a)); },
+    weighted(w){ let t=0; for(const v of w) t+=v; let r=this.f()*t;
+      for(let i=0;i<w.length;i++){ r-=w[i]; if(r<=0) return i; } return w.length-1; }
+  };
+}
+
+// ---------- Konstanta simulasi ----------
+const FIXED_DT = 1/60, MAX_STEPS = 5;
+let CFG = null;               // diisi dari Config/arena_config.json
+
+// ---------- State global ----------
+const S = {
+  variant:0, rng:null, tick:0, acc:0,
+  state:'playing',            // playing | victory | defeat
+  score:0, combo:0, bestCombo:0, kills:0, lives:3, coins:0,
+  waveIndex:-1, waveTimer:1.5, waveActive:false, leaked:0,
+  ammo:5, reload:0,
+  timeScale:1, targetTimeScale:1, holdSlow:0,
+  shake:0, shakeAmp:0, fov:1, targetFov:1,
+  enemies:[], bullets:[], obstacles:[], fx:[], floats:[],
+  bounceLadder:0, lastBounce:0,
+};
+
+// ---------- Audio (WebAudio, pitch-ladder bounce) ----------
+let AC=null, master=null;
+function initAudio(){
+  if(AC) return;
+  AC = new (window.AudioContext||window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value = 0.22; master.connect(AC.destination);
+}
+function beep(freq, dur, type='sine', vol=1, slide=0){
+  if(!AC) return;
+  const o=AC.createOscillator(), g=AC.createGain();
+  o.type=type; o.frequency.setValueAtTime(freq, AC.currentTime);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,freq*slide), AC.currentTime+dur);
+  g.gain.setValueAtTime(0.0001, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(vol, AC.currentTime+0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime+dur);
+  o.connect(g); g.connect(master); o.start(); o.stop(AC.currentTime+dur+0.02);
+}
+const SFX = {
+  shot(){ beep(180,0.13,'square',0.5,0.4); beep(70,0.18,'sine',0.7,0.6); },
+  // Pitch ladder: naik 1 semitone tiap bounce (persis AudioDirector.cs)
+  bounce(n){ beep(660*Math.pow(1.05946, Math.min(n,14)), 0.09,'triangle',0.45); },
+  kill(){ beep(280+Math.random()*80,0.05,'square',0.16); },
+  combo(){ [0,4,7].forEach((st,i)=>setTimeout(()=>beep(523*Math.pow(1.05946,st),0.16,'sine',0.5),i*70)); },
+  boom(){ beep(90,0.5,'sawtooth',0.6,0.25); beep(45,0.7,'sine',0.7,0.4); },
+  slow(){ beep(420,0.3,'sine',0.35,0.45); },
+  breach(){ beep(120,0.35,'sawtooth',0.6,0.7); },
+  expire(){ beep(300,0.2,'triangle',0.25,0.4); },
+};
+
+// =============================================================================
+// RICOCHET SOLVER — matematika murni, tanpa physics engine
+// =============================================================================
+const Solver = {
+  reflect(dx,dz,nx,nz){ const d = 2*(dx*nx+dz*nz); return [dx-d*nx, dz-d*nz]; },
+
+  // Pengaman sudut serempet: paksa minimal 12° menjauh dari permukaan.
+  reflectSafe(dx,dz,nx,nz){
+    let [rx,rz] = this.reflect(dx,dz,nx,nz);
+    const sin = rx*nx+rz*nz, minSin = Math.sin(12*Math.PI/180);
+    if(sin < minSin){ rx += nx*(minSin-sin)*1.5; rz += nz*(minSin-sin)*1.5; }
+    const l = Math.hypot(rx,rz)||1; return [rx/l, rz/l];
+  },
+
+  rotate(dx,dz,deg){ const r=deg*Math.PI/180, c=Math.cos(r), s=Math.sin(r);
+    return [dx*c+dz*s, -dx*s+dz*c]; },
+
+  // Swept circle vs circle: akar terkecil dari a t^2 + b t + k = 0
+  sweepCircle(px,pz,ddx,ddz,rb, cx,cz,rc){
+    const mx=px-cx, mz=pz-cz, R=rb+rc;
+    const a=ddx*ddx+ddz*ddz; if(a<1e-12) return null;
+    const b=2*(mx*ddx+mz*ddz), k=mx*mx+mz*mz-R*R;
+    if(k<0){ const l=Math.hypot(mx,mz)||1; return {t:0,nx:mx/l,nz:mz/l}; }
+    const disc=b*b-4*a*k; if(disc<0) return null;
+    const t=(-b-Math.sqrt(disc))/(2*a); if(t<0||t>1) return null;
+    const hx=px+ddx*t, hz=pz+ddz*t, l=Math.hypot(hx-cx,hz-cz)||1;
+    return {t, nx:(hx-cx)/l, nz:(hz-cz)/l};
+  },
+
+  // Dinding samping: bidang X = konstan
+  sweepWalls(px,ddx,rb,xMin,xMax){
+    let best=null;
+    if(ddx<-1e-6){ const t=((xMin+rb)-px)/ddx; if(t>=0&&t<=1) best={t,nx:1,nz:0}; }
+    if(ddx> 1e-6){ const t=((xMax-rb)-px)/ddx; if(t>=0&&t<=1&&(!best||t<best.t)) best={t,nx:-1,nz:0}; }
+    return best;
+  },
+
+  // Gravity well: memutar ARAH, tidak menambah kecepatan.
+  gravity(px,pz,dx,dz,cx,cz,r,force,dt){
+    const tx=cx-px, tz=cz-pz, dist=Math.hypot(tx,tz);
+    if(dist>r||dist<1e-4) return [dx,dz];
+    const strength = 1 - dist/r;
+    const want = Math.atan2(tz/dist, tx/dist), cur = Math.atan2(dz,dx);
+    let diff = want-cur; while(diff>Math.PI) diff-=2*Math.PI; while(diff<-Math.PI) diff+=2*Math.PI;
+    const maxStep = 120*Math.PI/180*dt;
+    const step = Math.max(-maxStep, Math.min(maxStep, diff*strength*force*dt));
+    const a = cur+step; return [Math.cos(a), Math.sin(a)];
+  }
+};
+
+// =============================================================================
+// FORMATION BUILDER
+// =============================================================================
+function buildFormation(kind, count, cols, spacing, halfW){
+  const out=[];
+  if(kind==='rect'){
+    const hw=(cols-1)*spacing/2;
+    for(let i=0;i<count;i++) out.push([ (i%cols)*spacing-hw, Math.floor(i/cols)*spacing ]);
+  } else if(kind==='vshape'){
+    let row=0; while(out.length<count){
+      const x=Math.min(row*spacing*0.6, halfW), z=row*spacing*0.8;
+      out.push([-x,z]); if(x>0.01&&out.length<count) out.push([x,z]); row++; if(row>400)break;
+    }
+  } else if(kind==='diamond'){
+    const maxW=Math.floor(Math.sqrt(count)), total=maxW*2; let row=0;
+    while(out.length<count&&row<total){
+      const n=Math.max(1, row<=maxW?row+1:total-row+1), hw=Math.min((n-1)*spacing/2, halfW);
+      for(let c=0;c<n&&out.length<count;c++)
+        out.push([ n===1?0:(-hw+(2*hw)*c/(n-1)), row*spacing*0.9 ]);
+      row++;
+    }
+    while(out.length<count){ const c=out.length%6; out.push([(c-2.5)*spacing, row*spacing*0.9]); if(c===5)row++; }
+  } else if(kind==='circle'){
+    let ring=1; while(out.length<count){
+      const r=Math.min(ring*spacing*1.1, halfW);
+      const per=Math.max(6, Math.floor(2*Math.PI*r/spacing));
+      for(let i=0;i<per&&out.length<count;i++){ const a=i/per*Math.PI*2;
+        out.push([Math.cos(a)*r, Math.sin(a)*r+r]); }
+      ring++; if(ring>60)break;
+    }
+  } else { for(let i=0;i<count;i++) out.push([0, i*spacing*0.7]); }
+  return out;
+}
+
+// =============================================================================
+// SETUP ARENA
+// =============================================================================
+function loadVariant(idx){
+  S.variant = idx;
+  const v = CFG.variants[idx];
+  S.obstacles = v.obstacles.map(o=>({
+    kind:o.type, x:o.x, z:o.z, bx:o.x,
+    r:o.radius ?? (CFG.obstacleDefaults[o.type]?.radius ?? 0.9),
+    w:o.width ?? 4, travel:o.travel ?? 6, speed:o.speed ?? 2, phase:o.phase ?? 0,
+    force:o.force ?? 5, hp:o.type==='barrel'?1:(o.type==='shieldWall'?3:Infinity), alive:true
+  }));
+  document.querySelectorAll('.vbtn').forEach((b,i)=>b.classList.toggle('sel', i===idx));
+  resetRun();
+}
+
+function resetRun(){
+  S.rng = Rng(CFG.determinism.defaultSeed + S.variant*7919);
+  S.tick=0; S.acc=0; S.state='playing';
+  S.score=0; S.combo=0; S.bestCombo=0; S.kills=0; S.lives=CFG.player.lives; S.coins=0;
+  S.waveIndex=-1; S.waveTimer=1.2; S.waveActive=false; S.leaked=0;
+  S.ammo=CFG.bullet.magazine; S.reload=0;
+  S.timeScale=1; S.targetTimeScale=1; S.holdSlow=0; S.shake=0; S.fov=1; S.targetFov=1;
+  S.enemies=[]; S.bullets=[]; S.fx=[]; S.floats=[]; S.bounceLadder=0;
+  for(const o of S.obstacles){ o.alive=true; o.hp = o.kind==='barrel'?1:(o.kind==='shieldWall'?3:Infinity); }
+  banner('', 0);
+  el.hint.style.opacity = 1;
+}
+
+// =============================================================================
+// ENEMY
+// =============================================================================
+const TYPES = ['grunt','runner','brute','shielder','splitter','bomber'];
+function typeStats(t){
+  const e = CFG.enemyTypes.find(x=>x.id===t) || CFG.enemyTypes[0];
+  return { hp:e.hp, speed:e.speed, color:e.color,
+    score:e.score, r: t==='brute'?0.55:(t==='shielder'?0.5:0.38),
+    armored: t==='brute'||t==='shielder',
+    explode: t==='bomber', split: t==='splitter' };
+}
+
+function spawnWave(){
+  const w = Math.min(S.waveIndex, CFG.spawn.enemiesPerWave.length-1);
+  let count = CFG.spawn.enemiesPerWave[w];
+  const kind = CFG.spawn.formation[w];
+  count = Math.min(count, CFG.spawn.maxActiveEnemies - S.enemies.length);
+  if(count<=0) return;
+
+  const cols = S.rng.int(CFG.spawn.columnsRange[0], CFG.spawn.columnsRange[1]+1);
+  const halfW = CFG.arena.width/2 - 1.2;
+  const pts = buildFormation(kind, count, cols, CFG.spawn.spacing, halfW);
+  const baseZ = CFG.arena.height + 1;
+
+  pts.forEach((p,i)=>{
+    // Baris depan selalu grunt → pemain punya target empuk untuk memicu riding.
+    let t = 'grunt';
+    if(i>=6){
+      const ws = [[1,0,0,0,0,0],[.7,.3,0,0,0,0],[.5,.2,.1,.1,.1,0],
+                  [.4,.2,.12,.12,.08,.08],[.35,.2,.15,.1,.1,.1]][Math.min(w,4)];
+      t = TYPES[S.rng.weighted(ws)];
+    }
+    const st = typeStats(t);
+    S.enemies.push({
+      type:t, x:Math.max(-halfW,Math.min(halfW,p[0]+S.rng.range(-.1,.1))),
+      z:baseZ+p[1]+S.rng.range(-.1,.1),
+      hp:st.hp, maxHp:st.hp, speed:st.speed*S.rng.range(.9,1.1), r:st.r,
+      color:st.color, score:st.score, armored:st.armored,
+      explode:st.explode, split:st.split, phase:S.rng.range(0,Math.PI*2),
+      vx:0, vz:0, near:false, hit:0
+    });
+  });
+  S.waveActive = true;
+  setWaveLabel();
+}
+
+// =============================================================================
+// BULLET
+// =============================================================================
+function fire(){
+  if(S.state!=='playing') return;
+  initAudio();
+  el.hint.style.opacity = 0;
+
+  // Tap saat riding = REM (constraint: tidak ada tombol terpisah)
+  const riding = S.bullets.find(b=>b.riding&&b.alive);
+  if(riding){ killBullet(riding,'brake'); return; }
+  if(S.ammo<=0) return;
+
+  const bc = CFG.bullet;
+  S.bullets.push({
+    x:CFG.arena.playerSpawn.x, z:CFG.arena.playerSpawn.z + CFG.arena.muzzleOffset.z,
+    px:CFG.arena.playerSpawn.x, pz:CFG.arena.playerSpawn.z,
+    dx:0, dz:1, speed:bc.baseSpeed, spdMul:1, dmgMul:1,
+    bounces:bc.maxBounce, bounceCount:0, riding:false,
+    steer:0, steerMax:bc.steerMeterDuration, pending:0,
+    alive:true, life:0, trail:[]
+  });
+  S.ammo--; S.reload = bc.autoReloadDelay;
+  SFX.shot();
+  S.bounceLadder = 0;
+}
+
+function killBullet(b, reason){
+  if(!b.alive) return;
+  b.alive=false; b.riding=false;
+  requestSlow(1);
+  S.combo = 0;                       // combo reset saat peluru habis
+  S.bounceLadder = 0;
+  SFX.expire();
+  setCombo();
+}
+
+function queueSteer(norm){
+  const b = S.bullets.find(x=>x.riding&&x.alive&&x.steer>0);
+  if(!b) return;
+  const deg = Math.max(-1,Math.min(1,norm)) * CFG.bullet.steerAnglePerSwipe;
+  b.pending = Math.max(-45, Math.min(45, b.pending+deg));
+}
+
+function tickBullet(b, dt){
+  if(!b.alive) return;
+  b.life += dt;
+  if(b.life > 12){ killBullet(b,'timeout'); return; }
+  b.px=b.x; b.pz=b.z;
+
+  // --- steer meter (berjalan di waktu SIMULASI → slow-mo memperpanjangnya) ---
+  if(b.riding && b.steer>0){
+    b.steer -= dt;
+    if(b.steer<=0){ b.steer=0; b.pending=0; requestSlow(1); }
+  }
+  // --- rate limit steering: maks 90°/detik ---
+  if(Math.abs(b.pending)>1e-4 && b.riding && b.steer>0){
+    const maxStep = CFG.bullet.steerMaxAnglePerSecond*dt;
+    const step = Math.max(-maxStep, Math.min(maxStep, b.pending));
+    b.pending -= step;
+    [b.dx,b.dz] = Solver.rotate(b.dx,b.dz,step);
+  }
+  // --- gravity well ---
+  for(const o of S.obstacles){
+    if(o.kind!=='gravityWell'||!o.alive) continue;
+    [b.dx,b.dz] = Solver.gravity(b.x,b.z,b.dx,b.dz,o.x,o.z,o.r,o.force,dt);
+  }
+
+  // --- substep sesuai jarak tempuh (anti-tunneling) ---
+  const speed = b.speed*b.spdMul, travel = speed*dt;
+  const sub = Math.max(1, Math.min(CFG.bullet.simulationSubsteps, Math.ceil(travel/0.5)));
+  for(let s=0; s<sub && b.alive; s++) substep(b, dt/sub);
+
+  b.trail.push([b.x,b.z]); if(b.trail.length>20) b.trail.shift();
+}
+
+function substep(b, dt){
+  const rb = CFG.bullet.radius;
+  let remaining = b.speed*b.spdMul*dt;
+
+  for(let iter=0; iter<4 && remaining>1e-5; iter++){
+    const ddx = b.dx*remaining, ddz = b.dz*remaining;
+    let hit=null;
+
+    // --- dinding samping ---
+    const w = Solver.sweepWalls(b.x, ddx, rb, CFG.arena.xMin, CFG.arena.xMax);
+    if(w) hit = {...w, kind:'wall', ref:null};
+
+    // --- obstacle ---
+    for(const o of S.obstacles){
+      if(!o.alive) continue;
+      if(o.kind==='gravityWell'||o.kind==='movingPlatform') continue;  // non-pemantul
+      const rc = o.kind==='barrel'?0.6:o.r;
+      const h = Solver.sweepCircle(b.x,b.z,ddx,ddz,rb,o.x,o.z,rc);
+      if(h && (!hit||h.t<hit.t)) hit = {...h, kind:o.kind, ref:o};
+    }
+
+    // --- crowd: musuh biasa DITEMBUS, berarmor MEMANTULKAN ---
+    let touched=false, armorHit=null;
+    for(const e of S.enemies){
+      if(e.hp<=0) continue;
+      const h = Solver.sweepCircle(b.x,b.z,ddx,ddz,rb,e.x,e.z,e.r);
+      if(!h) continue;
+      touched = true;
+      if(e.armored && (!armorHit||h.t<armorHit.t)){ armorHit={...h, ref:e}; damageEnemy(e, 10*b.dmgMul*0.5); }
+      else if(!e.armored && (!armorHit||h.t<=armorHit.t)) damageEnemy(e, 10*b.dmgMul);
+    }
+    if(armorHit && (!hit||armorHit.t<hit.t)) hit = {...armorHit, kind:'enemy'};
+
+    // --- kontak musuh pertama → BULLET RIDING ---
+    if(touched && !b.riding){
+      b.riding = true; b.steer = b.steerMax;
+      requestSlow(CFG.slowMo.crowdTimeScale);
+      S.targetFov = 0.68;                 // 60° → 40°
+      SFX.slow();
+      addFx(b.x,b.z,'ripple');
+    }
+
+    if(!hit){
+      b.x += ddx; b.z += ddz; remaining = 0;
+      if(b.z < CFG.arena.zMin - rb || b.z > CFG.arena.zMax + rb) killBullet(b,'exit');
+      return;
+    }
+
+    // --- pindah ke titik kontak + skin width ---
+    const travelled = remaining*hit.t;
+    b.x += b.dx*travelled; b.z += b.dz*travelled;
+    remaining -= travelled;
+    b.x += hit.nx*0.01; b.z += hit.nz*0.01;
+
+    // --- barrel & shield wall menerima damage ---
+    if(hit.ref && hit.kind==='barrel'){ detonate(hit.ref, 0); }
+    if(hit.ref && hit.kind==='shieldWall'){
+      if(hit.nz > 0){ hit.ref.hp -= 1; if(hit.ref.hp<=0) hit.ref.alive=false; }  // hanya dari belakang
+    }
+
+    if(!resolveBounce(b, hit)) return;
+  }
+}
+
+function resolveBounce(b, hit){
+  b.bounces--; b.bounceCount++;
+  if(b.bounces < 0){ killBullet(b,'exhausted'); return false; }
+
+  [b.dx,b.dz] = Solver.reflectSafe(b.dx,b.dz,hit.nx,hit.nz);
+
+  // Stacking reward
+  b.dmgMul *= CFG.bullet.damagePerBounce;
+  b.spdMul = Math.min(b.spdMul*CFG.bullet.speedPerBounce, CFG.bullet.speedMultiplierCap);
+  if(hit.kind==='bumper') b.dmgMul *= 1.05;
+
+  S.bounceLadder++;
+  SFX.bounce(S.bounceLadder);
+  addFx(b.x,b.z,'bounce');
+  S.shake = Math.max(S.shake, b.bounceCount>8?0.22:0.08);
+
+  // Milestone tiap 5 bounce
+  if(b.bounceCount % CFG.scoring.bounceMilestoneEvery === 0){
+    S.shake = Math.max(S.shake, 0.18);
+    flashPopup('BOUNCE x'+b.bounceCount);
+  }
+  // 3 pantulan terakhir → slow-mo ekstra
+  if(b.bounces <= CFG.slowMo.finalBounceThreshold && b.bounces>0)
+    requestSlow(CFG.slowMo.finalBounceTimeScale);
+
+  return true;
+}
+
+// =============================================================================
+// DAMAGE / EXPLOSION
+// =============================================================================
+function damageEnemy(e, dmg){
+  if(e.hp<=0) return;
+  e.hp -= dmg; e.hit = 0.12;
+  if(e.hp>0) return;
+
+  S.kills++; S.combo++;
+  if(S.combo>S.bestCombo) S.bestCombo=S.combo;
+  const gained = Math.round(e.score * (1 + S.combo*CFG.scoring.bounceMultiplierStep));
+  S.score += gained;
+  SFX.kill();
+  addFx(e.x,e.z,'kill',e.color);
+  if(S.floats.length<32) S.floats.push({x:e.x,z:e.z,t:0.8,v:gained});
+
+  if(CFG.scoring.comboMilestones.includes(S.combo)){ SFX.combo(); flashPopup('x'+S.combo); S.shake=Math.max(S.shake,.18); }
+  if(CFG.scoring.killMilestones.includes(S.kills)){ S.score+=500; flashPopup(S.kills+' KILLS'); }
+
+  if(e.split){
+    for(let i=0;i<3;i++){ const a=i*Math.PI*2/3; const st=typeStats('grunt');
+      S.enemies.push({type:'grunt', x:e.x+Math.cos(a)*.6, z:e.z+Math.sin(a)*.6,
+        hp:st.hp,maxHp:st.hp,speed:st.speed,r:st.r,color:st.color,score:st.score,
+        armored:false,explode:false,split:false,phase:Math.random()*6.28,vx:0,vz:0,near:false,hit:0}); }
+  }
+  if(e.explode) explodeAt(e.x,e.z,2.5,30,1);
+  setScore(); setCombo();
+}
+
+function explodeAt(x,z,r,dmg,depth){
+  addFx(x,z,'boom'); SFX.boom(); S.shake=Math.max(S.shake,.32);
+  for(const e of S.enemies){
+    if(e.hp<=0) continue;
+    const d=Math.hypot(e.x-x,e.z-z);
+    if(d<=r) damageEnemy(e, dmg*(1-d/r));
+  }
+}
+
+function detonate(o, depth){
+  if(!o.alive) return;
+  o.alive=false;
+  const d = CFG.obstacleDefaults.barrel;
+  explodeAt(o.x,o.z,d.explosionRadius,d.explosionDamage,depth);
+  if(depth>=8) return;
+  // Chain di-stagger 0.08s agar terbaca sebagai RANTAI, bukan satu ledakan.
+  for(const other of S.obstacles){
+    if(other===o||!other.alive||other.kind!=='barrel') continue;
+    if(Math.hypot(other.x-o.x,other.z-o.z) > d.explosionRadius) continue;
+    other.alive=false;
+    setTimeout(()=>{ other.alive=true; detonate(other, depth+1); }, 80*(depth+1));
+  }
+}
+
+// =============================================================================
+// SLOW-MO (satu pemilik waktu)
+// =============================================================================
+function requestSlow(target){
+  if(S.holdSlow>0) return;
+  if(target < S.targetTimeScale-0.001){ S.targetTimeScale = target; return; }
+  S.targetTimeScale = target;
+  if(target>=0.999) S.targetFov = 1;
+}
+
+// =============================================================================
+// SIMULASI SATU TICK
+// =============================================================================
+function simulate(dt){
+  // --- 1. obstacle (moving platform deterministik dari simTime) ---
+  const simTime = S.tick*FIXED_DT;
+  for(const o of S.obstacles){
+    if(o.kind!=='movingPlatform') continue;
+    const p = o.travel*2, raw = (simTime*o.speed + o.phase*p) % (p*2);
+    o.x = o.bx + (raw<p ? raw-o.travel : p*2-raw-o.travel);
+  }
+
+  // --- 2. crowd ---
+  const halfW = CFG.arena.width/2, defZ = CFG.arena.defenseLineZ;
+  for(let i=S.enemies.length-1;i>=0;i--){
+    const e=S.enemies[i];
+    if(e.hp<=0){ S.enemies.splice(i,1); continue; }
+    if(e.hit>0) e.hit-=dt;
+
+    let vx = Math.sin(simTime*CFG.spawn.swayFrequency*Math.PI*2 + e.phase)*CFG.spawn.swayAmplitude;
+    let vz = -e.speed;
+
+    // separation ringan (O(n·k) — di JS cukup sampling tetangga terdekat)
+    for(let j=0;j<S.enemies.length;j+=1){
+      const o=S.enemies[j]; if(o===e||o.hp<=0) continue;
+      const dx=e.x-o.x, dz=e.z-o.z, sq=dx*dx+dz*dz;
+      if(sq>0.49||sq<1e-6) continue;
+      const d=Math.sqrt(sq); vx += (dx/d)*(1-d/0.7); vz += (dz/d)*(1-d/0.7);
+    }
+    // platform menghalangi musuh
+    for(const o of S.obstacles){
+      if(o.kind!=='movingPlatform'||!o.alive) continue;
+      if(Math.abs(e.x-o.x)<o.w/2+e.r && Math.abs(e.z-o.z)<0.5 && vz<0) vz = 0;
+    }
+
+    e.vx=vx; e.vz=vz; e.x+=vx*dt; e.z+=vz*dt;
+    e.x = Math.max(-halfW+e.r, Math.min(halfW-e.r, e.x));
+
+    if(!e.near && e.z <= defZ+CFG.arena.nearMissBandZ){ e.near=true; }
+    if(e.z <= defZ){
+      S.enemies.splice(i,1); S.leaked++;
+      S.lives--; SFX.breach(); flashScreen(); S.shake=Math.max(S.shake,.3);
+      setHp();
+      if(S.lives<=0) endRun(false);
+    }
+  }
+
+  // --- 3. peluru ---
+  for(const b of S.bullets) tickBullet(b, dt);
+  S.bullets = S.bullets.filter(b=>b.alive || b.trail.length>0);
+  for(const b of S.bullets) if(!b.alive && b.trail.length) b.trail.shift();
+
+  // --- 4. amunisi (auto-reload, tanpa tombol) ---
+  if(S.ammo < CFG.bullet.magazine){
+    S.reload -= dt;
+    if(S.reload<=0){ S.ammo++; S.reload=CFG.bullet.autoReloadDelay; setAmmo(); }
+  }
+
+  // --- 5. wave logic ---
+  S.waveTimer -= dt;
+  if(S.waveActive && S.enemies.length===0){
+    S.waveActive=false;
+    if(S.leaked===0){ S.coins+=CFG.scoring.perfectClearBonusCoins; banner('PERFECT CLEAR','#7CFF4D'); }
+    S.leaked=0;
+    if(S.waveIndex >= CFG.spawn.waveCount-1){ endRun(true); return; }
+    S.waveTimer = Math.min(S.waveTimer, 1.6);
+  }
+  if(S.waveTimer<=0 && S.waveIndex < CFG.spawn.waveCount-1 && S.state==='playing'){
+    S.waveIndex++; spawnWave();
+    S.waveTimer = CFG.spawn.spawnInterval[Math.min(S.waveIndex,CFG.spawn.spawnInterval.length-1)];
+  }
+
+  // --- 6. fx & floating text ---
+  for(let i=S.fx.length-1;i>=0;i--){ S.fx[i].t-=dt; if(S.fx[i].t<=0) S.fx.splice(i,1); }
+  for(let i=S.floats.length-1;i>=0;i--){ S.floats[i].t-=dt; S.floats[i].z+=dt*1.5;
+    if(S.floats[i].t<=0) S.floats.splice(i,1); }
+
+  S.tick++;
+}
+
+function endRun(victory){
+  S.state = victory?'victory':'defeat';
+  banner(victory?'VICTORY':'GAME OVER', victory?'#00E5FF':'#FF1744');
+  S.targetTimeScale = victory?0.35:0.2; S.holdSlow = 1.2;
+}
+
+// =============================================================================
+// RENDER — proyeksi 2.5D
+// =============================================================================
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  const r = cv.getBoundingClientRect();
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  cv.width = Math.floor(r.width*DPR); cv.height = Math.floor(r.height*DPR);
+  W = r.width; H = r.height;
+}
+window.addEventListener('resize', resize);
+
+// Proyeksi: makin jauh (z besar) → makin kecil & makin ke atas layar.
+// Ini meniru kamera perspektif miring 40° tanpa 3D engine.
+function proj(x, z){
+  const zn = Math.max(0, Math.min(1.08, z / CFG.arena.height));
+  const persp = 1 / (1 + zn*1.25);                 // faktor perspektif
+  const sy = H*0.97 - Math.pow(zn,0.82) * H*0.90 * S.fov;
+  const sx = W*0.5 + x * (W*0.042) * persp * (2-S.fov);
+  return [sx, sy, persp];
+}
+
+function draw(){
+  const v = CFG.variants[S.variant], th = v.theme;
+  ctx.save(); ctx.scale(DPR,DPR);
+
+  // shake
+  const sh = S.shake>0 ? S.shake : 0;
+  ctx.translate((Math.random()-.5)*sh*22, (Math.random()-.5)*sh*14);
+
+  // background gradient
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, th.bgTop); g.addColorStop(1, th.bgBottom);
+  ctx.fillStyle = g; ctx.fillRect(-40,-40,W+80,H+80);
+
+  // ---- lantai: trapezoid + grid neon ----
+  const A=proj(CFG.arena.xMin,0), B=proj(CFG.arena.xMax,0),
+        C=proj(CFG.arena.xMax,CFG.arena.height), D=proj(CFG.arena.xMin,CFG.arena.height);
+  ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.lineTo(C[0],C[1]); ctx.lineTo(D[0],D[1]); ctx.closePath();
+  ctx.fillStyle = 'rgba(8,16,34,.75)'; ctx.fill();
+
+  ctx.strokeStyle = hexA(th.grid, .16); ctx.lineWidth = 1;
+  for(let z=0; z<=40; z+=2){ const p1=proj(-10,z), p2=proj(10,z);
+    ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.stroke(); }
+  for(let x=-10; x<=10; x+=2){ const p1=proj(x,0), p2=proj(x,40);
+    ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.stroke(); }
+
+  // ---- dinding bumper kiri/kanan ----
+  ctx.lineWidth=3; ctx.strokeStyle=th.bumper; ctx.shadowColor=th.bumper; ctx.shadowBlur=18;
+  [[-10],[10]].forEach(([x])=>{ const p1=proj(x,0), p2=proj(x,40);
+    ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.stroke(); });
+
+  // ---- spawn gate ----
+  ctx.strokeStyle = hexA(th.enemy,.55); ctx.shadowColor=th.enemy;
+  { const p1=proj(-10,40), p2=proj(10,40);
+    ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.stroke(); }
+
+  // ---- garis pertahanan ----
+  const dz = CFG.arena.defenseLineZ, d1=proj(-10,dz), d2=proj(10,dz);
+  ctx.strokeStyle = th.primary; ctx.shadowColor = th.primary; ctx.shadowBlur=22; ctx.lineWidth=3.5;
+  ctx.beginPath(); ctx.moveTo(d1[0],d1[1]); ctx.lineTo(d2[0],d2[1]); ctx.stroke();
+  ctx.shadowBlur=0;
+
+  // ---- obstacle ----
+  for(const o of S.obstacles){
+    if(!o.alive) continue;
+    const p = proj(o.x,o.z);
+    if(o.kind==='gravityWell'){
+      const rr = o.r*(W*0.042)*p[2];
+      const gg = ctx.createRadialGradient(p[0],p[1],2,p[0],p[1],rr);
+      gg.addColorStop(0,hexA(th.bumper,.55)); gg.addColorStop(1,hexA(th.bumper,0));
+      ctx.fillStyle=gg; ctx.beginPath(); ctx.ellipse(p[0],p[1],rr,rr*.45,0,0,6.283); ctx.fill();
+      ctx.strokeStyle=hexA(th.bumper,.6); ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.ellipse(p[0],p[1],rr,rr*.45,0,0,6.283); ctx.stroke();
+    } else if(o.kind==='movingPlatform'){
+      const hw=o.w/2*(W*0.042)*p[2];
+      ctx.fillStyle=hexA(th.bumper,.8); ctx.shadowColor=th.bumper; ctx.shadowBlur=14;
+      roundRect(p[0]-hw,p[1]-5*p[2],hw*2,10*p[2],4); ctx.fill(); ctx.shadowBlur=0;
+    } else if(o.kind==='shieldWall'){
+      const hw=o.w/2*(W*0.042)*p[2];
+      ctx.fillStyle=hexA('#FFC93C',.75); ctx.fillRect(p[0]-hw,p[1]-4*p[2],hw*2,8*p[2]);
+    } else if(o.kind==='barrel'){
+      const rr=0.6*(W*0.042)*p[2];
+      ctx.fillStyle='#FF8A2B'; ctx.shadowColor='#FF8A2B'; ctx.shadowBlur=16;
+      ctx.beginPath(); ctx.ellipse(p[0],p[1],rr,rr*.7,0,0,6.283); ctx.fill(); ctx.shadowBlur=0;
+    } else {
+      const rr=o.r*(W*0.042)*p[2];
+      const gg=ctx.createRadialGradient(p[0]-rr*.3,p[1]-rr*.4,rr*.1,p[0],p[1],rr);
+      gg.addColorStop(0,'#FFFFFF'); gg.addColorStop(.35,th.bumper); gg.addColorStop(1,shade(th.bumper,-45));
+      ctx.fillStyle=gg; ctx.shadowColor=th.bumper; ctx.shadowBlur=20;
+      ctx.beginPath(); ctx.ellipse(p[0],p[1],rr,rr*.72,0,0,6.283); ctx.fill(); ctx.shadowBlur=0;
+    }
+  }
+
+  // ---- musuh (urut dari jauh ke dekat = painter's algorithm) ----
+  const sorted = S.enemies.slice().sort((a,b)=>b.z-a.z);
+  for(const e of sorted){
+    const p = proj(e.x,e.z);
+    const s = (W*0.042)*p[2]*e.r*1.9;
+    // blob shadow
+    ctx.fillStyle='rgba(0,0,0,.35)';
+    ctx.beginPath(); ctx.ellipse(p[0],p[1]+s*.5,s*.75,s*.28,0,0,6.283); ctx.fill();
+    // body
+    ctx.fillStyle = e.hit>0 ? '#FFFFFF' : e.color;
+    ctx.shadowColor = e.color; ctx.shadowBlur = 8*p[2];
+    roundRect(p[0]-s*.5, p[1]-s*1.15, s, s*1.5, s*.32); ctx.fill();
+    ctx.shadowBlur=0;
+    // rim light
+    ctx.strokeStyle='rgba(255,220,120,.55)'; ctx.lineWidth=1;
+    roundRect(p[0]-s*.5, p[1]-s*1.15, s, s*1.5, s*.32); ctx.stroke();
+    // armor marker
+    if(e.armored){ ctx.fillStyle='rgba(255,255,255,.85)';
+      ctx.fillRect(p[0]-s*.36,p[1]-s*1.02,s*.72,s*.16); }
+  }
+
+  // ---- peluru + trail ----
+  for(const b of S.bullets){
+    if(b.trail.length>1){
+      ctx.lineCap='round';
+      for(let i=1;i<b.trail.length;i++){
+        const p1=proj(b.trail[i-1][0],b.trail[i-1][1]), p2=proj(b.trail[i][0],b.trail[i][1]);
+        const a=i/b.trail.length;
+        ctx.strokeStyle=hexA(th.primary, a*0.8); ctx.lineWidth=1+a*5;
+        ctx.shadowColor=th.primary; ctx.shadowBlur=12*a;
+        ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.stroke();
+      }
+      ctx.shadowBlur=0;
+    }
+    if(!b.alive) continue;
+    const p=proj(b.x,b.z), rr=Math.max(3, 0.3*(W*0.042)*p[2]);
+    ctx.fillStyle='#FFFFFF'; ctx.shadowColor=th.primary; ctx.shadowBlur=26;
+    ctx.beginPath(); ctx.arc(p[0],p[1],rr,0,6.283); ctx.fill(); ctx.shadowBlur=0;
+  }
+
+  // ---- FX ----
+  for(const f of S.fx){
+    const p=proj(f.x,f.z), k=1-f.t/f.max;
+    if(f.kind==='bounce'||f.kind==='ripple'){
+      ctx.strokeStyle=hexA(f.kind==='ripple'?th.primary:th.bumper, 1-k);
+      ctx.lineWidth=3*(1-k);
+      ctx.beginPath(); ctx.ellipse(p[0],p[1],(8+k*46)*p[2],(4+k*22)*p[2],0,0,6.283); ctx.stroke();
+    } else if(f.kind==='kill'){
+      ctx.fillStyle=hexA(f.color||'#FF4D3D',1-k);
+      ctx.beginPath(); ctx.arc(p[0],p[1],(10*(1-k)+2)*p[2],0,6.283); ctx.fill();
+    } else if(f.kind==='boom'){
+      const rr=(10+k*90)*p[2];
+      const gg=ctx.createRadialGradient(p[0],p[1],1,p[0],p[1],rr);
+      gg.addColorStop(0,`rgba(255,240,180,${(1-k)*.9})`);
+      gg.addColorStop(.5,`rgba(255,120,40,${(1-k)*.6})`);
+      gg.addColorStop(1,'rgba(255,60,0,0)');
+      ctx.fillStyle=gg; ctx.beginPath(); ctx.ellipse(p[0],p[1],rr,rr*.55,0,0,6.283); ctx.fill();
+    }
+  }
+
+  // ---- floating text ----
+  ctx.font='700 15px system-ui'; ctx.textAlign='center';
+  for(const f of S.floats){
+    const p=proj(f.x,f.z);
+    ctx.fillStyle=`rgba(255,213,79,${Math.min(1,f.t/0.8)})`;
+    ctx.fillText('+'+f.v, p[0], p[1]-14);
+  }
+
+  // ---- player ----
+  const pp = proj(CFG.arena.playerSpawn.x, CFG.arena.playerSpawn.z);
+  const ps = W*0.042*pp[2]*1.5;
+  const pg = ctx.createRadialGradient(pp[0],pp[1],2,pp[0],pp[1],ps*2.6);
+  pg.addColorStop(0,hexA(th.primary,.5)); pg.addColorStop(1,hexA(th.primary,0));
+  ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(pp[0],pp[1],ps*2.6,0,6.283); ctx.fill();
+  ctx.fillStyle=th.primary; ctx.shadowColor=th.primary; ctx.shadowBlur=24;
+  ctx.beginPath(); ctx.moveTo(pp[0],pp[1]-ps*1.1); ctx.lineTo(pp[0]+ps*.7,pp[1]+ps*.6);
+  ctx.lineTo(pp[0]-ps*.7,pp[1]+ps*.6); ctx.closePath(); ctx.fill(); ctx.shadowBlur=0;
+
+  ctx.restore();
+}
+
+function roundRect(x,y,w,h,r){ ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function hexA(hex,a){ const h=hex.replace('#',''); const n=parseInt(h,16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+function shade(hex,amt){ const h=hex.replace('#',''); const n=parseInt(h,16);
+  const c=[(n>>16)&255,(n>>8)&255,n&255].map(v=>Math.max(0,Math.min(255,v+amt)));
+  return `rgb(${c[0]},${c[1]},${c[2]})`; }
+function addFx(x,z,kind,color){ if(S.fx.length>200) return;
+  const dur = kind==='boom'?0.45:(kind==='kill'?0.3:0.22);
+  S.fx.push({x,z,kind,color,t:dur,max:dur}); }
+
+// =============================================================================
+// HUD
+// =============================================================================
+const el = {
+  score:document.getElementById('score'), combo:document.getElementById('combo'),
+  wave:document.getElementById('wave'), ammo:document.getElementById('ammo'),
+  hp:document.getElementById('hp'), steerRow:document.getElementById('steerRow'),
+  steerFill:document.getElementById('steerFill'), steerSec:document.getElementById('steerSec'),
+  popup:document.getElementById('popup'), banner:document.getElementById('banner'),
+  flash:document.getElementById('flash'), vig:document.getElementById('vig'),
+  hint:document.getElementById('hint'),
+};
+function setScore(){ el.score.textContent = S.score.toLocaleString('en-US'); }
+function setCombo(){ el.combo.textContent = S.combo>1?('x'+S.combo):'';
+  el.combo.style.transform = 'scale(1.18)'; setTimeout(()=>el.combo.style.transform='scale(1)',80); }
+function setWaveLabel(){ el.wave.textContent = `WAVE ${S.waveIndex+1}/${CFG.spawn.waveCount}`; }
+function setAmmo(){ el.ammo.innerHTML = Array.from({length:CFG.bullet.magazine},
+  (_,i)=>`<i class="${i<S.ammo?'f':''}"></i>`).join(''); }
+function setHp(){ el.hp.innerHTML = Array.from({length:CFG.player.lives},
+  (_,i)=>`<span class="${i<S.lives?'':'e'}">♥</span>`).join(''); }
+function flashPopup(txt){ el.popup.textContent=txt; el.popup.style.transition='none';
+  el.popup.style.opacity='1'; el.popup.style.transform='scale(1.25)';
+  requestAnimationFrame(()=>{ el.popup.style.transition='opacity .6s, transform .35s';
+    el.popup.style.opacity='0'; el.popup.style.transform='scale(1)'; }); }
+function flashScreen(){ el.flash.style.transition='none'; el.flash.style.opacity='.55';
+  requestAnimationFrame(()=>{ el.flash.style.transition='opacity .45s'; el.flash.style.opacity='0'; }); }
+function banner(txt,color){ el.banner.textContent=txt; el.banner.style.color=color||'#fff';
+  el.banner.style.transition='none'; el.banner.style.opacity= txt?'1':'0';
+  if(txt) setTimeout(()=>{ el.banner.style.transition='opacity .8s'; el.banner.style.opacity='0'; },1400); }
+
+// =============================================================================
+// INPUT — satu jempol: tap + drag
+// =============================================================================
+let ptrDown=false, ptrX=0, ptrStartX=0, ptrT=0;
+cv.addEventListener('pointerdown', e=>{ ptrDown=true; ptrX=ptrStartX=e.clientX; ptrT=performance.now();
+  cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', e=>{
+  if(!ptrDown) return;
+  const dx = (e.clientX-ptrX)/cv.getBoundingClientRect().width;
+  if(Math.abs(dx)>0.003){ queueSteer(dx/0.18); ptrX=e.clientX; }
+});
+cv.addEventListener('pointerup', e=>{
+  if(!ptrDown) return; ptrDown=false;
+  const dur=(performance.now()-ptrT)/1000;
+  const moved=Math.abs(e.clientX-ptrStartX)/cv.getBoundingClientRect().width;
+  if(dur<0.25 && moved<0.015) fire();     // tap = tembak / rem
+});
+window.addEventListener('keydown', e=>{
+  if(e.key===' '){ e.preventDefault(); fire(); }
+  if(e.key==='ArrowLeft') queueSteer(-1);
+  if(e.key==='ArrowRight') queueSteer(1);
+  if(e.key.toLowerCase()==='r') resetRun();
+  if('12345'.includes(e.key)) loadVariant(+e.key-1);
+});
+
+// =============================================================================
+// MAIN LOOP
+// =============================================================================
+let lastT = performance.now(), fpsAcc=0, fpsN=0, fpsShow=0;
+function frame(now){
+  const realDt = Math.min(0.25, (now-lastT)/1000); lastT=now;
+
+  // FPS
+  fpsAcc += realDt; fpsN++;
+  if(fpsAcc>0.4){ fpsShow = Math.round(fpsN/fpsAcc); fpsAcc=0; fpsN=0; }
+
+  if(CFG){
+    // --- SlowMoSystem ---
+    if(S.holdSlow>0){ S.holdSlow-=realDt; if(S.holdSlow<=0) S.targetTimeScale=1; }
+    const k = 1-Math.exp(-(3/CFG.slowMo.transitionDuration)*realDt);
+    S.timeScale += (S.targetTimeScale-S.timeScale)*k;
+    S.fov += (S.targetFov-S.fov)*k;
+    el.vig.style.opacity = String((1-S.timeScale)*1.2);
+
+    // --- SimClock: fixed step ---
+    if(S.state==='playing'){
+      S.acc += realDt*S.timeScale;
+      let steps=0;
+      while(S.acc>=FIXED_DT && steps<MAX_STEPS){ S.acc-=FIXED_DT; simulate(FIXED_DT); steps++; }
+      if(S.acc>FIXED_DT*MAX_STEPS) S.acc=0;
+    }
+
+    S.shake = Math.max(0, S.shake - realDt*3.2);
+    draw();
+
+    // HUD dinamis
+    const rb = S.bullets.find(b=>b.riding&&b.alive);
+    el.steerRow.classList.toggle('on', !!rb);
+    const sv = rb? rb.steer/rb.steerMax : 0;
+    el.steerFill.style.width = (sv*100).toFixed(1)+'%';
+    el.steerSec.textContent = (rb?rb.steer:0).toFixed(1)+'s';
+
+    // Panel
+    P.sFps.textContent = fpsShow;
+    P.sTick.textContent = S.tick;
+    P.sEnemies.textContent = S.enemies.length;
+    P.sBounce.textContent = rb?rb.bounceCount:(S.bullets[0]?S.bullets[0].bounceCount:0);
+    P.sDmg.textContent = (rb?rb.dmgMul:1).toFixed(2);
+    P.sSpd.textContent = (rb?rb.spdMul:1).toFixed(2);
+    P.sTs.textContent = S.timeScale.toFixed(2);
+    P.sKills.textContent = S.kills;
+  }
+  requestAnimationFrame(frame);
+}
+
+const P = {};
+['sFps','sTick','sEnemies','sBounce','sDmg','sSpd','sTs','sKills']
+  .forEach(id=>P[id]=document.getElementById(id));
+
+// =============================================================================
+// BOOT
+// =============================================================================
+fetch('../Config/arena_config.json')
+  .then(r=>r.json())
+  .then(cfg=>{
+    CFG = cfg;
+    // tombol varian
+    document.getElementById('variants').innerHTML = cfg.variants.map((v,i)=>
+      `<button class="vbtn" data-i="${i}">${v.index}. ${v.name}<em>${v.description}</em></button>`).join('');
+    document.querySelectorAll('.vbtn').forEach(b=>
+      b.addEventListener('click', ()=>loadVariant(+b.dataset.i)));
+    resize();
+    loadVariant(0);
+    setScore(); setAmmo(); setHp(); setWaveLabel();
+    requestAnimationFrame(frame);
+  })
+  .catch(err=>{
+    document.body.innerHTML = '<div style="padding:40px;font-family:monospace;color:#f66">'+
+      'Gagal memuat Config/arena_config.json<br>'+err+'</div>';
+  });
+</script>
+</body>
+</html>
