@@ -802,7 +802,11 @@ function damageEnemy(e, dmg){
   S.score += gained;
   SFX.kill();
   addFx(e.x,e.z,'kill',e.color);
-  if(S.floats.length<32) S.floats.push({x:e.x,z:e.z,t:0.8,v:gained});
+  // jx spreads stacked numbers sideways so simultaneous kills stay legible.
+  // Derived from position, never from S.rng: drawing must not consume the
+  // RNG stream or replays stop matching.
+  if(S.floats.length<32) S.floats.push({x:e.x,z:e.z,t:0.8,v:gained,
+    jx:((Math.round((e.x+e.z)*97)%11)-5)*0.16});
 
   if(CFG.scoring.comboMilestones.includes(S.combo)){ SFX.combo(); flashPopup('x'+S.combo); S.shake=Math.max(S.shake,.18); }
   if(CFG.scoring.killMilestones.includes(S.kills)){ S.score+=500; flashPopup(S.kills+' KILLS'); }
@@ -970,7 +974,8 @@ function tickGates(dt){
   }
 }
 
-function addFloat(x,z,txt){ if(S.floats.length<40) S.floats.push({x,z,v:txt,t:0.9,raw:true}); }
+function addFloat(x,z,txt){ if(S.floats.length<40) S.floats.push({x,z,v:txt,t:0.9,raw:true,
+  jx:((Math.round((x+z)*97)%11)-5)*0.16}); }
 
 function requestSlow(target){
   if(S.holdSlow>0) return;
@@ -1241,6 +1246,20 @@ function draw(){
   // ---- musuh (urut dari jauh ke dekat = painter's algorithm) ----
   const sorted = S.enemies.slice().sort((a,b)=>b.z-a.z);
   for(const e of sorted){
+    // Enemies spawn past the far wall (baseZ = height+1, plus formation
+    // depth) and proj() clamps zn at 1.08, so everything beyond z=43 lands on
+    // one screen row and stacks into an unreadable slab above the horizon.
+    // Fade them in over the last few units so they emerge from the far wall
+    // instead. Cosmetic only: the sim still ticks them, so replays are
+    // bit-identical either way.
+    // The ramp is wide on purpose. proj() crushes z=33..43 into the top ~19%
+    // of the screen, so a full-brightness wave there is a solid unreadable
+    // slab. Ramping across eight units turns the spawn zone into a depth
+    // gradient: enemies resolve out of the haze well before z=34, which is
+    // still ~29 units of warning ahead of the defense line at z=5.
+    const fade = Math.min(1, Math.max(0, (CFG.arena.height + 2 - e.z) / 8));
+    if(fade <= 0.02) continue;
+    ctx.globalAlpha = fade;
     const p = proj(e.x,e.z);
     const s = (W*0.042)*p[2]*e.r*1.9;
     // blob shadow
@@ -1258,6 +1277,7 @@ function draw(){
     if(e.armored){ ctx.fillStyle='rgba(255,255,255,.85)';
       ctx.fillRect(p[0]-s*.36,p[1]-s*1.02,s*.72,s*.16); }
   }
+  ctx.globalAlpha = 1;
 
   // ---- gate matematika ----
   for(const g of S.gates){
@@ -1361,7 +1381,7 @@ function draw(){
   // ---- floating text ----
   ctx.font='700 15px system-ui'; ctx.textAlign='center';
   for(const f of S.floats){
-    const p=proj(f.x,f.z);
+    const p=proj(f.x+(f.jx||0),f.z);
     ctx.fillStyle=`rgba(255,213,79,${Math.min(1,f.t/0.8)})`;
     ctx.fillText(f.raw ? f.v : '+'+f.v, p[0], p[1]-14);
   }

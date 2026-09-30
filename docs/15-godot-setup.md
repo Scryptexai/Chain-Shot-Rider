@@ -139,6 +139,59 @@ Hasil terukur setelah semuanya: **0 buntu, 2/5 menang, rata-rata 75,7 detik** (j
 
 ---
 
+## Melihat hasil render tanpa GPU
+
+Sandbox ini tidak punya GPU, X server, maupun `libGL` (`ldconfig -p | grep -c libGL`
+= 0), dan `apt-get` tidak bisa menjangkau mirror Debian — `sudo apt-get update`
+gagal dengan *Connection failed* ke `deb.debian.org`, jadi `xvfb` dan `mesa`
+tidak bisa dipasang. Konsekuensinya jujur: **render Godot tidak bisa ditangkap
+di sini sama sekali.** Godot hanya jalan `--headless` dengan renderer dummy.
+
+Yang bisa ditangkap adalah prototipe, dan itu ternyata cukup berharga. npm bisa
+diakses, dan `@napi-rs/canvas` adalah build Skia yang berdiri sendiri tanpa
+dependensi sistem. Prototipe menggambar lewat Canvas2D biasa, jadi mengarahkan
+context-nya ke Skia menghasilkan **frame yang sama persis dengan yang dilihat
+browser** — `draw()` yang asli di atas state permainan yang asli, bukan mockup
+atau diagram:
+
+```bash
+npm install --no-save @napi-rs/canvas
+node tools/screenshot.js                    # kelima arena, t=42 s
+node tools/screenshot.js --variant=2 --at=90
+```
+
+Hasil di `screenshots/*.png` (450×800). Harness ini memuat prototipe dengan
+kontrak yang sama dengan `tools/sim_test.js` — satu blok `<script>`, boot
+`fetch` dibuang, config disuntik dari disk — supaya perubahan yang merusak
+salah satunya merusak keduanya dengan berisik, bukan diam-diam menyimpang.
+
+Dua batasan yang harus diingat saat membaca PNG-nya:
+
+1. **HUD tidak ada di gambar.** HUD prototipe adalah overlay DOM (`<div id="score">`,
+   `#combo`, `#wave`, `#steerFill`), bukan canvas — di canvas hanya ada dua
+   panggilan `fillText`. Jadi skor, nyawa, wave, dan steer meter memang tidak
+   ikut tertangkap. Di browser semuanya tetap tampil.
+2. **Ini prototipe, bukan Godot.** Keduanya berbagi palet (docs/02), config, dan
+   spesifikasi layout (docs/06) — bukan renderer. Kecocokan visual Godot masih
+   belum pernah diverifikasi dengan mata.
+
+### Bug yang baru ketahuan setelah benar-benar dilihat
+
+`proj()` memampatkan z = 33–43 ke sekitar 19% teratas layar, dan `zn` dibatasi
+di 1.08. Musuh spawn di `baseZ = height + 1` plus kedalaman formasi, sehingga
+**semua musuh di z ≥ 43,2 dipetakan ke satu baris layar yang sama** dan
+menumpuk jadi lempengan padat tak terbaca di atas garis dinding jauh. Tidak ada
+uji headless yang bisa menangkap ini; angka balance-nya sempurna. Perbaikannya
+kosmetik murni — ramp alpha selebar 8 unit (z 42 → 34) sehingga zona spawn
+terbaca sebagai gradien kedalaman, dan musuh sudah jelas jauh sebelum z = 34
+(masih ~29 unit sebelum garis pertahanan di z = 5).
+
+Angka damage yang bertumpuk juga disebar mendatar lewat field `jx`. Sebarannya
+diturunkan dari posisi, **bukan dari `S.rng`** — memanggil RNG di jalur simulasi
+demi kosmetik akan menggeser urutan acak dan merusak replay. Setelah kedua
+perubahan, `tools/sim_test.js` tetap 3/5 menang, rata-rata 146,9 s: tidak ada
+yang menyentuh simulasi.
+
 ## Yang belum ada
 
 - **Audio** (doc 07): belum ada satu pun cue. Ini item nomor satu sekarang.

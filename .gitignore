@@ -44,3 +44,7 @@ __pycache__/
 Godot_v*_linux.x86_64
 Godot_v*_win64.exe
 Godot_v*_macos.universal
+
+# Node (only used by the headless screenshot renderer)
+node_modules/
+package-lock.json
