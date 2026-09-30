@@ -62,12 +62,16 @@ Jendela terbuka 1080x1920 portrait; mouse berfungsi sebagai jempol
 (`emulate_touch_from_mouse`). Dari sini terlihat MVP sebenarnya: menu, **peta 15
 stage**, arena, HUD, layar hasil, dan draft kartu.
 
-Preview di browser (butuh export templates 4.3):
+Preview di browser lewat server Python — satu perintah, mengurus ekspor dan
+header sekaligus:
 
 ```bash
-godot --headless --path godot/ --export-release "Web" ../build/web/index.html
-python3 tools/serve_web_build.py 8081
+python3 tools/run_web_preview.py --install-templates   # sekali, ~700 MB
+python3 tools/run_web_preview.py                       # http://localhost:8081/
 ```
+
+Yang dirender di browser itu **engine Godot sungguhan** (dikompilasi ke
+WebAssembly, menggambar lewat WebGL2), bukan prototipe JavaScript.
 
 Pakai `tools/serve_web_build.py`, **bukan** `python3 -m http.server`: build Web
 diekspor dengan thread support, jadi perlu header COOP/COEP atau kanvasnya
