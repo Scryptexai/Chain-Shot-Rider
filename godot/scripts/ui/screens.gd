@@ -17,11 +17,14 @@ signal restart_pressed
 signal menu_pressed
 signal continue_pressed
 signal card_chosen(card_id: String)
+signal stage_chosen(stage: int)
 
 const REF_W := 1080.0
 const SAFE_TOP := 88.0
 const BUTTON_H := 120.0
 const CARD_H := 168.0
+const STAGE_ROW_H := 120.0
+const STAGE_ROW_GAP := 20.0
 
 var _pal: Dictionary = {}
 var _theme: Theme
@@ -35,6 +38,10 @@ var _cards: Control
 var _card_list: VBoxContainer
 var _result_advance: Button
 var _menu_best: Label
+var _map: Control
+var _map_list: VBoxContainer
+var _map_scroll: ScrollContainer
+var _map_subtitle: Label
 
 
 ## Called by Game before the first frame, with the variant for this stage.
@@ -46,6 +53,7 @@ func build(variant_index: int) -> void:
 	_pause = _build_pause()
 	_result = _build_result()
 	_cards = _build_cards()
+	_map = _build_stage_map()
 	show_menu()
 
 
@@ -85,7 +93,7 @@ func hide_all() -> void:
 
 
 func _swap(target: Control) -> void:
-	for screen in [_menu, _pause, _result, _cards]:
+	for screen in [_menu, _pause, _result, _cards, _map]:
 		if screen != null:
 			screen.visible = screen == target
 	_scrim.visible = target != null
@@ -196,6 +204,140 @@ func show_cards(offers: Array) -> void:
 		_card_list.add_child(_card_button(card))
 		_card_list.add_child(_spacer(24.0))
 	_swap(_cards)
+
+
+## The stage ladder. Rebuilt on every open because unlocks change underneath
+## it, and a map that still shows yesterday's locks is worse than no map.
+##
+## Awaits the layout pass before scrolling: ScrollContainer reports a zero
+## viewport until its children are measured, so a scroll offset computed in
+## the same frame lands at the top no matter which stage is next. Callers
+## that do not await still get the screen immediately; only the scroll
+## position arrives a frame later.
+func show_stage_map() -> void:
+	var total := _stage_count()
+	var unlocked: int = clampi(SaveGame.unlocked_stage, 0, total - 1)
+	_map_subtitle.text = "%d / %d CLEARED" % [mini(SaveGame.unlocked_stage, total), total]
+	for child in _map_list.get_children():
+		child.queue_free()
+	for stage in range(total):
+		_map_list.add_child(_stage_row(stage, unlocked))
+	_swap(_map)
+
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var row_pitch := STAGE_ROW_H + STAGE_ROW_GAP
+	var target := float(unlocked) * row_pitch - (_map_scroll.size.y - STAGE_ROW_H) * 0.5
+	_map_scroll.scroll_vertical = int(maxf(target, 0.0))
+
+
+func _build_stage_map() -> Control:
+	var root := _screen_root()
+	var box := _column(root, 140.0, 1720.0)
+
+	var title := Label.new()
+	title.text = "CAMPAIGN"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_label(title, 72, _pal["primary"], 12)
+	box.add_child(title)
+
+	_map_subtitle = Label.new()
+	_map_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiTheme.style_label(_map_subtitle, 28, UiTheme.INK_DIM, 0)
+	box.add_child(_map_subtitle)
+
+	box.add_child(_spacer(32.0))
+
+	_map_scroll = ScrollContainer.new()
+	_map_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_map_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(_map_scroll)
+
+	_map_list = VBoxContainer.new()
+	_map_list.add_theme_constant_override("separation", int(STAGE_ROW_GAP))
+	_map_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_map_scroll.add_child(_map_list)
+
+	box.add_child(_spacer(24.0))
+	box.add_child(_button("MENU", menu_pressed))
+	return root
+
+
+## One rung of the ladder. Locked stages stay in the list rather than being
+## hidden: seeing what is ahead is the only reason a ladder screen exists.
+func _stage_row(stage: int, unlocked: int) -> Button:
+	var variant: Dictionary = GameConfig.dict("variants.%d" % _variant_for_stage(stage))
+	var cleared := stage < SaveGame.unlocked_stage
+	var locked := stage > unlocked
+	var accent: Color = UiTheme.INK_DIM if locked else _pal["primary"]
+	if cleared:
+		accent = UiTheme.GOLD
+
+	var button := Button.new()
+	button.theme = _theme
+	button.custom_minimum_size = Vector2(0.0, STAGE_ROW_H)
+	button.focus_mode = Control.FOCUS_NONE
+	button.disabled = locked
+	button.add_theme_stylebox_override("normal", UiTheme.panel(accent, 20, 0.08))
+	button.add_theme_stylebox_override("hover", UiTheme.panel(accent, 20, 0.16))
+	button.add_theme_stylebox_override("pressed", UiTheme.panel(accent, 20, 0.24))
+	button.add_theme_stylebox_override("disabled", UiTheme.panel(accent, 20, 0.04))
+
+	var row := HBoxContainer.new()
+	row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 32.0
+	row.offset_right = -32.0
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(row)
+
+	var stack := VBoxContainer.new()
+	stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(stack)
+
+	var name_label := Label.new()
+	name_label.text = "STAGE %02d   %s" % [stage + 1, String(variant.get("name", "?"))]
+	UiTheme.style_label(name_label, 40, UiTheme.INK_DIM if locked else UiTheme.INK, 0)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(name_label)
+
+	var sub := Label.new()
+	sub.text = (
+		"BOSS %s    DIF x%.2f"
+		% [String(variant.get("boss", "?")).to_upper(), _difficulty_for_stage(stage)]
+	)
+	UiTheme.style_label(sub, 26, UiTheme.INK_DIM, 0)
+	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(sub)
+
+	var state := Label.new()
+	state.text = "CLEARED" if cleared else ("LOCKED" if locked else "PLAY")
+	state.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UiTheme.style_label(state, 32, accent, 0)
+	state.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(state)
+
+	button.pressed.connect(func() -> void: stage_chosen.emit(stage))
+	return button
+
+
+func _stage_count() -> int:
+	return maxi(int(Cfg.num(GameConfig.dict("meta"), "stageCount", 15.0)), 1)
+
+
+## Mirrors Game._variant_for_stage so the map names the arena the run will
+## actually load.
+func _variant_for_stage(stage: int) -> int:
+	var cycle: Array = GameConfig.list("meta.variantCycle")
+	if cycle.is_empty():
+		return 0
+	return int(cycle[stage % cycle.size()])
+
+
+func _difficulty_for_stage(stage: int) -> float:
+	var per: float = Cfg.num(GameConfig.dict("meta"), "difficultyPerStage", 0.12)
+	return 1.0 + per * float(stage)
 
 
 func _build_cards() -> Control:

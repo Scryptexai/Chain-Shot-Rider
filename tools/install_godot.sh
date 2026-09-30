@@ -18,6 +18,13 @@
 #      lets you validate GDScript without the engine at all.
 #
 # Exit codes: 0 engine ready · 3 engine unavailable but validators installed.
+#
+# DO NOT add the engine zip at the repo root to .gitignore. It is committed on
+# purpose: every download mirror is blocked from this sandbox, so the copy in
+# git history is the only way the engine survives a fresh session. Ignoring it
+# once was enough to make it disappear from the workspace and left the session
+# with no engine at all; `git checkout -- Godot_v4.3-stable_linux.x86_64.zip`
+# is what brought it back.
 
 set -uo pipefail
 

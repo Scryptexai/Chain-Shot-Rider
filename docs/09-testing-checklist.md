@@ -197,3 +197,73 @@ grep -rn "Time.deltaTime\|Time.time\b" unity/Assets/ChainRider/Scripts/ \
 | Musuh menembus dinding, atau peluru tunneling |
 | HUD tertutup notch di device mana pun |
 | Crash atau kebocoran memori setelah 10 run berturut-turut |
+
+---
+
+## Mengukur keseimbangan kartu upgrade
+
+Mode `--cards` membandingkan 8 kartu `meta.cards` terhadap baseline tanpa kartu:
+
+```
+godot --headless --path godot/ --script res://tests/sim_headless.gd -- --cards
+godot --headless --path godot/ --script res://tests/sim_headless.gd -- --cards-noise
+godot --headless --path godot/ --script res://tests/sim_headless.gd -- --cards-replicate
+```
+
+### Kenapa metriknya bocor-per-menit, bukan skor
+
+Tiga metrik dicoba dan dua gugur. Angkanya diukur, bukan diperkirakan:
+
+| Metrik | Lantai derau | Kenapa gugur |
+|---|---|---|
+| Skor akhir run | **1,54×** | Tebing menang/kalah mendominasi; run yang mati awal melewatkan wave penuh. |
+| Bunuh dalam jendela tetap | 1,07× | **Mentok pasokan spawn** — pemain sudah membunuh hampir semua yang muncul, jadi kartu tak terlihat. |
+| **Bocor per menit hidup** | **1,03×** | Tidak mentok dan tidak dihukum karena bertahan hidup. Dipakai. |
+
+Lantai derau diukur dengan menjalankan **konfigurasi identik tanpa kartu pada blok
+seed berbeda**. Itu wajib dilakukan sebelum tabel kartu dipercaya: versi pertama uji
+ini punya sebaran kartu 1,17× di bawah lantai derau 1,54×, artinya ia lulus ambang
+1,6× tanpa mengukur apa pun.
+
+### Guard yang membuat uji ini jujur sendiri
+
+- `CARD_CONTROL_LIMIT` (1,12) — baris `(kontrol, seed lain)` adalah baseline kedua
+  pada seed lain. Kalau dua pengukuran konfigurasi yang sama meleset lebih dari ini,
+  sampelnya terlalu kecil dan uji **gagal**, bukan meluluskan tabel yang tak terbaca.
+- `CARD_SPREAD_LIMIT` (1,25) — rasio kartu terkuat:terlemah.
+- Mode kartu memakai `_endless_cfg()` (nyawa 9999) supaya setiap run menempuh jendela
+  90 detik yang sama. Tanpa itu, kebocoran berhenti dihitung saat pemain mati dan
+  kartu yang membuat pemain bertahan justru tercatat sebagai kerugian.
+
+### Temuan: RNG bersama memalsukan hasil kartu
+
+`extra_troops` awalnya terukur 0,78× / 0,86× / 0,81× pada tiga blok seed — konsisten,
+di luar derau, dan **salah**. Audit kode menunjukkan `troops` hanya memberi makan
+auto-fire yang sudah mentok 9/detik plus cadangan nyawa; tidak ada jalur mekanis ke
+kebocoran. Penyebab sebenarnya: sebaran auto-fire menarik dari `_rng` yang sama dengan
+polaritas gate, spawn wave, dan formasi. Fire rate naik seiring jumlah pasukan, jadi
+setiap kartu penambah pasukan menarik lebih banyak undian dan **menggeser seluruh dunia
+ke urutan acak lain**. Kartunya tidak lemah — ia bermain di arena yang berbeda.
+
+Perbaikannya di `sim_world.gd`: `_fx_rng` terpisah untuk sebaran kosmetik. Setelah itu
+`extra_troops` menjadi 0,98× (dalam derau). Aturannya sekarang: **undian yang tidak
+memengaruhi aturan main tidak boleh berbagi aliran dengan pembangkitan dunia.**
+
+### Hasil terukur (6 seed × 5 varian, jendela 90 s)
+
+| Kartu | Bocor/mnt | Efektivitas |
+|---|---|---|
+| (tanpa kartu) | 28,17 | 1,00× |
+| (kontrol, seed lain) | 28,97 | 0,97× |
+| Trigger Discipline | 25,10 | **1,12×** |
+| Heavy Core | 25,67 | **1,10×** |
+| Hollow Points | 27,41 | 1,03× |
+| Light Boots | 27,55 | 1,02× |
+| Overcharge | 27,67 | 1,02× |
+| Good Intel | 27,81 | 1,01× |
+| Live Wire | 28,18 | 1,00× |
+| Reinforcements | 28,65 | 0,98× |
+
+Sebaran 1,14×, derau 1,03×. Dua kartu teratas adalah yang langsung menambah DPS
+penahan garis — urutan yang masuk akal secara desain, dan itulah tanda pertama bahwa
+pengukurannya benar.

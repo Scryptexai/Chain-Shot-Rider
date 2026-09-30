@@ -234,3 +234,44 @@ dan tidak membuktikan apa pun.
   di repo dan bisa membingungkan.
 - **Komentar Bahasa Indonesia di `prototype/index.html`** melanggar aturan "komentar kode
   dalam English" yang berlaku di repo ini. File `.gd` sudah patuh.
+
+---
+
+## Zip engine di root repo: jangan di-`.gitignore`
+
+`Godot_v4.3-stable_linux.x86_64.zip` (50 MB) di root repo **sengaja di-commit**.
+Semua mirror unduhan diblokir dari sandbox ini, jadi salinan di riwayat git
+adalah satu-satunya cara engine bertahan di sesi baru. Biasanya biner sebesar
+ini tidak layak masuk git; di sini ia satu-satunya jalan.
+
+Menambahkannya ke `.gitignore` sekali saja sudah cukup untuk melenyapkannya, dan
+ia **tidak bisa diunduh ulang dari sandbox ini**:
+
+| Host | Hasil |
+|---|---|
+| `github.com/.../releases/download/...` | 302 ke `release-assets.githubusercontent.com` |
+| `release-assets.githubusercontent.com` | `SSL_ERROR_SYSCALL` (diblokir) |
+| `downloads.tuxfamily.org` | tidak terjangkau |
+| mirror tuna / nju / ghproxy / gh-proxy | tidak terjangkau |
+| npm & PyPI | terjangkau, tapi **tidak ada** biner Linux Godot di sana |
+
+Kalau zip itu hilang dari working tree, pulihkan dari git — bukan dari jaringan:
+
+```bash
+git checkout -- Godot_v4.3-stable_linux.x86_64.zip
+bash tools/install_godot.sh
+```
+
+Kalau riwayat git juga tidak punya salinannya, engine tidak bisa dipasang sama
+sekali sampai seseorang menyediakannya lagi:
+
+```bash
+GODOT_MIRROR=https://host-yang-terjangkau/godot bash tools/install_godot.sh
+# atau jatuhkan zip-nya ke salah satu lokasi ini, lalu jalankan ulang:
+#   <repo root>/Godot_v4.3-stable_linux.x86_64.zip
+#   ~/.cache/godot/Godot_v4.3-stable_linux.x86_64.zip
+```
+
+Tanpa engine, yang masih berjalan hanya gerbang statis: `gdparse`, `gdlint`,
+`gdformat --check`, dan `tools/validate_godot.py`. Semua uji perilaku
+(`sim_headless.gd`, `smoke.tscn`) butuh engine.

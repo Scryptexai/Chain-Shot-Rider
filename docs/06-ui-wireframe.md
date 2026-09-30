@@ -215,3 +215,64 @@ rt.anchorMax = new Vector2(safe.xMax / Screen.width,  safe.yMax / Screen.height)
 | Rasio didukung | 16:9 sampai 21:9 (arena di-crop vertikal, HUD tetap) |
 
 **Uji wajib:** iPhone SE (16:9, 375 pt), iPhone 15 Pro (19.5:9 + Dynamic Island), Galaxy S23 (19.5:9 punch-hole), tablet 4:3 (HUD tidak boleh melar — clamp lebar maksimum 1200 px).
+
+---
+
+## 6.3b Peta stage (campaign ladder)
+
+Layar tangga 15 stage, dibuka lewat PLAY di menu utama. Alur: **menu → peta →
+stage → hasil → kartu → kembali ke peta**.
+
+```
+  y=0     +----------------------------------------+
+          |            (safe area 88)              |
+  y=140   |               CAMPAIGN         72px    |
+          |            3 / 15 CLEARED      28px    |
+  y~300   +----------------------------------------+
+          | +------------------------------------+ |  <- ScrollContainer
+          | | STAGE 01  Classic Pit      CLEARED | |     viewport ~1424px
+          | | BOSS COLOSSUS  DIF x1.00           | |     tinggi baris 120
+          | +------------------------------------+ |     jarak antar-baris 20
+          | | STAGE 02  Twin Towers         PLAY | |     konten 15x120+14x20
+          | | BOSS TWIN_WARDEN  DIF x1.12        | |            = 2080px
+          | +------------------------------------+ |
+          | | STAGE 03  Gravity Chamber   LOCKED | |
+          | +------------------------------------+ |
+  y~1716  +----------------------------------------+
+          |                MENU            120px   |
+  y=1860  +----------------------------------------+
+```
+
+**Angka mengikat**
+
+| Elemen | Nilai |
+|---|---|
+| Kolom | margin samping 90, atas 140, tinggi 1720 (dasar 1860/1920) |
+| Baris stage | tinggi **120** (lantai tap docs/06 6.3a), jarak 20, lebar 900 |
+| Judul / subjudul | 72px / 28px |
+| Nama stage / baris bawah | 40px / 26px |
+| Label status | 32px |
+
+**Warna status** — `CLEARED` emas `#FFD54F`, `PLAY` primary varian,
+`LOCKED` `INK_DIM` dengan isian 4%.
+
+**Aturan perilaku**
+
+- Stage terkunci **tetap ditampilkan**, hanya `disabled`. Melihat apa yang ada
+  di depan adalah satu-satunya alasan layar tangga ini ada.
+- Nama arena dan boss dibaca dari `variants[meta.variantCycle[stage % 5]]`,
+  jadi peta menyebut arena yang benar-benar akan dimuat. Kesulitan
+  `1 + difficultyPerStage * stage`.
+- **Auto-scroll ke stage berjalan.** `scroll_vertical` dihitung
+  `stage * 140 - (viewport - 120) / 2`, lalu Godot menjepitnya ke rentang bar.
+  Stage 1 mendarat di 0, stage 8 di ~328, stage 15 terjepit di ~656 — ketiganya
+  di dalam viewport.
+- Scroll disetel **setelah dua `process_frame`**. ScrollContainer melaporkan
+  viewport nol sebelum layout pass, dan offset yang dihitung di frame yang sama
+  selalu mendarat di puncak berapa pun stage-nya.
+
+**Bug progresi yang ikut diperbaiki** — `_on_card_chosen` dulu memanggil
+`start_stage(_stage)`, mengulang stage yang baru saja dimenangkan: `_stage`
+hanya dibaca dari `SaveGame` saat boot, jadi tangga tidak pernah naik dalam satu
+sesi. Sekarang memilih kartu mengakhiri stage dan mengembalikan kendali ke peta,
+sehingga unlock-nya terlihat.

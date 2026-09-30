@@ -85,11 +85,26 @@ func _connect_screens() -> void:
 	_screens.connect("menu_pressed", _on_menu)
 	_screens.connect("continue_pressed", _on_continue)
 	_screens.connect("card_chosen", _on_card_chosen)
+	_screens.connect("stage_chosen", _on_stage_chosen)
 
 
+## Play opens the ladder instead of dropping straight into a stage. The
+## campaign is fifteen stages long, so "where am I" is a question the player
+## has to be able to answer before a run starts, not after it.
 func _on_play() -> void:
+	_show_stage_map()
+
+
+func _show_stage_map() -> void:
+	Engine.time_scale = 1.0
+	set_physics_process(false)
+	_screens.call("show_stage_map")
+
+
+func _on_stage_chosen(stage: int) -> void:
+	_stage = stage
 	_screens.call("hide_all")
-	start_stage(_stage)
+	start_stage(stage)
 	set_physics_process(true)
 
 
@@ -124,12 +139,18 @@ func _draw_offers() -> Array:
 	return offers
 
 
+## Taking the card ends the stage, it does not start the next one.
+##
+## This used to call start_stage(_stage), which replayed the stage that had
+## just been won: _stage is only read from SaveGame at boot, so the ladder
+## never advanced inside a session no matter how many runs were cleared.
+## Handing control back to the map makes the unlock visible and lets the
+## player choose where to go next.
 func _on_card_chosen(card_id: String) -> void:
 	if not card_id.is_empty():
 		SaveGame.grant_card(card_id)
-	_screens.call("hide_all")
-	start_stage(_stage)
-	set_physics_process(true)
+	_stage = SaveGame.unlocked_stage
+	_show_stage_map()
 
 
 func _on_resume() -> void:

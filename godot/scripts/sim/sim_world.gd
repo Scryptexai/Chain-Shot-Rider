@@ -93,6 +93,18 @@ var boss_hp_max: float = 1.0
 var events: Array[Dictionary] = []
 
 var _rng: DetRng
+
+# Cosmetic scatter draws from its own stream.
+#
+# Auto-fire spread used to share _rng with gate polarity, wave spawns and
+# formation layout. Fire rate rises with squad size, so every upgrade that
+# added troops pulled extra draws and shifted the whole world onto a
+# different random sequence. The extra_troops card measured 0.78x, 0.86x and
+# 0.81x against baseline that way, even though troops only feed a fire rate
+# that is already capped: the card was not weaker, it was playing a
+# different arena. Splitting the stream keeps world generation identical no
+# matter how often the squad shoots.
+var _fx_rng: DetRng
 var _cfg: Dictionary = {}
 var _upgrades: Dictionary = {}
 
@@ -182,6 +194,7 @@ func _init(config: Dictionary, seed_value: int, stage: int, upgrades: Dictionary
 	_upgrades = upgrades
 	stage_index = stage
 	_rng = DetRng.new(seed_value)
+	_fx_rng = DetRng.new(seed_value ^ 0x5F375A86)
 	_read_config()
 	_reserve_arrays()
 	_start_wave()
@@ -456,7 +469,7 @@ func _tick_auto_fire() -> void:
 	_auto_cooldown = 1.0 / maxf(rate, 0.01)
 	if auto_count >= MAX_AUTO_BULLETS:
 		return
-	var spread := deg_to_rad(_rng.range_float(-_auto_spread, _auto_spread))
+	var spread := deg_to_rad(_fx_rng.range_float(-_auto_spread, _auto_spread))
 	auto_x[auto_count] = squad_x
 	auto_z[auto_count] = SQUAD_Z + 0.8
 	auto_vx[auto_count] = sin(spread) * _auto_speed

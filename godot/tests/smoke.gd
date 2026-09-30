@@ -32,7 +32,141 @@ func _ready() -> void:
 	for stage in range(maxi(stages, 1)):
 		_run_stage(packed, stage)
 	await _run_card_draft(packed)
+	await _run_stage_map(packed)
 	_finish()
+
+
+## Drives the fifteen stage ladder: open it, measure every rung, and press one.
+##
+## A ladder screen fails in ways a screenshot would not show. Rows can collapse
+## to a few pixels, locked stages can stay pressable, and the scroll can sit at
+## the top so the stage you are actually on is off screen. All three are
+## checked here against real geometry from the layout pass.
+func _run_stage_map(packed: PackedScene) -> void:
+	SaveGame.reset_progress()
+	var root := packed.instantiate()
+	add_child(root)
+	var screens: Object = root.get("_screens")
+	if screens == null or not screens.has_method("show_stage_map"):
+		_fail("peta: layar peta stage tidak ada")
+		root.queue_free()
+		return
+
+	var rows := await _open_map(root, screens)
+	var total := int(Cfg.num(GameConfig.dict("meta"), "stageCount", 15.0))
+	if rows.size() != total:
+		_fail("peta: %d baris, meta.stageCount minta %d" % [rows.size(), total])
+	if rows.is_empty():
+		root.queue_free()
+		return
+
+	_check_map_layout(rows, screens)
+	var row_h: float = (rows[0] as Button).get_global_rect().size.y
+	var row_count: int = rows.size()
+
+	# Fresh profile: only the first stage may be pressable.
+	var pressable := 0
+	for row in rows:
+		if not (row as Button).disabled:
+			pressable += 1
+	if pressable != 1:
+		_fail("peta: %d stage bisa ditekan pada profil baru, harusnya 1" % pressable)
+
+	# Reopen part way up the ladder and confirm the scroll follows progress.
+	SaveGame.unlocked_stage = 7
+	var later := await _open_map(root, screens)
+	if later.size() == total:
+		var scroll_rect: Rect2 = (screens.get("_map_scroll") as Control).get_global_rect()
+		var current: Rect2 = (later[7] as Button).get_global_rect()
+		if not scroll_rect.intersects(current):
+			_fail("peta: stage 8 di luar viewport setelah auto-scroll")
+		var cleared := 0
+		for i in range(7):
+			if not (later[i] as Button).disabled:
+				cleared += 1
+		if cleared != 7:
+			_fail("peta: %d dari 7 stage yang sudah lewat terbuka" % cleared)
+
+	# Pressing a rung has to actually launch that stage.
+	SaveGame.reset_progress()
+	var again := await _open_map(root, screens)
+	(again[0] as Button).pressed.emit()
+	if root.get("_sim") == null:
+		_fail("peta: menekan stage tidak memulai simulasi")
+	else:
+		print(
+			(
+				"  peta stage: %d baris, tinggi %d px, stage 8 terlihat, tekan stage 1 jalan"
+				% [row_count, int(row_h)]
+			)
+		)
+	root.queue_free()
+
+
+## Opens the map and waits for the layout pass before handing back the rows.
+func _open_map(root: Node, screens: Object) -> Array:
+	root.call("_show_stage_map")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var list: Object = screens.get("_map_list")
+	var rows: Array = []
+	for child in (list as Node).get_children():
+		if child is Button:
+			rows.append(child)
+	return rows
+
+
+## Measured geometry, not assumptions: tap height, width, and no overlap.
+func _check_map_layout(rows: Array, screens: Object) -> void:
+	var viewport: Vector2 = (screens as CanvasLayer).get_viewport().get_visible_rect().size
+	var previous_bottom := -1.0
+	for i in range(rows.size()):
+		var rect: Rect2 = (rows[i] as Button).get_global_rect()
+		if rect.size.y < 100.0:
+			_fail("peta: baris %d tinggi %d px, di bawah lantai 100 px" % [i + 1, rect.size.y])
+			break
+		if rect.size.x < 200.0:
+			_fail("peta: baris %d lebar %d px" % [i + 1, rect.size.x])
+			break
+		if rect.position.x < 0.0 or rect.position.x + rect.size.x > viewport.x + 1.0:
+			_fail("peta: baris %d keluar layar mendatar" % [i + 1])
+			break
+		if previous_bottom >= 0.0 and rect.position.y < previous_bottom - 0.5:
+			_fail("peta: baris %d tumpang tindih dengan baris sebelumnya" % [i + 1])
+			break
+		previous_bottom = rect.position.y + rect.size.y
+	_dump_map_layout(rows, screens, viewport)
+
+
+func _dump_map_layout(rows: Array, screens: Object, viewport: Vector2) -> void:
+	var clip: Rect2 = (screens.get("_map_scroll") as Control).get_global_rect()
+	var entries: Array = []
+	for i in range(rows.size()):
+		var rect: Rect2 = (rows[i] as Button).get_global_rect()
+		if not clip.intersects(rect):
+			continue
+		(
+			entries
+			. append(
+				{
+					"label": "STAGE %02d" % (i + 1),
+					"x": rect.position.x,
+					"y": rect.position.y,
+					"w": rect.size.x,
+					"h": rect.size.y,
+				}
+			)
+		)
+	var payload := {
+		"screen": "stage map",
+		"viewport": {"w": viewport.x, "h": viewport.y},
+		"rects": entries,
+	}
+	var file := FileAccess.open("res://../screenshots/layout-stagemap.json", FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify(payload, "  "))
+		file.close()
 
 
 ## Drives the between-stage upgrade draft end to end: open it, press a card,
@@ -82,9 +216,12 @@ func _run_card_draft(packed: PackedScene) -> void:
 	var upgrades: Dictionary = SaveGame.active_upgrades()
 	if upgrades.is_empty():
 		_fail("draft: kartu dimiliki tapi active_upgrades() kosong")
+	# Taking the card ends the stage and hands control back to the ladder, so
+	# launch from there to confirm the upgrade actually reaches SimWorld.
+	root.call("_on_stage_chosen", 0)
 	var sim: Object = root.get("_sim")
 	if sim == null:
-		_fail("draft: stage berikutnya tidak dimulai setelah memilih kartu")
+		_fail("draft: stage tidak bisa dimulai dari peta setelah memilih kartu")
 	elif upgrades.has("startTroops"):
 		# The one upgrade whose effect is readable straight off the sim, so
 		# when it is the card drawn, check the number rather than trusting the
@@ -216,9 +353,11 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 			_fail("%s tidak punya %s()" % [pair[0], pair[1]])
 
 	root.set("_stage", stage)
-	# Goes through the menu button rather than start_stage directly, so the
-	# screen wiring is exercised too.
-	root.call("_on_play")
+	# Goes through the map's launch handler rather than start_stage directly,
+	# so the screen wiring is exercised too. _on_play opens the stage ladder
+	# now and no longer starts a run by itself; pressing a rung is covered by
+	# _run_stage_map.
+	root.call("_on_stage_chosen", stage)
 
 	var sim: Object = root.get("_sim")
 	if sim == null:

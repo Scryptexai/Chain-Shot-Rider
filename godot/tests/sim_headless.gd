@@ -20,8 +20,39 @@ const TICKS_PER_SECOND := 60
 const MAX_SECONDS := 300.0
 const DETERMINISM_TICKS := 7200
 const THUMB_LATENCY := 0.20
+const CARD_SEEDS := 6
+## Strongest card may not out-earn the weakest by more than this.
+const CARD_SPREAD_LIMIT := 1.25
+
+## A second no-card baseline runs beside the cards as a control. Two
+## measurements of the identical config must land within this ratio, or the
+## sample is too small and the card table below it means nothing. Without
+## this guard the suite once "passed" a 1.6x limit while its own noise floor
+## was 1.54x, which would have accepted any table at all.
+const CARD_CONTROL_LIMIT := 1.12
+
+## Cards are scored inside a fixed time window instead of over a whole run.
+##
+## Full-run score cannot measure a card. Replaying the identical no-card
+## config on four different seed blocks moved the mean score by 1.54x
+## (8980 to 13788, 3/15 to 9/15 wins), because a run that dies early skips
+## whole waves and the win/lose cliff dominates everything a card does.
+## The card table's own spread was 1.17x, entirely underneath that floor.
+## A fixed window removes the cliff: every run is scored over the same
+## amount of played time, so the number reflects the card, not the length.
+const CARD_WINDOW_SECONDS := 90.0
 
 var _cfg: Dictionary = {}
+## Config swapped in by the card modes so every run plays the full window.
+##
+## Leaks stop being counted the moment a run dies, so any card that keeps the
+## squad standing collects more of them and is scored as a drawback. Extra
+## troops measured 0.78x for exactly that reason while its gate income was
+## better (100.1 vs 88.1) and its peak squad larger (69.9 vs 59.9): the card
+## worked, the metric punished it for surviving. Removing the death cutoff
+## makes every run cover the same stretch of pressure.
+var _cfg_override: Dictionary = {}
+
 var _failures: Array[String] = []
 
 
@@ -33,7 +64,13 @@ func _init() -> void:
 		return
 
 	var args := OS.get_cmdline_user_args()
-	if args.has("--trace"):
+	if args.has("--cards-replicate"):
+		_run_card_replicate()
+	elif args.has("--cards-noise"):
+		_run_card_noise()
+	elif args.has("--cards"):
+		_run_cards()
+	elif args.has("--trace"):
 		_run_trace(0)
 	elif args.has("--determinism"):
 		_run_determinism()
@@ -116,14 +153,24 @@ func _run_balance() -> void:
 
 
 ## Plays one stage with a bot that reads the same state a thumb would see.
-func _play_one(stage: int) -> Dictionary:
-	var seed_value := _seed() + stage * 7919
-	var sim := SimWorld.new(_cfg, seed_value, stage)
+func _play_one(
+	stage: int, upgrades: Dictionary = {}, seed_offset: int = 0, tick_limit: int = 0
+) -> Dictionary:
+	var seed_value := _seed() + stage * 7919 + seed_offset * 31337
+	var cfg := _cfg_override if not _cfg_override.is_empty() else _cfg
+	var sim := SimWorld.new(cfg, seed_value, stage, upgrades)
 	var max_ticks := int(MAX_SECONDS * TICKS_PER_SECOND)
+	if tick_limit > 0:
+		max_ticks = tick_limit
 	var problems: Array[String] = []
 	var latency_ticks := int(THUMB_LATENCY * TICKS_PER_SECOND)
 	var held_target := 0.0
 	var ticks := 0
+	var kills := 0
+	var leaks := 0
+	var peak_troops := 0
+	var gate_up := 0
+	var gate_down := 0
 
 	while ticks < max_ticks and sim.state == SimWorld.State.PLAYING:
 		# The thumb reacts late. Refreshing the target on every tick would
@@ -134,6 +181,19 @@ func _play_one(stage: int) -> Dictionary:
 		sim.set_input(held_target, true, tap, _bot_steer(sim))
 		sim.tick()
 		ticks += 1
+		for event in sim.events:
+			var kind := String(event.get("type", ""))
+			if kind == "kill":
+				kills += 1
+			elif kind == "leak":
+				leaks += 1
+			elif kind == "gate_squad":
+				var delta := int(event.get("delta", 0))
+				if delta >= 0:
+					gate_up += delta
+				else:
+					gate_down += -delta
+		peak_troops = maxi(peak_troops, sim.troops)
 		var problem := _check_invariants(sim)
 		if problem != "" and not problems.has(problem):
 			problems.append(problem)
@@ -150,6 +210,11 @@ func _play_one(stage: int) -> Dictionary:
 		"wave": sim.wave_index,
 		"troops": sim.troops,
 		"score": sim.score,
+		"kills": kills,
+		"leaks": leaks,
+		"peak_troops": peak_troops,
+		"gate_up": gate_up,
+		"gate_down": gate_down,
 		"lives": sim.lives,
 		"ticks": ticks,
 		"problems": problems,
@@ -158,6 +223,273 @@ func _play_one(stage: int) -> Dictionary:
 
 ## Where the bot wants the squad. Gates outrank crowd: a bad door costs more
 ## than a few missed shots, which is the lesson the reference game teaches.
+## Measures every upgrade card against a no-card baseline.
+##
+## The draft is only a choice if the options are close. Nobody had ever
+## measured them: the cards were written into config, wired through
+## SaveGame and consumed by SimWorld without a single run comparing them. A
+## card worth triple the next best turns the screen into a formality.
+##
+##   godot --headless --path godot/ --script res://tests/sim_headless.gd -- --cards
+func _run_cards() -> void:
+	_cfg_override = _endless_cfg()
+	var cards: Array = _cfg.get("meta", {}).get("cards", [])
+	print("")
+	print(
+		(
+			"PENGARUH KARTU (%d seed x %d varian, jendela %ds, metrik bocor/menit)"
+			% [CARD_SEEDS, _variant_names().size(), int(CARD_WINDOW_SECONDS)]
+		)
+	)
+	print("=".repeat(96))
+	print(
+		(
+			"%-22s %8s %8s %8s %8s %12s"
+			% ["kartu", "bocor/mnt", "detik", "bunuh", "pasukan", "efektivitas"]
+		)
+	)
+	print("-".repeat(96))
+
+	var base := _measure(_upgrades_none(), 0)
+	var control := _measure(_upgrades_none(), 1)
+	_print_card_row("(tanpa kartu)", base, base)
+	_print_card_row("(kontrol, seed lain)", control, base)
+	print("-".repeat(96))
+
+	var results: Array = []
+	for entry in cards:
+		var card: Dictionary = entry
+		var stats := _measure(_upgrades_for(card), 0)
+		results.append({"card": card, "stats": stats})
+	# Fewer leaks is a stronger card, so the table sorts ascending.
+	results.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool:
+			return _leak_rate(a["stats"]) < _leak_rate(b["stats"])
+	)
+	for row in results:
+		_print_card_row(String((row["card"] as Dictionary).get("name", "?")), row["stats"], base)
+	print("-".repeat(96))
+
+	var raw_control := _leak_ratio(base, control)
+	var control_ratio: float = maxf(raw_control, 1.0 / maxf(raw_control, 0.0001))
+	var best := _leak_ratio(base, results[0]["stats"])
+	var worst := _leak_ratio(base, results[results.size() - 1]["stats"])
+	var spread: float = best / maxf(worst, 0.01)
+	print("lantai derau (baseline vs kontrol) = %.2fx" % control_ratio)
+	print("sebaran terkuat:terlemah = %.2fx" % spread)
+	if control_ratio > CARD_CONTROL_LIMIT:
+		_failures.append(
+			(
+				"derau %.2fx melebihi %.2fx — sampel terlalu kecil, tabel kartu tak terbaca"
+				% [control_ratio, CARD_CONTROL_LIMIT]
+			)
+		)
+	if spread > CARD_SPREAD_LIMIT:
+		_failures.append(
+			(
+				"sebaran kartu %.2fx melebihi batas %.2fx — draft bukan pilihan nyata"
+				% [spread, CARD_SPREAD_LIMIT]
+			)
+		)
+
+
+## Measures the same no-card baseline on four disjoint seed blocks.
+##
+## This has to run before any card is believed. The card table separates the
+## best option from the worst by about 1.17x; if replaying the baseline on
+## different seeds moves the score by a comparable amount, that table is
+## measuring noise and every conclusion drawn from it is invented.
+## Re-measures the one outlier card on independent seed blocks.
+##
+## The card table flagged Reinforcements at 0.78x, outside a 1.09x noise
+## floor. One block is still one sample: an outlier that does not survive a
+## replication is a fluke, and retuning config to chase it would be damage.
+func _run_card_replicate() -> void:
+	_cfg_override = _endless_cfg()
+	var target := "extra_troops"
+	var card := {}
+	for entry in _cfg.get("meta", {}).get("cards", []):
+		if String((entry as Dictionary).get("id", "")) == target:
+			card = entry
+	print("")
+	print(
+		(
+			"REPLIKASI '%s' (%d seed x %d varian per blok)"
+			% [target, CARD_SEEDS, _variant_names().size()]
+		)
+	)
+	print("=".repeat(70))
+	print(
+		(
+			"%-16s %9s %9s %9s %9s %9s"
+			% ["kondisi", "bocor/mnt", "puncak", "gate+", "gate-", "gate net"]
+		)
+	)
+	print("-".repeat(70))
+	for block in range(1):
+		var base := _measure(_upgrades_none(), block)
+		var with_card := _measure(_upgrades_for(card), block)
+		_print_gate_row("blok %d baseline" % block, base)
+		_print_gate_row("blok %d kartu" % block, with_card)
+	print("-".repeat(70))
+
+
+## A copy of the config whose squad cannot be wiped out, so the run length is
+## fixed by the window instead of by how well the card kept the squad alive.
+func _endless_cfg() -> Dictionary:
+	var cfg := _cfg.duplicate(true)
+	var player: Dictionary = cfg.get("player", {})
+	player["lives"] = 9999
+	cfg["player"] = player
+	return cfg
+
+
+func _print_gate_row(label: String, stats: Dictionary) -> void:
+	var up := float(stats["gate_up"])
+	var down := float(stats["gate_down"])
+	print(
+		(
+			"%-16s %9.2f %9.1f %9.1f %9.1f %9.1f"
+			% [label, _leak_rate(stats), float(stats["peak_troops"]), up, down, up - down]
+		)
+	)
+
+
+func _run_card_noise() -> void:
+	_cfg_override = _endless_cfg()
+	print("")
+	print(
+		(
+			"DERAU BASELINE (%d seed x %d varian per blok, tanpa kartu)"
+			% [CARD_SEEDS, _variant_names().size()]
+		)
+	)
+	print("=".repeat(70))
+	var scores: Array[float] = []
+	var kill_counts: Array[float] = []
+	for block in range(4):
+		var stats := _measure(_upgrades_none(), block)
+		scores.append(float(stats["score"]))
+		kill_counts.append(float(stats["kills"]))
+		print(
+			(
+				"  blok %d: bunuh %.1f, bocor %.2f, pasukan %.1f, menang %d/%d"
+				% [
+					block,
+					float(stats["kills"]),
+					float(stats["leaks"]),
+					float(stats["troops"]),
+					int(stats["wins"]),
+					int(stats["runs"])
+				]
+			)
+		)
+	var lo: float = scores[0]
+	var hi: float = scores[0]
+	for v in scores:
+		lo = minf(lo, v)
+		hi = maxf(hi, v)
+	var spread: float = hi / maxf(lo, 1.0)
+	var klo: float = kill_counts[0]
+	var khi: float = kill_counts[0]
+	for v in kill_counts:
+		klo = minf(klo, v)
+		khi = maxf(khi, v)
+	var kill_spread: float = khi / maxf(klo, 1.0)
+	print("-".repeat(70))
+	print("sebaran baseline murni: skor %.2fx, bunuh %.2fx" % [spread, kill_spread])
+
+
+## Leaks per minute alive.
+##
+## Raw leak totals cannot rank cards: leaks only accumulate while the squad
+## is still standing, so a card that keeps the run alive longer collects more
+## of them and scores as a drawback. Reinforcements measured 0.77x that way
+## purely for surviving. Dividing by time removes the reward for dying early.
+func _leak_rate(stats: Dictionary) -> float:
+	return float(stats["leaks"]) / maxf(float(stats["seconds"]), 0.01) * 60.0
+
+
+## How much of the baseline leak rate a card prevents. Above 1.00 means the
+## card holds the line better than no card at all.
+func _leak_ratio(base: Dictionary, stats: Dictionary) -> float:
+	return _leak_rate(base) / maxf(_leak_rate(stats), 0.0001)
+
+
+func _print_card_row(label: String, stats: Dictionary, base: Dictionary) -> void:
+	print(
+		(
+			"%-22s %8.2f %8.1f %8.1f %8.1f %11.2fx"
+			% [
+				label,
+				_leak_rate(stats),
+				float(stats["seconds"]),
+				float(stats["kills"]),
+				float(stats["troops"]),
+				_leak_ratio(base, stats)
+			]
+		)
+	)
+
+
+func _measure(upgrades: Dictionary, block: int = 0) -> Dictionary:
+	var wins := 0
+	var runs := 0
+	var seconds := 0.0
+	var score := 0.0
+	var kills := 0.0
+	var leaks := 0.0
+	var troops := 0.0
+	var peak := 0.0
+	var gate_up := 0.0
+	var gate_down := 0.0
+	var window := int(CARD_WINDOW_SECONDS * TICKS_PER_SECOND)
+	for seed_offset in range(CARD_SEEDS):
+		for stage in range(_variant_names().size()):
+			var run := _play_one(stage, upgrades, block * CARD_SEEDS + seed_offset, window)
+			runs += 1
+			if String(run["outcome"]) == "victory":
+				wins += 1
+			seconds += float(run["elapsed"])
+			score += float(run["score"])
+			kills += float(run["kills"])
+			leaks += float(run["leaks"])
+			troops += float(run["troops"])
+			peak += float(run["peak_troops"])
+			gate_up += float(run["gate_up"])
+			gate_down += float(run["gate_down"])
+	return {
+		"wins": wins,
+		"runs": runs,
+		"seconds": seconds / maxf(runs, 1),
+		"score": score / maxf(runs, 1),
+		"kills": kills / maxf(runs, 1),
+		"leaks": leaks / maxf(runs, 1),
+		"troops": troops / maxf(runs, 1),
+		"peak_troops": peak / maxf(runs, 1),
+		"gate_up": gate_up / maxf(runs, 1),
+		"gate_down": gate_down / maxf(runs, 1),
+	}
+
+
+## Folds one card into the stat map SimWorld reads. Mirrors
+## SaveGame.active_upgrades(), which cannot be used here: `--script` runs do
+## not register autoloads.
+func _upgrades_for(card: Dictionary) -> Dictionary:
+	var stat := String(card.get("stat", ""))
+	if stat.is_empty():
+		return {}
+	if card.has("mul"):
+		return {stat: float(card["mul"])}
+	if card.has("add"):
+		return {stat: float(card["add"])}
+	return {}
+
+
+func _upgrades_none() -> Dictionary:
+	return {}
+
+
 func _bot_target_x(sim: SimWorld) -> float:
 	var aim := _crowd_aim_x(sim)
 	var gate := _imminent_gate(sim)
