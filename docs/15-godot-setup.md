@@ -194,16 +194,20 @@ yang menyentuh simulasi.
 
 ## Yang belum ada
 
-- **Audio** (doc 07): belum ada satu pun cue. Ini item nomor satu sekarang.
+- **Musik** (doc 07 §7.3): SFX sudah lengkap, tapi layer musik per varian, dynamic
+  mixing per wave, dan stinger akhir run belum ada. Bus `Music` sudah berdiri dan
+  sudah di-duck saat slow-mo — yang kurang tinggal materi audionya.
+- **Cue yang belum pernah terpicu di uji**: `combo_milestone`, `heartbeat`,
+  `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`. Semuanya
+  tersambung dan file-nya ada, tapi butuh run lebih panjang atau kondisi spesifik
+  (boss di wave 5, 50 kill, combo 10) daripada smoke 30 detik.
 - **Kartu upgrade antar-stage**: `SaveGame` sudah mendukung penuh, layarnya belum.
-- **Interpolasi render**: tampilan membaca state simulasi langsung, belum ada interpolasi alpha antar tick.
-- **Barrel**: config, tabrakan, dan konstanta sudah ada; spawner-nya belum disambung.
-- **Layar non-gameplay** (menu, pause, result) sudah ada di `scripts/ui/screens.gd`, bertema per varian;
-  yang belum: pemilih arena 5 kartu, slider audio, count-up tween baris result.
-- **Boss**: satu pola gerak generik, belum 5 pola unik per varian seperti di [doc 05](05-prefab-spec.md).
-- **Varian arena**: tema warna dibaca dari config, tapi obstacle per varian (bumper, pillar, gravity well, platform) belum di-spawn di Godot. Logikanya sudah ada dan teruji di prototipe web.
-- **Audio, camera shake, partikel**: dirancang di doc 07/08, belum diimplementasikan. Vignette slow-mo sudah ada di HUD, tapi belum ada perlambatan waktu sungguhan.
-- **Layar pemilihan kartu**: `SaveGame` sudah mendukung penuh, UI-nya belum.
-- **Interpolasi render**: tampilan membaca state simulasi langsung, belum ada interpolasi alpha antar tick.
-
-Prototipe web di `prototype/` masih memakai loop lama (player diam, bidik drag) dan **belum** mencerminkan desain Last War ini. Selama Godot belum bisa dijalankan, keduanya sementara berbeda — menyelaraskan prototipe adalah langkah berikutnya yang masuk akal, karena di situlah balance bisa benar-benar diukur.
+- **Interpolasi render**: tampilan membaca state simulasi langsung, belum ada
+  interpolasi alpha antar tick — terasa di 30 fps, tidak di 60.
+- **Pemilih arena 5 kartu**, slider volume, dan count-up tween di layar result.
+- **Prototipe vs Godot**: prototipe masih memakai loop lama (player diam, bidik drag)
+  dan belum mencerminkan desain Last War. Keduanya berbagi config dan palet, bukan kode.
+- **27 file `.cs` Unity warisan** di `unity/` — sudah tidak jadi target, tapi masih ada
+  di repo dan bisa membingungkan.
+- **Komentar Bahasa Indonesia di `prototype/index.html`** melanggar aturan "komentar kode
+  dalam English" yang berlaku di repo ini. File `.gd` sudah patuh.

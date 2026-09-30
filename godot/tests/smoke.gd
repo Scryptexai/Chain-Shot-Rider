@@ -90,10 +90,14 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 		_fail("varian %d: slow-mo tidak pernah aktif" % stage)
 	if not shook:
 		_fail("varian %d: camera shake tidak pernah aktif" % stage)
+	var cues := _check_audio(root, stage)
 
 	print(
 		(
-			"  varian %d: skor %d, troop %d, musuh %d, obstacle %d, slow-mo %.2f, shake %s"
+			(
+				"  varian %d: skor %d, troop %d, musuh %d, obstacle %d,"
+				+ " slow-mo %.2f, shake %s, cue %d"
+			)
 			% [
 				stage + 1,
 				int(sim.get("score")),
@@ -102,10 +106,45 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 				(sim.get("field") as ObstacleField).obstacles.size(),
 				slowest,
 				"ya" if shook else "tidak",
+				cues,
 			]
 		)
 	)
 	root.queue_free()
+
+
+## Audio is the newest layer and the easiest to leave silently disconnected:
+## nothing in this sandbox can hear it, and a director that never plays sounds
+## exactly like one that does. So assert the cues that a played run must fire.
+func _check_audio(root: Node, stage: int) -> int:
+	var audio: Object = root.get("_audio")
+	if audio == null:
+		_fail("varian %d: AudioDirector tidak dibuat" % stage)
+		return 0
+	var counts: Dictionary = audio.get("play_counts")
+	var total := 0
+	for cue in counts:
+		total += int(counts[cue])
+	# shot and kill are unconditional in a run that taps and scores; if either
+	# is missing the event wiring is broken, not the balance.
+	for required in ["shot", "kill"]:
+		if int(counts.get(required, 0)) == 0:
+			_fail("varian %d: cue '%s' tidak pernah berbunyi" % [stage, required])
+	# The kill cooldown is the load-bearing mix decision in docs/07 7.4.
+	var seconds := float(FRAMES_PER_STAGE) / 60.0
+	var kill_cap := int(seconds / 0.04) + 2
+	if int(counts.get("kill", 0)) > kill_cap:
+		_fail(
+			(
+				"varian %d: cue 'kill' berbunyi %d kali, cooldown 0.04 s membatasi %d"
+				% [stage, int(counts.get("kill", 0)), kill_cap]
+			)
+		)
+	# Bus tree from docs/07 7.4 must exist or every volume trim is a no-op.
+	for bus_name in ["Music", "SFX", "Impact", "Crowd", "UI"]:
+		if AudioServer.get_bus_index(bus_name) < 0:
+			_fail("varian %d: bus '%s' tidak dibuat" % [stage, bus_name])
+	return total
 
 
 func _fail(message: String) -> void:

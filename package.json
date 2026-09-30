@@ -1,0 +1,6 @@
+{
+  "name": "chain-rider-tools",
+  "private": true,
+  "description": "Headless renderer and audio audit tooling. node_modules is not persisted in this sandbox; run `npm install` before tools/screenshot.js or tools/audit_sfx.js.",
+  "dependencies": { "@napi-rs/canvas": "^0.1.60" }
+}

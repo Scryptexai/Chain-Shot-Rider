@@ -154,3 +154,65 @@ t=3.20  └─ siap tembak lagi
 | Audio CPU | < 4% pada device target |
 
 **Uji wajib:** mainkan wave 5 (200 musuh + chain explosion + combo x50) sambil memantau Audio Profiler. Tidak boleh ada voice stealing pada cue prioritas 0, dan tidak boleh ada clipping di Master.
+
+
+---
+
+## 7.7 Status implementasi (Godot)
+
+Semua 16 cue di §7.1 sudah berbunyi di engine. Tidak ada aset audio berlisensi
+yang bisa dijangkau dari sandbox ini, jadi setiap cue **disintesis secara
+prosedural** oleh `tools/gen_sfx.py` ke `godot/audio/sfx/*.wav`.
+
+Itu ternyata cocok dengan proyek ini, bukan sekadar terpaksa:
+
+- **Deterministik.** Seed tetap, jadi WAV hasilnya byte-identik tiap run.
+  (Versi pertama memakai `hash(name)` — Python mengacak hash string per proses,
+  sehingga cue diam-diam berubah tiap regenerasi. Sekarang `zlib.crc32`.)
+- **Kecil.** 36 file mono 22 kHz = **748 KB**, jauh di bawah budget 12 MB di §7.6.
+- **Spesifikasinya memang sudah bahasa sintesis.** "Sub-bass 60 Hz + transient
+  klik 4 kHz" memetakan langsung ke kode.
+
+Pitch **tidak** di-bake. Ladder 14 semitone di §7.2 diterapkan saat play lewat
+`pitch_scale`, jadi ladder bisa ditune tanpa merender ulang apa pun.
+
+### Verifikasi tanpa bisa mendengar
+
+Sandbox tidak punya perangkat audio, jadi cue-cue ini tidak bisa didengar di
+sini. Itu persis kondisi yang melahirkan bug `Vector2.UP` dan bug lempengan
+horizon: kode yang lolos semua pemeriksaan sambil salah di satu dimensi yang
+tidak pernah diperiksa. Karena itu ada `tools/audit_sfx.js`, yang mengukur tiap
+klip dan menggambar contact sheet gelombang (`screenshots/sfx-waveforms.png`).
+
+Yang ditangkapnya, dan semuanya nyata:
+
+| Temuan | Akibat |
+|---|---|
+| `declick` simetris 3 ms | Puncak cue perkusif ada di milidetik pertama, jadi ramp-nya merusak transien — `ui_tap` terukur peak 0,18 dari target 0,60. Diperbaiki jadi asimetris: attack 0,5 ms, release 8 ms. |
+| `shot` centroid 112 Hz | Klik 4 kHz tenggelam oleh sub. |
+| `explosion` tanpa transien onset | Debris baru mulai di t=0,12 s, jadi onsetnya sub murni tanpa "crack". |
+| `hash()` tidak stabil | Cue berubah antar-run; klaim reproducible ternyata palsu. |
+
+Satu catatan jujur soal metrik: ambang `centroid` dan `hfMin` adalah **batas
+desain yang dikalibrasi**, bukan hukum fisika. Percobaan awal menetapkan `shot`
+ke 90–400 Hz *dan* 6% energi onset — kombinasi yang tidak bisa dipenuhi suara
+mana pun sekaligus. Ambang sekarang longgar cukup agar tidak saling tarik, tapi
+tetap ketat cukup untuk menjepret jika ada edit yang menumpulkan transien.
+
+### Mixing yang benar-benar berjalan
+
+`godot/scripts/view/audio_director.gd` mengimplementasikan §7.4: voice pool 8,
+pohon bus (`Music -6 dB`, `Impact 0`, `Crowd -4`, `Ambient -12`, `UI -3`),
+limiter −1 dB di Master, duck musik −6 dB dengan attack 0,15 s / release 0,4 s
+saat slow-mo, dan duck Crowd −5 dB selama 0,3 s setiap ledakan.
+
+Dua hal yang dijaga ketat:
+
+1. **Jitter pitch memakai RNG sendiri**, tidak pernah RNG simulasi. Menarik satu
+   angka dari RNG sim untuk memvariasikan pop kill akan menggeser seluruh undian
+   berikutnya dan merusak determinisme replay.
+2. **Cooldown memakai waktu unscaled.** Kalau tidak, slow-mo akan meregangkan
+   cooldown kill 0,04 s jadi seperempat detik.
+
+Terukur di smoke test: balance tetap 2/5 menang, rata-rata 75,7 s, dan
+determinisme 5×7200 tick tetap IDENTIK setelah audio masuk.

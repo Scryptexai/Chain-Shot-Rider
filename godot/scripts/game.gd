@@ -19,6 +19,7 @@ var _press_time := 0.0
 var _pending_tap := false
 var _pending_drag := 0.0
 var _feel: GameFeel = null
+var _audio: AudioDirector = null
 var _camera_home := Vector3.ZERO
 
 @onready var _view: Node3D = $ArenaView
@@ -44,6 +45,8 @@ func _ready() -> void:
 		_screens.call("build", variant)
 	_connect_screens()
 	_feel = GameFeel.new(GameConfig.dict(""))
+	_audio = AudioDirector.new(GameConfig.dict(""))
+	add_child(_audio)
 	set_physics_process(false)
 
 
@@ -127,10 +130,16 @@ func _process(_delta: float) -> void:
 func _update_feel(delta: float) -> void:
 	if _feel == null:
 		return
+	var unscaled := delta / maxf(Engine.time_scale, 0.01)
 	for entry in _sim.events:
 		_feel.react_to(entry)
-	var unscaled := delta / maxf(Engine.time_scale, 0.01)
+		if _audio != null:
+			_audio.react_to(entry)
 	_feel.update(_sim, unscaled)
+	# Audio updates after feel so slow-mo enter/exit cues read this frame's
+	# time_scale rather than the previous one's.
+	if _audio != null:
+		_audio.update(_sim, _feel, unscaled)
 	# The sim keeps its fixed step; this only changes how many steps a real
 	# second buys, so a slowed run still replays identically.
 	Engine.time_scale = _feel.time_scale
