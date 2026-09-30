@@ -1,0 +1,46 @@
+; Chain Rider — Godot 4.3 project.
+;
+; Engine settings live here rather than in an editor-only script, because Godot
+; project files are plain text: they diff, merge, and review like source code.
+
+config_version=5
+
+[application]
+
+config/name="Chain Rider"
+config/description="Bullet-steering crowd shooter. Portrait, one thumb, 1-3 minute runs."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+boot_splash/show_image=false
+
+[autoload]
+
+GameConfig="*res://scripts/autoload/game_config.gd"
+SaveGame="*res://scripts/autoload/save_game.gd"
+
+[display]
+
+window/size/viewport_width=1080
+window/size/viewport_height=1920
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep_width"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[physics]
+
+common/physics_ticks_per_second=60
+common/max_physics_steps_per_frame=4
+2d/default_gravity=0.0
+3d/default_gravity=0.0
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=true
+lights_and_shadows/directional_shadow/size=2048
+anti_aliasing/quality/msaa_3d=1
