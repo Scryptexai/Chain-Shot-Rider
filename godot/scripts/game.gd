@@ -20,6 +20,7 @@ var _pending_tap := false
 var _pending_drag := 0.0
 var _feel: GameFeel = null
 var _audio: AudioDirector = null
+var _music: MusicDirector = null
 var _camera_home := Vector3.ZERO
 
 @onready var _view: Node3D = $ArenaView
@@ -47,6 +48,10 @@ func _ready() -> void:
 	_feel = GameFeel.new(GameConfig.dict(""))
 	_audio = AudioDirector.new(GameConfig.dict(""))
 	add_child(_audio)
+	# Music is built after AudioDirector so the Music bus and its low-pass
+	# already exist when MusicDirector goes looking for the filter to drive.
+	_music = MusicDirector.new()
+	add_child(_music)
 	set_physics_process(false)
 
 
@@ -61,6 +66,8 @@ func start_stage(stage: int) -> void:
 		_hud.call("bind_sim", _sim)
 	if _hud.has_method("bind_camera"):
 		_hud.call("bind_camera", _camera)
+	if _music != null:
+		_music.start(_variant_for_stage(stage))
 
 
 ## Maps a stage index onto one of the five arena variants.
@@ -99,6 +106,8 @@ func _on_menu() -> void:
 	Engine.time_scale = 1.0
 	set_physics_process(false)
 	_screens.call("show_menu")
+	if _music != null:
+		_music.stop()
 
 
 func _physics_process(_delta: float) -> void:
@@ -140,6 +149,8 @@ func _update_feel(delta: float) -> void:
 	# time_scale rather than the previous one's.
 	if _audio != null:
 		_audio.update(_sim, _feel, unscaled)
+	if _music != null:
+		_music.update(_sim, _feel, unscaled)
 	# The sim keeps its fixed step; this only changes how many steps a real
 	# second buys, so a slowed run still replays identically.
 	Engine.time_scale = _feel.time_scale
@@ -207,6 +218,8 @@ func _finish_run() -> void:
 	# Never leave the engine slowed on the results screen.
 	Engine.time_scale = 1.0
 	var won: bool = _sim.state == SimWorld.State.VICTORY
+	if _music != null:
+		_music.finish(won)
 	var earned := _sim.score / 10
 	SaveGame.record_run(_stage, won, _sim.score, earned)
 	set_physics_process(false)

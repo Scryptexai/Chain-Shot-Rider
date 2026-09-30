@@ -216,3 +216,76 @@ Dua hal yang dijaga ketat:
 
 Terukur di smoke test: balance tetap 2/5 menang, rata-rata 75,7 s, dan
 determinisme 5×7200 tick tetap IDENTIK setelah audio masuk.
+
+
+---
+
+## 7.8 Status implementasi musik
+
+Enam stem + dua stinger ada di `godot/audio/music/*.ogg`, disintesis oleh
+`tools/gen_music.py`. **Total seluruh audio 4,50 MB** dari budget 12 MB di §7.6.
+
+Format sesuai spesifikasi — Ogg Vorbis, stereo, 44,1 kHz, streaming. Encoder-nya
+datang dari libsndfile yang dibundel wheel `soundfile`; di sandbox ini tidak ada
+ffmpeg, oggenc, maupun sox.
+
+### Satu inkonsistensi di §7.3 yang harus diputuskan
+
+Bagian itu menyebut **loop 60 detik** sekaligus struktur **8 + 16 + 16 + 16 bar**
+dengan loop point di akhir bar 56. Pada 120 BPM 4/4 satu bar = 2 detik, jadi
+56 bar = 112 detik. Keduanya tidak bisa benar bersamaan.
+
+Saya memilih **60 detik**, karena itu angka yang disandari bagian lain proyek:
+budget audio §7.6, dan sesi 1–3 menit yang hampir tidak tertutup satu kali putar
+oleh loop 112 detik. Proporsi seksi dipertahankan dengan membaginya dua:
+**6 intro / 8 A / 8 B / 8 A' = 30 bar = tepat 60 detik**.
+
+### Verifikasi
+
+`tools/audit_music.py` mengukur tiap stem dan menggambar
+`screenshots/music-structure.png`. Tiga hal yang tidak berlaku pada SFX:
+
+| Cek | Kenapa perlu |
+|---|---|
+| **Sambungan loop** | Stem berputar selamanya; kalau sampel terakhir tidak menyambung ke yang pertama, akan berbunyi klik tiap 60 detik |
+| **Grid 120 BPM** | Onset perkusi harus jatuh di grid, kalau melenceng lapisan tidak bisa ditumpuk |
+| **Struktur** | Stem yang merender satu bar lalu mengulanginya lolos semua metrik lain sambil mati secara musikal |
+
+Keempat temuannya nyata, dan yang ketiga memalukan:
+
+1. **`glitch` clipping peak 1,26** meski dinormalisasi ke 0,82 — Vorbis melakukan
+   overshoot saat decode pada gelombang kotak beralias. Diperbaiki dengan
+   low-pass 5,2 kHz dan headroom turun ke 0,72.
+2. **Sambungan `drums_fill` melompat 32×** — ekor tom di bar terakhir terpotong.
+   `place()` sekarang membungkus ke awal, persis seperti yang terjadi pada
+   putaran kedua. Turun ke 1,0.
+3. **Struktur intro/A/B/A' praktis tidak ada** (spread RMS 0,0015). Saya menulis
+   satu pola lalu mengulangnya 30 bar — persis kegagalan yang saya tulis sendiri
+   di komentar pengujian. Sekarang intro benar-benar lebih lapang (bass half-note,
+   satu kick per bar, arp separuh kerapatan), B berpindah ke `F–C–G–Am` dengan
+   stab tiap ketukan dan filter lebih terbuka, A' menggandakan satu oktaf di atas.
+4. **`hash()` Python** (di generator SFX) diacak per proses.
+
+Satu catatan jujur soal metrik, sama seperti di §7.7: tiga dari empat "masalah"
+yang tersisa setelah perbaikan ternyata **metrik saya yang salah sasaran**, bukan
+musiknya — menguji grid ritmis pada pad, menguji arp bernot 1/16 terhadap grid
+1/8, dan mengukur sambungan loop terhadap gerak *rata-rata* sehingga loop drum
+mana pun yang dibuka dengan hentakan tampak rusak. Ambang seam sekarang
+dibandingkan ke persentil 99, dan cek grid dibatasi ke stem yang memang ritmis.
+
+### Dynamic music yang berjalan
+
+`godot/scripts/view/music_director.gd`: tiga player berputar bersamaan di bus
+`Music` dan **diaransemen lewat volume, bukan lewat start/stop**, supaya
+lapisannya tidak pernah lepas sinkron.
+
+| Kondisi | Reaksi |
+|---|---|
+| Wave 1–2 | Base saja |
+| Wave 3–4 | + layer varian, +3 dB |
+| Wave 5 (boss) | + `drums_fill`, filter terbuka penuh |
+| Slow-mo | pitch 0,85×, low-pass 1200 Hz |
+| Run berakhir | fade → stinger menang/kalah |
+
+Duck −6 dB saat slow-mo sengaja **tidak** diulang di sini; itu sudah dikerjakan
+`AudioDirector` di bus `Music`.

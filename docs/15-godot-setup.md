@@ -194,9 +194,9 @@ yang menyentuh simulasi.
 
 ## Yang belum ada
 
-- **Musik** (doc 07 §7.3): SFX sudah lengkap, tapi layer musik per varian, dynamic
-  mixing per wave, dan stinger akhir run belum ada. Bus `Music` sudah berdiri dan
-  sudah di-duck saat slow-mo — yang kurang tinggal materi audionya.
+- **Audio selesai** (doc 07): 16 cue SFX + 6 stem musik + 2 stinger, total 4,50 MB
+  dari budget 12 MB. Yang belum: slider volume di UI, dan sub-pulse saat nyawa
+  tinggal 1 (§7.3 menyebutnya; high-pass sweep-nya belum ada).
 - **Cue yang belum pernah terpicu di uji**: `combo_milestone`, `heartbeat`,
   `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`. Semuanya
   tersambung dan file-nya ada, tapi butuh run lebih panjang atau kondisi spesifik

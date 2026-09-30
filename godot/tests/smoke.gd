@@ -91,6 +91,7 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 	if not shook:
 		_fail("varian %d: camera shake tidak pernah aktif" % stage)
 	var cues := _check_audio(root, stage)
+	_check_music(root, stage)
 
 	print(
 		(
@@ -145,6 +146,33 @@ func _check_audio(root: Node, stage: int) -> int:
 		if AudioServer.get_bus_index(bus_name) < 0:
 			_fail("varian %d: bus '%s' tidak dibuat" % [stage, bus_name])
 	return total
+
+
+## Music loads from disk and mixes by volume, so both halves can fail quietly:
+## a missing stem leaves a silent player, and a stuck fade leaves it inaudible.
+func _check_music(root: Node, stage: int) -> void:
+	var music: Object = root.get("_music")
+	if music == null:
+		_fail("varian %d: MusicDirector tidak dibuat" % stage)
+		return
+	# Variant 0 runs on base alone (docs/07 7.3), so base + fill is the floor;
+	# every other variant adds its own layer on top.
+	var expected := 2 if stage == 0 else 3
+	var loaded := int(music.get("layers_loaded"))
+	if loaded < expected:
+		_fail("varian %d: %d stem musik dimuat, diharapkan %d" % [stage, loaded, expected])
+	if int(music.get("active_variant")) != stage:
+		_fail(
+			"varian %d: MusicDirector memutar varian %d" % [stage, int(music.get("active_variant"))]
+		)
+	# The base loop must have faded up from its silent start.
+	var base: Node = music.get_child(0)
+	if base is AudioStreamPlayer:
+		var player := base as AudioStreamPlayer
+		if not player.playing:
+			_fail("varian %d: loop musik dasar tidak berjalan" % stage)
+		elif player.volume_db <= -59.0:
+			_fail("varian %d: musik dasar masih senyap (%.1f dB)" % [stage, player.volume_db])
 
 
 func _fail(message: String) -> void:
