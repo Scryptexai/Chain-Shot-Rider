@@ -39,6 +39,8 @@ var _gate_pool: Array[MeshInstance3D] = []
 var _gate_labels: Array[Label3D] = []
 var _floor: MeshInstance3D
 var _environment: WorldEnvironment
+var _obstacle_nodes: Array[Node3D] = []
+var _boss: Node3D
 
 
 ## Called by Game before the first frame, with the variant for this stage.
@@ -49,9 +51,11 @@ func build(variant_index: int) -> void:
 	_build_actors()
 
 
-## Called by Game once a run starts.
+## Called by Game once a run starts. The furniture can only be built now:
+## which obstacles exist is a property of the run, not of the scene.
 func bind_sim(sim: SimWorld) -> void:
 	_sim = sim
+	_build_obstacles()
 
 
 ## Pushes one frame of simulation state into the scene.
@@ -63,6 +67,8 @@ func render_frame() -> void:
 	_render_auto()
 	_render_chain()
 	_render_gates()
+	_render_obstacles()
+	_render_boss()
 
 
 func _build_environment() -> void:
@@ -140,6 +146,103 @@ func _build_actors() -> void:
 	_chain.mesh = _sphere(0.26)
 	_chain.material_override = _emissive(_pal["primary"], 3.0)
 	add_child(_chain)
+
+
+## Builds one node per obstacle, once. They are few and long-lived, so a
+## MultiMesh would cost more in bookkeeping than it saves in draw calls.
+func _build_obstacles() -> void:
+	for node in _obstacle_nodes:
+		node.queue_free()
+	_obstacle_nodes.clear()
+	if _sim == null or _sim.field == null:
+		return
+	for entry in _sim.field.obstacles:
+		var obstacle: Dictionary = entry
+		var node := _make_obstacle(obstacle)
+		add_child(node)
+		_obstacle_nodes.append(node)
+
+	if _boss != null:
+		_boss.queue_free()
+	_boss = MeshInstance3D.new()
+	var boss_mesh := SphereMesh.new()
+	boss_mesh.radius = 1.8
+	boss_mesh.height = 3.6
+	(_boss as MeshInstance3D).mesh = boss_mesh
+	(_boss as MeshInstance3D).material_override = _emissive(_pal["enemy"], 2.2)
+	_boss.visible = false
+	add_child(_boss)
+
+
+## Each kind reads as itself at a glance: bumpers glow, pillars are dead
+## weight, wells are translucent volumes, barrels are small and hot.
+func _make_obstacle(obstacle: Dictionary) -> Node3D:
+	var node := MeshInstance3D.new()
+	var kind := String(obstacle["kind"])
+	var radius := float(obstacle["radius"])
+	match kind:
+		"gravityWell":
+			var well := SphereMesh.new()
+			well.radius = radius
+			well.height = radius * 2.0
+			node.mesh = well
+			var glass := StandardMaterial3D.new()
+			glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			glass.albedo_color = Color(_pal["bumper"], 0.16)
+			glass.emission_enabled = true
+			glass.emission = _pal["bumper"]
+			glass.emission_energy_multiplier = 0.5
+			node.material_override = glass
+		"barrel":
+			node.mesh = _cylinder(0.6, 1.2)
+			node.material_override = _emissive(Color("#FF8A2B"), 1.8)
+		"shieldWall", "movingPlatform":
+			var slab := BoxMesh.new()
+			slab.size = Vector3(float(obstacle["width"]), 0.9, 0.5)
+			node.mesh = slab
+			node.material_override = _emissive(_pal["bumper"], 0.9)
+		"pillar":
+			node.mesh = _cylinder(radius, 3.0)
+			var stone := StandardMaterial3D.new()
+			stone.albedo_color = _pal["grid"].darkened(0.4)
+			stone.roughness = 0.9
+			node.material_override = stone
+		_:
+			var ball := SphereMesh.new()
+			ball.radius = radius
+			ball.height = radius * 2.0
+			node.mesh = ball
+			node.material_override = _emissive(_pal["bumper"], 2.0)
+	return node
+
+
+## Only position and visibility change per frame; meshes never rebuild.
+func _render_obstacles() -> void:
+	if _sim == null or _sim.field == null:
+		return
+	var list: Array = _sim.field.obstacles
+	for i in range(mini(list.size(), _obstacle_nodes.size())):
+		var obstacle: Dictionary = list[i]
+		var node := _obstacle_nodes[i]
+		node.visible = bool(obstacle["alive"])
+		if node.visible:
+			node.position = Vector3(float(obstacle["x"]), 0.5, -float(obstacle["z"]))
+
+
+func _render_boss() -> void:
+	if _boss == null:
+		return
+	_boss.visible = _sim.boss_active
+	if _boss.visible:
+		_boss.position = Vector3(_sim.boss_pos.x, 1.4, -_sim.boss_pos.y)
+
+
+func _cylinder(radius: float, height: float) -> Mesh:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = radius
+	mesh.bottom_radius = radius
+	mesh.height = height
+	return mesh
 
 
 func _render_enemies() -> void:
