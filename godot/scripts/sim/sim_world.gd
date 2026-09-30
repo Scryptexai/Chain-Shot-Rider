@@ -141,6 +141,18 @@ var _boss_hp_scale := 1.0
 var _enemy_types: Array = []
 var _wave_sizes: Array = []
 var _spawn_interval := 0.5
+# Seconds each wave has to fully deploy. Divided across that wave's enemy
+# count to get the trickle rate, so later waves arrive faster, not just in
+# greater number. The prototype spawns a wave in one burst instead; that is
+# why a replay does not carry across the two implementations.
+var _spawn_windows: Array = []
+var _formation_kinds: Array = []
+var _formation_columns := Vector2(5.0, 12.0)
+var _formation_spacing := 0.8
+var _formation_slots := PackedVector2Array()
+var _formation_index := 0
+var _formation_anchor_x := 0.0
+var _wave_timer := 0.0
 var _spawn_timer := 0.0
 var _wave_remaining := 0
 var _wave_cooldown := 0.0
@@ -177,6 +189,12 @@ func set_input(pointer_x: float, pointer_down: bool, tap: bool, drag_dx: float) 
 func tick() -> void:
 	if state != State.PLAYING:
 		return
+	# Events describe the tick that just ran, so the sim clears them itself.
+	# Leaving that to the consumer cost us twice: a reader that ran late saw an
+	# empty list, and a reader that never ran let the array grow for the whole
+	# session. Now a slow frame simply accumulates several ticks' events, which
+	# is what a renderer wants anyway.
+	events.clear()
 	_consume_input()
 	_tick_squad()
 	_tick_gates()
@@ -201,66 +219,97 @@ func snapshot_hash() -> int:
 	return acc & 0x7FFFFFFF
 
 
+## Reads one number from a config dictionary without trusting its type.
+##
+## This exists because of a real failure: `spawnInterval` changed from a scalar
+## to a per-wave array, `float()` threw, and the rest of _read_config never
+## ran — silently restoring bossHpScale to 1.0 and stalling three of five
+## stages. A bad key should cost one value, not every value after it.
+func _num(source: Dictionary, key: String, fallback: float) -> float:
+	var value: Variant = source.get(key, fallback)
+	if value is float or value is int:
+		return float(value)
+	push_warning(
+		"config '%s' is %s, not a number; using %s" % [key, type_string(typeof(value)), fallback]
+	)
+	return fallback
+
+
+## Same guard, for a numeric entry inside an array.
+func _num_at(source: Array, index: int, fallback: float) -> float:
+	if index < 0 or index >= source.size():
+		return fallback
+	var value: Variant = source[index]
+	if value is float or value is int:
+		return float(value)
+	return fallback
+
+
 func _read_config() -> void:
 	var arena: Dictionary = _cfg.get("arena", {})
-	_x_min = float(arena.get("xMin", -10.0))
-	_x_max = float(arena.get("xMax", 10.0))
-	_z_max = float(arena.get("zMax", 40.0))
-	_defense_z = float(arena.get("defenseLineZ", 5.0))
+	_x_min = _num(arena, "xMin", -10.0)
+	_x_max = _num(arena, "xMax", 10.0)
+	_z_max = _num(arena, "zMax", 40.0)
+	_defense_z = _num(arena, "defenseLineZ", 5.0)
 
 	var squad: Dictionary = _cfg.get("squad", {})
 	troops = int(squad.get("startTroops", 5)) + int(_upgrade("startTroops", 0.0))
 	_max_troops = int(squad.get("maxTroops", 60))
-	_move_speed = float(squad.get("moveSpeedMax", 14.0)) * _upgrade_mul("moveSpeedMul")
-	_move_smoothing = float(squad.get("moveSmoothing", 18.0))
-	_body_radius = float(squad.get("bodyRadius", 0.30))
+	_move_speed = _num(squad, "moveSpeedMax", 14.0) * _upgrade_mul("moveSpeedMul")
+	_move_smoothing = _num(squad, "moveSmoothing", 18.0)
+	_body_radius = _num(squad, "bodyRadius", 0.30)
 	_troop_loss_per_leak = int(squad.get("troopLossPerLeak", 3))
 	_respawn_troops = int(squad.get("respawnTroops", 3))
 
 	var auto: Dictionary = squad.get("autoFire", {})
-	_auto_rate_base = float(auto.get("baseRatePerSec", 2.4))
-	_auto_rate_per_troop = float(auto.get("ratePerTroop", 0.12))
-	_auto_rate_max = float(auto.get("maxRatePerSec", 9.0))
-	_auto_damage = float(auto.get("damage", 4.0)) * _upgrade_mul("autoDamageMul")
-	_auto_speed = float(auto.get("projectileSpeed", 34.0))
-	_auto_radius = float(auto.get("projectileRadius", 0.12))
-	_auto_spread = float(auto.get("spreadDeg", 2.5))
+	_auto_rate_base = _num(auto, "baseRatePerSec", 2.4)
+	_auto_rate_per_troop = _num(auto, "ratePerTroop", 0.12)
+	_auto_rate_max = _num(auto, "maxRatePerSec", 9.0)
+	_auto_damage = _num(auto, "damage", 4.0) * _upgrade_mul("autoDamageMul")
+	_auto_speed = _num(auto, "projectileSpeed", 34.0)
+	_auto_radius = _num(auto, "projectileRadius", 0.12)
+	_auto_spread = _num(auto, "spreadDeg", 2.5)
 	# Auto-fire always travels up, so it can never satisfy a boss vulnerability
 	# rule like "only from behind". Without chip damage that is a stalemate,
 	# and a stalemate wastes the player's time worse than a loss does.
-	_boss_chip_factor = float(auto.get("bossChipFactor", 0.35))
+	_boss_chip_factor = _num(auto, "bossChipFactor", 0.35)
 
 	var chain: Dictionary = squad.get("chainShot", {})
-	_chain_charge_seconds = float(chain.get("chargeSeconds", 4.0))
-	_chain_charge_per_kill = float(chain.get("chargePerKill", 0.12))
+	_chain_charge_seconds = _num(chain, "chargeSeconds", 4.0)
+	_chain_charge_per_kill = _num(chain, "chargePerKill", 0.12)
 	_chain_max_charges = int(chain.get("maxCharges", 2))
 
 	var bullet: Dictionary = _cfg.get("bullet", {})
-	_chain_base_speed = float(bullet.get("baseSpeed", 25.0))
-	_chain_radius = float(bullet.get("radius", 0.26))
+	_chain_base_speed = _num(bullet, "baseSpeed", 25.0)
+	_chain_radius = _num(bullet, "radius", 0.26)
 	_chain_base_bounces = int(bullet.get("maxBounce", 15)) + int(_upgrade("bounceBudget", 0.0))
-	_chain_damage_base = float(bullet.get("damageBase", 10.0))
-	_chain_damage_per_bounce = float(bullet.get("damagePerBounce", 1.15))
-	_chain_speed_per_bounce = float(bullet.get("speedPerBounce", 1.02))
-	_chain_speed_cap = float(bullet.get("speedMultiplierCap", 1.5))
-	_chain_steer_per_swipe = float(bullet.get("steerAnglePerSwipe", 15.0))
-	_chain_steer_max_rate = float(bullet.get("steerMaxAnglePerSecond", 90.0))
-	_chain_steer_duration = float(bullet.get("steerMeterDuration", 3.0))
+	_chain_damage_base = _num(bullet, "damageBase", 10.0)
+	_chain_damage_per_bounce = _num(bullet, "damagePerBounce", 1.15)
+	_chain_speed_per_bounce = _num(bullet, "speedPerBounce", 1.02)
+	_chain_speed_cap = _num(bullet, "speedMultiplierCap", 1.5)
+	_chain_steer_per_swipe = _num(bullet, "steerAnglePerSwipe", 15.0)
+	_chain_steer_max_rate = _num(bullet, "steerMaxAnglePerSecond", 90.0)
+	_chain_steer_duration = _num(bullet, "steerMeterDuration", 3.0)
 
 	_read_gate_config()
 
 	_enemy_types = _cfg.get("enemyTypes", [])
 	var spawn: Dictionary = _cfg.get("spawn", {})
 	_wave_sizes = spawn.get("enemiesPerWave", [30, 50, 80, 120, 200])
-	_spawn_interval = float(spawn.get("spawnInterval", 0.5))
+	_spawn_windows = spawn.get("spawnInterval", [10.0, 12.0, 15.0, 18.0, 20.0])
+	_formation_kinds = spawn.get("formation", ["rect"])
+	var columns: Array = spawn.get("columnsRange", [5, 12])
+	if columns.size() >= 2:
+		_formation_columns = Vector2(_num_at(columns, 0, 5.0), _num_at(columns, 1, 12.0))
+	_formation_spacing = _num(spawn, "spacing", 0.8)
 
 	var balance: Dictionary = _cfg.get("balance", {})
 	# The damage model changed when auto-fire became the primary DPS, so boss
 	# HP is scaled by one measured lever instead of being re-tuned per boss.
-	_boss_hp_scale = float(balance.get("bossHpScale", 1.0))
+	_boss_hp_scale = _num(balance, "bossHpScale", 1.0)
 
 	var meta: Dictionary = _cfg.get("meta", {})
-	_difficulty = 1.0 + float(meta.get("difficultyPerStage", 0.12)) * float(stage_index)
+	_difficulty = 1.0 + _num(meta, "difficultyPerStage", 0.12) * float(stage_index)
 
 	var scoring: Dictionary = _cfg.get("scoring", {})
 	_combo_milestones = scoring.get("comboMilestones", [10, 20, 50, 100])
@@ -272,22 +321,22 @@ func _read_config() -> void:
 func _read_gate_config() -> void:
 	var gate_cfg: Dictionary = _cfg.get("gates", {})
 	_gate_enabled = bool(gate_cfg.get("enabled", true))
-	_gate_spawn_z = float(gate_cfg.get("spawnZ", 38.0))
-	_gate_speed = float(gate_cfg.get("descendSpeed", 2.4))
-	_gate_half_width = float(gate_cfg.get("halfWidth", 4.7))
-	_gate_center_gap = float(gate_cfg.get("centerGapX", 0.6))
-	_gate_height = float(gate_cfg.get("height", 0.9))
-	_gate_next_at = float(gate_cfg.get("firstAtSeconds", 6.0))
-	_gate_interval = float(gate_cfg.get("intervalSeconds", 11.0))
-	_gate_jitter = float(gate_cfg.get("intervalJitter", 2.0))
-	_gate_negative_chance = float(gate_cfg.get("negativeSideChance", 0.45))
+	_gate_spawn_z = _num(gate_cfg, "spawnZ", 38.0)
+	_gate_speed = _num(gate_cfg, "descendSpeed", 2.4)
+	_gate_half_width = _num(gate_cfg, "halfWidth", 4.7)
+	_gate_center_gap = _num(gate_cfg, "centerGapX", 0.6)
+	_gate_height = _num(gate_cfg, "height", 0.9)
+	_gate_next_at = _num(gate_cfg, "firstAtSeconds", 6.0)
+	_gate_interval = _num(gate_cfg, "intervalSeconds", 11.0)
+	_gate_jitter = _num(gate_cfg, "intervalJitter", 2.0)
+	_gate_negative_chance = _num(gate_cfg, "negativeSideChance", 0.45)
 	_gate_negative_chance *= _upgrade_mul("negativeSideChance")
 	_gate_ops = gate_cfg.get("squadOps", [])
 	var effects: Dictionary = gate_cfg.get("bulletEffects", {})
 	_gate_bounce_cap = int(effects.get("bounceBudgetCap", 50))
-	_gate_damage_cap = float(effects.get("damageMulCap", 4.0))
+	_gate_damage_cap = _num(effects, "damageMulCap", 4.0)
 	_gate_sub_loss = int(effects.get("subBounceLoss", 4))
-	_gate_div_damage = float(effects.get("divDamageMul", 0.6))
+	_gate_div_damage = _num(effects, "divDamageMul", 0.6)
 
 
 func _reserve_arrays() -> void:
@@ -442,48 +491,67 @@ func _tick_chain_bullet() -> void:
 		_advance_chain(step_delta)
 
 
+## Moves the chain bullet, resolving every contact inside the step.
+##
+## The earlier version returned after the first contact, throwing away the
+## unused part of the step. In a crowd that meant the bullet barely advanced:
+## it spent its twelve-second life grinding forward instead of ricocheting,
+## and a fifteen-bounce budget was never spent. Now the leftover distance is
+## carried into the next iteration, so one tick can pass through several
+## enemies and still bounce off the wall behind them.
 func _advance_chain(distance: float) -> void:
-	var motion := chain_dir * distance
-	var wall: Dictionary = Ricochet.sweep_side_walls(
-		chain_pos, motion, _chain_radius, _x_min, _x_max
-	)
-	var top: Dictionary = Ricochet.sweep_top_wall(chain_pos, motion, _chain_radius, _z_max)
-	var enemy_hit := _sweep_chain_enemies(motion)
-	var boss_hit := _sweep_chain_boss(motion)
+	var remaining := distance
+	# Bounded so a bullet wedged in a corner cannot spin here forever; the
+	# rest of its travel is dropped that tick, which is survivable.
+	var guard := 0
+	while remaining > 0.0001 and chain_active and guard < 8:
+		guard += 1
+		var motion := chain_dir * remaining
+		var wall: Dictionary = Ricochet.sweep_side_walls(
+			chain_pos, motion, _chain_radius, _x_min, _x_max
+		)
+		var top: Dictionary = Ricochet.sweep_top_wall(chain_pos, motion, _chain_radius, _z_max)
+		var enemy_hit := _sweep_chain_enemies(motion)
+		var boss_hit := _sweep_chain_boss(motion)
 
-	var best_t := 2.0
-	var kind := ""
-	if wall.get("hit", false):
-		best_t = float(wall["t"])
-		kind = "wall"
-	if top.get("hit", false) and float(top["t"]) < best_t:
-		best_t = float(top["t"])
-		kind = "top"
-	if enemy_hit.get("hit", false) and float(enemy_hit["t"]) < best_t:
-		best_t = float(enemy_hit["t"])
-		kind = "enemy"
-	if boss_hit.get("hit", false) and float(boss_hit["t"]) < best_t:
-		best_t = float(boss_hit["t"])
-		kind = "boss"
+		var best_t := 2.0
+		var kind := ""
+		if wall.get("hit", false):
+			best_t = float(wall["t"])
+			kind = "wall"
+		if top.get("hit", false) and float(top["t"]) < best_t:
+			best_t = float(top["t"])
+			kind = "top"
+		if enemy_hit.get("hit", false) and float(enemy_hit["t"]) < best_t:
+			best_t = float(enemy_hit["t"])
+			kind = "enemy"
+		if boss_hit.get("hit", false) and float(boss_hit["t"]) < best_t:
+			best_t = float(boss_hit["t"])
+			kind = "boss"
 
-	if kind == "":
-		chain_pos += motion
-		_chain_gate_and_bounds()
-		return
+		if kind == "":
+			chain_pos += motion
+			_chain_gate_and_bounds()
+			return
 
-	chain_pos += motion * best_t
-	if kind == "enemy":
-		_resolve_chain_enemy(int(enemy_hit["index"]))
-		return
-	if kind == "boss":
-		# Full damage, unlike auto-fire chip: landing a ricochet on the boss is
-		# the skill play, so it has to be worth far more than holding still.
-		boss_hp -= _chain_damage_base * chain_damage_mul * 3.0
-		events.append({"type": "boss_hit", "x": chain_pos.x, "z": chain_pos.y})
-		_bounce_chain(boss_hit["normal"])
-		return
-	var normal: Vector2 = top["normal"] if kind == "top" else wall["normal"]
-	_bounce_chain(normal)
+		chain_pos += motion * best_t
+		remaining -= remaining * best_t
+
+		if kind == "enemy":
+			_resolve_chain_enemy(int(enemy_hit["index"]))
+			# The nudge past the body is travel too, so charge it to the step.
+			remaining = maxf(remaining - (_chain_radius + 0.05), 0.0)
+			continue
+		if kind == "boss":
+			# Full damage, unlike auto-fire chip: landing a ricochet on the
+			# boss is the skill play, so it has to be worth far more than
+			# holding still.
+			boss_hp -= _chain_damage_base * chain_damage_mul * 3.0
+			events.append({"type": "boss_hit", "x": chain_pos.x, "z": chain_pos.y})
+			_bounce_chain(boss_hit["normal"])
+			continue
+		var normal: Vector2 = top["normal"] if kind == "top" else wall["normal"]
+		_bounce_chain(normal)
 
 
 func _sweep_chain_enemies(motion: Vector2) -> Dictionary:
@@ -706,6 +774,14 @@ func _lose_life() -> void:
 		events.append({"type": "defeat"})
 
 
+## Waves run on a clock, not on a clear.
+##
+## Waiting for an empty arena was the original rule, and headless runs sat at
+## wave four for five minutes: auto-fire caps at nine shots a second, so a
+## hundred-and-twenty enemy wave simply outlasts it. The tuned prototype
+## advances on spawnInterval regardless of what is left alive, which is also
+## what makes the pressure curve rise. Clearing early is still rewarded — it
+## cuts the remainder of the timer short.
 func _tick_waves() -> void:
 	if boss_active:
 		return
@@ -714,11 +790,11 @@ func _tick_waves() -> void:
 		if _spawn_timer <= 0.0:
 			_spawn_timer = _spawn_interval
 			_spawn_enemy()
-		return
-	if enemy_count > 0:
-		return
-	_wave_cooldown -= FIXED_DELTA
-	if _wave_cooldown > 0.0:
+	_wave_timer -= FIXED_DELTA
+	# A wave fully spawned and fully killed hands the time back to the player.
+	if _wave_remaining <= 0 and enemy_count == 0:
+		_wave_timer = minf(_wave_timer, 1.6)
+	if _wave_timer > 0.0:
 		return
 	wave_index += 1
 	if wave_index >= _wave_sizes.size():
@@ -731,6 +807,12 @@ func _start_wave() -> void:
 	if wave_index >= _wave_sizes.size():
 		return
 	_wave_remaining = int(_wave_sizes[wave_index])
+	var window := 12.0
+	if not _spawn_windows.is_empty():
+		window = _num_at(_spawn_windows, mini(wave_index, _spawn_windows.size() - 1), 12.0)
+	_spawn_interval = window / maxf(float(_wave_remaining), 1.0)
+	_wave_timer = window
+	_build_formation(_wave_remaining)
 	_spawn_timer = 0.0
 	_wave_cooldown = 2.0
 	events.append({"type": "wave_start", "wave": wave_index + 1})
@@ -740,13 +822,111 @@ func _spawn_enemy() -> void:
 	if enemy_count >= MAX_ENEMIES or _wave_remaining <= 0:
 		return
 	var type_index := _pick_enemy_type()
+	var slot := _next_formation_slot()
 	var margin := 1.0
-	enemy_x[enemy_count] = _rng.range_float(_x_min + margin, _x_max - margin)
-	enemy_z[enemy_count] = _rng.range_float(_z_max - 6.0, _z_max)
+	enemy_x[enemy_count] = clampf(_formation_anchor_x + slot.x, _x_min + margin, _x_max - margin)
+	enemy_z[enemy_count] = _z_max + slot.y
 	enemy_hp[enemy_count] = _enemy_hp(type_index) * _difficulty
 	enemy_type[enemy_count] = type_index
 	enemy_count += 1
 	_wave_remaining -= 1
+
+
+## Lays out one wave in a shape, instead of scattering it across the arena.
+##
+## This matters more than it looks. The squad fires straight up, so a crowd
+## spread evenly over eighteen units can never be engaged: measured headlessly,
+## random placement produced twelve kills in sixty seconds and lost every
+## stage in wave one. A formation concentrates the crowd into columns the
+## squad can actually meet, and turns "where do I stand" into a real decision.
+## Shapes and counts come from spawn.formation / columnsRange / spacing, the
+## same keys the web prototype uses.
+func _build_formation(count: int) -> void:
+	_formation_slots = PackedVector2Array()
+	_formation_index = 0
+	var kind := "rect"
+	if not _formation_kinds.is_empty():
+		var at := mini(wave_index, _formation_kinds.size() - 1)
+		kind = String(_formation_kinds[at])
+	var columns := _rng.range_int(int(_formation_columns.x), int(_formation_columns.y) + 1)
+	var spacing := _formation_spacing
+	var half_w := (_x_max - _x_min) * 0.5 - 1.5
+
+	match kind:
+		"vshape":
+			_formation_v(count, spacing, half_w)
+		"diamond":
+			_formation_diamond(count, spacing, half_w)
+		"circle":
+			_formation_circle(count, spacing, half_w)
+		_:
+			_formation_rect(count, columns, spacing)
+
+	# Anchor the shape somewhere the whole crowd still fits inside the walls.
+	var widest := 0.0
+	for slot in _formation_slots:
+		widest = maxf(widest, absf(slot.x))
+	var limit := maxf(half_w - widest, 0.0)
+	_formation_anchor_x = _rng.range_float(-limit, limit)
+
+
+func _formation_rect(count: int, columns: int, spacing: float) -> void:
+	var half := float(columns - 1) * spacing * 0.5
+	for i in range(count):
+		_formation_slots.append(
+			Vector2(float(i % columns) * spacing - half, float(i / columns) * spacing)
+		)
+
+
+func _formation_v(count: int, spacing: float, half_w: float) -> void:
+	var row := 0
+	while _formation_slots.size() < count and row < 400:
+		var x := minf(float(row) * spacing * 0.6, half_w)
+		var z := float(row) * spacing * 0.8
+		_formation_slots.append(Vector2(-x, z))
+		if x > 0.01 and _formation_slots.size() < count:
+			_formation_slots.append(Vector2(x, z))
+		row += 1
+
+
+func _formation_diamond(count: int, spacing: float, half_w: float) -> void:
+	var widest := int(sqrt(float(count)))
+	var total := widest * 2
+	var row := 0
+	while _formation_slots.size() < count and row <= total:
+		var n := maxi(1, (row + 1) if row <= widest else (total - row + 1))
+		var half := minf(float(n - 1) * spacing * 0.5, half_w)
+		for c in range(n):
+			if _formation_slots.size() >= count:
+				break
+			var x := 0.0 if n == 1 else -half + 2.0 * half * float(c) / float(n - 1)
+			_formation_slots.append(Vector2(x, float(row) * spacing * 0.9))
+		row += 1
+	while _formation_slots.size() < count:
+		var c := _formation_slots.size() % 6
+		_formation_slots.append(Vector2((float(c) - 2.5) * spacing, float(row) * spacing * 0.9))
+
+
+func _formation_circle(count: int, spacing: float, half_w: float) -> void:
+	var ring := 1
+	while _formation_slots.size() < count and ring <= 60:
+		var r := minf(float(ring) * spacing * 1.1, half_w)
+		var per := maxi(6, int(TAU * r / spacing))
+		for i in range(per):
+			if _formation_slots.size() >= count:
+				break
+			var a := float(i) / float(per) * TAU
+			_formation_slots.append(Vector2(cos(a) * r, sin(a) * r + r))
+		ring += 1
+
+
+## Slots are consumed in order so a wave keeps its shape while it trickles in.
+func _next_formation_slot() -> Vector2:
+	if _formation_slots.is_empty():
+		return Vector2(_rng.range_float(-6.0, 6.0), _rng.range_float(0.0, 6.0))
+	var slot := _formation_slots[_formation_index % _formation_slots.size()]
+	_formation_index += 1
+	return slot
 
 
 func _pick_enemy_type() -> int:

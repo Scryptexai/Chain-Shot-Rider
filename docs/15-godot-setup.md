@@ -28,7 +28,7 @@ Setelah mengubah `Config/arena_config.json`, jalankan `python3 tools/sync_config
 
 Godot dipilih karena open source, tanpa lisensi, dan punya binary headless yang bisa menjalankan game dari CLI. Alasan terakhir itu yang paling berharga: engine yang bisa dijalankan tanpa GUI berarti balance dan determinisme bisa diuji otomatis.
 
-**Batas jujurnya:** di lingkungan tempat kode ini ditulis, binary Godot tidak bisa diunduh — hanya npm dan PyPI yang lolos jaringan, sedangkan GitHub release assets dan godotengine.org diblokir. Jadi project ini **belum pernah dijalankan**. Yang sudah dilakukan:
+**Engine kini terpasang dan project sudah benar-benar dijalankan.** Unduhan otomatis tetap diblokir di sandbox ini (hanya npm dan PyPI yang lolos; GitHub release assets dan godotengine.org tertutup), jadi zip `Godot_v4.3-stable_linux.x86_64.zip` dipasok manual ke root repo dan `tools/install_godot.sh` memungutnya dari sana. Riwayat pemeriksaan statis:
 
 | Pemeriksaan | Alat | Hasil |
 |---|---|---|
@@ -41,9 +41,20 @@ Godot dipilih karena open source, tanpa lisensi, dan punya binary headless yang 
 | Ekonomi gate | Monte Carlo 500 run × 4 skill | lihat [doc 14](14-lastwar-atm.md) |
 | Loop penuh (prototipe web) | harness 6 seed × 5 varian | median 143 s, 0 buntu, determinisme lulus |
 
-Ini lebih kuat daripada yang bisa dicapai pada versi Unity sebelumnya, tapi tetap **bukan** pengganti menjalankannya. Harapkan penyesuaian pada percobaan pertama, terutama pembingkaian kamera dan skala HUD.
+Semua pemeriksaan itu lolos — dan tetap **melewatkan empat bug** yang langsung muncul pada detik pertama engine dijalankan. Catatan ini layak disimpan: analisis statis pada GDScript memberi rasa aman yang jauh melebihi jangkauannya.
 
 Tiga bug ditemukan oleh pemeriksaan silang itu, bukan oleh linter, dan sudah diperbaiki: `GameConfig.dict("")` mengembalikan kosong sehingga simulasi akan lahir tanpa angka sama sekali; sisi kanan gate memakai polaritas yang salah sehingga kedua pintu bisa merugikan; dan steering peluru tidak dibatasi laju sehingga drag cepat memutar 900°/detik, sepuluh kali batas spec.
+
+### Yang hanya terlihat setelah engine dijalankan
+
+| Bug | Gejala | Sebab |
+|---|---|---|
+| `spawnInterval` dibaca sebagai skalar | `Invalid call. Nonexistent 'float' constructor` | Nilainya array per-wave. Error itu **membatalkan sisa `_read_config`**, diam-diam mengembalikan `bossHpScale` ke 1.0 (bukan 0.4), `difficultyPerStage` ke 0, dan mengosongkan `comboMilestones`. Tiga dari lima stage jadi buntu. |
+| Crowd disebar acak | 12 kill dalam 60 detik; kalah di wave 1, kelima varian | Spawner mengabaikan `spawn.formation`/`columnsRange`/`spacing`. Squad menembak lurus ke atas, jadi kerumunan selebar 18 unit mustahil dijangkau. |
+| `_advance_chain` membuang sisa jarak | Peluru merayap di kerumunan; 15 pantulan tak pernah terpakai | `return` setelah kontak pertama, sisa `(1−t)` langkah hilang. |
+| Wave menunggu arena kosong | Menggantung di wave 4 selama 300 detik, nyawa masih 3 | Prototipe yang sudah di-tuning memajukan wave dengan timer `spawnInterval`. Auto-fire mentok 9 tembakan/detik, jadi wave 120 musuh selalu mengalahkan jam. |
+
+Dua perbaikan struktural menyertainya. `SimWorld.tick()` kini **membersihkan `events` sendiri**; sebelumnya konsumen yang wajib melakukannya, dan konsumen yang lupa membuat array tumbuh sepanjang sesi (harness headless pertama menghitung 33.375 "kill" dari 12 kill nyata). Lalu semua pembacaan angka config lewat `_num()` yang fail-soft, supaya satu kunci bertipe salah merugikan satu nilai saja, bukan setiap nilai sesudahnya.
 
 ---
 
@@ -63,11 +74,31 @@ Skrip installer sengaja berbeda dari one-liner biasa dalam dua hal, keduanya dip
 1. **Ia memverifikasi apa yang diunduh.** Jaringan yang diblokir biasanya menjawab dengan halaman HTML error, dan `unzip` pada berkas itu gagal tiga langkah kemudian dengan pesan yang membingungkan. Di sini magic bytes diperiksa sebelum berkas dipercaya.
 2. **Ia selalu memasang gdtoolkit.** Bagian itu tetap berhasil dari PyPI meski unduhan engine diblokir, dan itulah yang memungkinkan validasi GDScript tanpa engine sama sekali.
 
-Kalau semua mirror tidak terjangkau, skrip keluar dengan kode 3 dan menjelaskan apa yang masih bisa dipakai — bukan gagal diam-diam. Set `GODOT_MIRROR` untuk mirror sendiri, atau letakkan zip-nya di `~/.cache/godot/`.
+Ditambah satu hal ketiga setelah engine benar-benar dipasok: **zip lokal diperiksa sebelum jaringan disentuh.** Skrip memungut `Godot_v<versi>_linux.x86_64.zip` dari root repo, cwd, `~/.cache/godot/`, atau `~/Downloads/`. Verifikasi tipe berkas juga tidak lagi memanggil `file` — perintah itu tidak ada di image ramping ini, sehingga zip yang sah pun akan ditolak; sekarang magic bytes `50 4B 03 04` dibaca langsung.
+
+Ekstraksi selalu menuju `~/.cache/godot/`, tidak pernah ke repo: binary-nya 110 MB. Zip 50 MB-nya sendiri sengaja ikut di-commit supaya sandbox offline bisa bootstrap.
+
+Kalau semua mirror tidak terjangkau, skrip keluar dengan kode 3 dan menjelaskan apa yang masih bisa dipakai — bukan gagal diam-diam. Set `GODOT_MIRROR` untuk mirror sendiri.
 
 `tools/validate_godot.py` memeriksa hal-hal yang berada di luar jangkauan linter: setiap jalur `GameConfig.num("...")` benar-benar ada di JSON, setiap simbol lintas file terdefinisi, setiap `res://` di scene dan autoload menunjuk berkas nyata, dan salinan config Godot tidak basi. Tiga bug nyata ditemukan justru oleh pemeriksaan ini, bukan oleh `gdlint`.
 
-Catatan sandbox: `.cache` tidak ikut snapshot, jadi tiap sesi baru perlu menjalankan ulang installer. Itu murah — gdtoolkit terpasang dalam beberapa detik.
+### Menjalankan engine
+
+```bash
+godot --headless --path godot/ --import   # bangun cache impor
+godot --headless --path godot/ --quit     # boot main.tscn sekali
+godot --headless --path godot/ --script res://tests/sim_headless.gd
+godot --headless --path godot/ --script res://tests/sim_headless.gd -- --trace
+godot --headless --path godot/ --script res://tests/sim_headless.gd -- --determinism
+```
+
+`--check-only --script <file>` **tidak** bisa dipakai untuk memeriksa berkas yang menyentuh autoload: mode itu memuat skrip tanpa mendaftarkan autoload, jadi `GameConfig` dilaporkan sebagai "Identifier not found" pada lima berkas yang sebenarnya sehat. Boot project penuh adalah pemeriksaan kompilasi yang sah.
+
+`godot/tests/sim_headless.gd` adalah pasangan Godot dari `tools/sim_test.js`: bot bermain lima stage, mencatat hasil, memeriksa invariant tiap tick, lalu membandingkan hash dua run identik sepanjang 7200 tick × 5 varian. Keluar dengan kode 1 bila ada yang gagal, jadi CI bisa menggantung padanya. Keduanya terpisah dengan sengaja — urutan tick-nya berbeda, jadi replay tidak lintas-engine.
+
+Satu pelajaran dari harness ini: **bot yang tidak menyetir peluru membuat harness berbohong.** Chain shot lepas lurus ke atas; tanpa input ia naik, memantul atap, turun lurus, dan keluar — 2 dari 15 pantulan. Bot pertama mengukur permainan yang tidak ada pemainnya. Versi kedua juga keliru dengan cara lain: ia parkir di x=±3 selama gerbang turun, dan karena gerbang hampir selalu ada di layar, ia berhenti menembak selama 45 detik beruntun. Bot sekarang memilih **sisi** gerbang lalu tetap melacak kerumunan di dalam sisi itu.
+
+Catatan sandbox: `.cache` tidak ikut snapshot, jadi tiap sesi baru perlu menjalankan ulang installer. Itu murah — zip-nya sudah ada di repo, ekstraksi ~7 detik.
 
 ---
 
@@ -87,7 +118,7 @@ Catatan sandbox: `.cache` tidak ikut snapshot, jadi tiap sesi baru perlu menjala
 
 ## Yang belum ada
 
-- **Belum dijalankan** (lihat di atas). Ini item nomor satu.
+- **Balance Godot belum sampai target.** Ini item nomor satu sekarang. Keadaan terukur: 0 buntu, semua run mencapai wave 4–5, determinisme lulus — tapi rata-rata 55 detik, di bawah jendela 60–180 detik, dan bot belum pernah menang. Throughput kill Godot (~100/run) masih jauh di bawah prototipe (~455/run) dengan config yang sama, jadi masih ada celah paritas yang perlu diukur, bukan ditebak.
 - **Barrel**: config, tabrakan, dan konstanta sudah ada; spawner-nya belum disambung.
 - **Layar non-gameplay** (menu, pause, result) sudah ada di `scripts/ui/screens.gd`, bertema per varian;
   yang belum: pemilih arena 5 kartu, slider audio, count-up tween baris result.

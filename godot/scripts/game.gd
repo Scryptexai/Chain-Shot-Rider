@@ -108,13 +108,13 @@ func _physics_process(_delta: float) -> void:
 func _process(_delta: float) -> void:
 	if _sim == null:
 		return
-	# HUD before view: the HUD is the only reader of sim events, and they are
-	# cleared at the end of the frame they were produced in.
+	# Order is free here: SimWorld.tick() owns the event buffer, so both
+	# readers see the same list no matter which one runs first, and a frame
+	# that spans several ticks sees all of their events.
 	if _hud.has_method("render_frame"):
 		_hud.call("render_frame")
 	if _view.has_method("render_frame"):
 		_view.call("render_frame")
-	_sim.events.clear()
 
 
 func _unhandled_input(event: InputEvent) -> void:

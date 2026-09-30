@@ -6,10 +6,14 @@
 # Two things this script does differently from the usual one-liner, both
 # learned the hard way in a locked-down sandbox:
 #
-#   1. It verifies what it downloaded. A blocked network usually answers with
-#      an HTML error page, and `unzip` on that produces a confusing failure
-#      three steps later. Here the file is checked before it is trusted.
-#   2. It always installs the static toolchain (gdtoolkit), because that part
+#   1. It verifies what it downloaded by reading the magic bytes, not by
+#      calling `file` (which many slim images do not ship) and not by trusting
+#      curl's exit code. A blocked proxy answers 200 with an HTML error page,
+#      and `unzip` on that fails three confusing steps later.
+#   2. It looks for a zip you supplied by hand BEFORE touching the network,
+#      so an offline sandbox works as long as the archive is somewhere obvious
+#      (repo root, cwd, ~/Downloads, or the cache dir).
+#   3. It always installs the static toolchain (gdtoolkit), because that part
 #      works from PyPI even when engine downloads are blocked, and it is what
 #      lets you validate GDScript without the engine at all.
 #
@@ -28,6 +32,22 @@ mkdir -p "$BIN_DIR" "$CACHE"
 
 log() { printf '  %s\n' "$*"; }
 
+# A zip starts with the bytes 50 4B 03 04. `file` is absent on slim images and
+# curl reports success for a proxy's HTML error page, so read the bytes.
+is_zip() {
+  [ -s "$1" ] || return 1
+  [ "$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')" = "504b0304" ]
+}
+
+# Unpacks an archive into the cache and links it onto PATH as `godot`.
+install_from_zip() {
+  local zip="$1"
+  unzip -oq "$zip" -d "$CACHE" || return 1
+  chmod +x "$CACHE/Godot_v${VERSION}_${ARCH}" || return 1
+  ln -sf "$CACHE/Godot_v${VERSION}_${ARCH}" "$BIN_DIR/godot" || return 1
+  log "installed from $zip"
+}
+
 # --- 1. already present? ----------------------------------------------------
 if command -v godot >/dev/null 2>&1; then
   log "godot already installed: $(godot --version 2>/dev/null | head -1)"
@@ -36,7 +56,23 @@ else
   ENGINE_OK=0
 fi
 
-# --- 2. try to fetch the engine --------------------------------------------
+# --- 2. a zip supplied by hand beats any download ---------------------------
+# Extraction targets the cache, never the repo: the binary is ~110 MB and has
+# no business in version control or in a diff.
+if [ "$ENGINE_OK" -eq 0 ]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  for candidate in "$CACHE/$ZIP" "$REPO_ROOT/$ZIP" "$PWD/$ZIP" "$HOME/Downloads/$ZIP"; do
+    [ -f "$candidate" ] || continue
+    if is_zip "$candidate"; then
+      echo "Found a local Godot archive, skipping download."
+      install_from_zip "$candidate" && ENGINE_OK=1 && break
+    else
+      log "$candidate is not a zip archive; ignoring"
+    fi
+  done
+fi
+
+# --- 3. try to fetch the engine --------------------------------------------
 # Mirrors are tried in order. Add your own with GODOT_MIRROR=<base-url>.
 MIRRORS=(
   "${GODOT_MIRROR:-}"
@@ -50,13 +86,9 @@ if [ "$ENGINE_OK" -eq 0 ]; then
     [ -z "$base" ] && continue
     log "trying ${base}"
     if curl -sSL --fail --max-time 300 -o "$CACHE/$ZIP" "${base}/${ZIP}" 2>/dev/null; then
-      # A blocked proxy happily returns 200 with an HTML body. Check the magic
-      # bytes instead of believing the exit code.
-      if file "$CACHE/$ZIP" 2>/dev/null | grep -qi zip; then
+      if is_zip "$CACHE/$ZIP"; then
         log "downloaded $(du -h "$CACHE/$ZIP" | cut -f1)"
-        unzip -oq "$CACHE/$ZIP" -d "$CACHE" && \
-        chmod +x "$CACHE/Godot_v${VERSION}_${ARCH}" && \
-        ln -sf "$CACHE/Godot_v${VERSION}_${ARCH}" "$BIN_DIR/godot" && ENGINE_OK=1
+        install_from_zip "$CACHE/$ZIP" && ENGINE_OK=1
         break
       fi
       log "response was not a zip archive (blocked or redirected); discarding"
@@ -65,7 +97,7 @@ if [ "$ENGINE_OK" -eq 0 ]; then
   done
 fi
 
-# --- 3. static toolchain, always ------------------------------------------
+# --- 4. static toolchain, always ------------------------------------------
 # Works from PyPI even when engine downloads are blocked. gdparse catches
 # syntax errors, gdlint catches style and structure, gdformat normalises.
 if ! "$VENV/bin/gdparse" --help >/dev/null 2>&1; then
@@ -78,7 +110,7 @@ if "$VENV/bin/gdparse" --help >/dev/null 2>&1; then
   log "add to PATH:  export PATH=\"$VENV/bin:\$PATH\""
 fi
 
-# --- 4. report -------------------------------------------------------------
+# --- 5. report -------------------------------------------------------------
 echo
 if [ "$ENGINE_OK" -eq 1 ]; then
   echo "Engine ready. Useful commands:"
@@ -103,7 +135,10 @@ What still works without the engine:
 
 To get the engine here anyway, either set a reachable mirror:
   GODOT_MIRROR=https://your-host/godot bash tools/install_godot.sh
-or download the zip on your own machine and drop it in, then re-run:
+or download the zip on your own machine and drop it in, then re-run. Any of
+these locations is picked up automatically:
+  <repo root>/Godot_v4.3-stable_linux.x86_64.zip
   ~/.cache/godot/Godot_v4.3-stable_linux.x86_64.zip
+  ~/Downloads/Godot_v4.3-stable_linux.x86_64.zip
 MSG
 exit 3
