@@ -48,18 +48,53 @@ Repo ini berisi **paket desain + implementasi arena** lengkap: blueprint, style 
 
 ---
 
-## Prototipe Interaktif
+## Menjalankan MVP (Godot 4.3)
+
+MVP ada di `godot/` dan butuh **Godot 4.3 stable** edisi standar (bukan .NET).
+Versi ini mengikat: `project.godot` memakai `config_version=5`.
+
+```bash
+godot --path godot/ --editor     # sekali, biar aset ter-import
+godot --path godot/              # jalankan (F5 dari editor juga bisa)
+```
+
+Jendela terbuka 1080x1920 portrait; mouse berfungsi sebagai jempol
+(`emulate_touch_from_mouse`). Dari sini terlihat MVP sebenarnya: menu, **peta 15
+stage**, arena, HUD, layar hasil, dan draft kartu.
+
+Preview di browser (butuh export templates 4.3):
+
+```bash
+godot --headless --path godot/ --export-release "Web" ../build/web/index.html
+python3 tools/serve_web_build.py 8081
+```
+
+Pakai `tools/serve_web_build.py`, **bukan** `python3 -m http.server`: build Web
+diekspor dengan thread support, jadi perlu header COOP/COEP atau kanvasnya
+hitam. APK Android dan detail lengkapnya ada di
+[`docs/15-godot-setup.md`](docs/15-godot-setup.md).
+
+Verifikasi tanpa GPU:
+
+```bash
+godot --headless --path godot/ --script res://tests/sim_headless.gd   # balance + determinisme
+godot --headless --path godot/ res://tests/smoke.tscn                 # renderer, UI, audio
+```
+
+---
+
+## Prototipe Interaktif (bukan MVP)
 
 Prototipe web menjalankan **aturan yang sama** dengan spec Unity: fixed-step 60 Hz, ricochet analitik tanpa physics engine, bullet riding + slow-mo, 5 varian arena yang dibaca langsung dari `Config/arena_config.json`.
 
 ```bash
-python3 -m http.server 8080 --bind 0.0.0.0
-# buka http://localhost:8080/prototype/
+python3 tools/serve_prototype.py 8080
+# buka http://localhost:8080/  (diarahkan ke /prototype/)
 ```
 
 **Kontrol:** `tap`/`klik` = tembak (atau rem saat riding) · `drag` = belokkan peluru · `←` `→` = steer keyboard · `1`–`5` = ganti arena · `R` = restart
 
-Gunakan prototipe ini untuk **iterasi layout sebelum masuk Unity** — memindahkan bumper di JSON lalu me-refresh browser jauh lebih cepat daripada rebuild scene.
+Prototipe ini **lebih lama dari MVP** dan belum memakai desain Last War: tidak ada peta stage, kartu upgrade, gate, maupun squad yang bisa digeser. Gunakan untuk iterasi layout arena — memindahkan bumper di JSON lalu me-refresh browser jauh lebih cepat daripada menjalankan ulang engine.
 
 ---
 

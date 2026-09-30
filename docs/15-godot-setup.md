@@ -275,3 +275,112 @@ GODOT_MIRROR=https://host-yang-terjangkau/godot bash tools/install_godot.sh
 Tanpa engine, yang masih berjalan hanya gerbang statis: `gdparse`, `gdlint`,
 `gdformat --check`, dan `tools/validate_godot.py`. Semua uji perilaku
 (`sim_headless.gd`, `smoke.tscn`) butuh engine.
+
+---
+
+## Menjalankan MVP asli di mesin sendiri
+
+Yang dilayani `tools/serve_prototype.py` adalah **prototipe JavaScript lama**,
+bukan MVP. MVP hidup di `godot/` dan butuh engine untuk dijalankan. Sandbox
+agent tidak punya GL/X sehingga tidak bisa merendernya; mesin Anda bisa.
+
+### Prasyarat
+
+Godot **4.3 stable**, edisi standar (bukan .NET — tidak ada C# di `godot/`).
+Versi ini mengikat: `project.godot` memakai `config_version=5` dan
+`config/features=("4.3", "Forward Plus")`. Godot 4.2 menolak membuka, 4.4+
+akan menawarkan konversi yang tidak perlu.
+
+```bash
+git clone https://github.com/Scryptexai/Chain-Shot-Rider.git
+cd Chain-Shot-Rider
+git checkout arena/01a0ee17-chain-shot-rider
+```
+
+### A. Cara tercepat — jalankan langsung (desktop)
+
+```bash
+godot --path godot/ --editor          # sekali, biar aset ter-import
+# lalu tekan F5, atau tanpa editor:
+godot --path godot/
+```
+
+Jendela terbuka **1080×1920 portrait**. Di monitor biasa itu lebih tinggi dari
+layar; perkecil saja jendelanya — `stretch/mode=canvas_items` dengan
+`aspect=keep_width` menjaga proporsi. Mouse berfungsi sebagai jempol karena
+`pointing/emulate_touch_from_mouse=true`, jadi geser kiri-kanan dan tap untuk
+chain shot langsung terasa.
+
+Dari sini yang terlihat adalah MVP sebenarnya: menu, **peta 15 stage**, arena,
+HUD, layar hasil, dan draft kartu.
+
+### B. Build web — preview di browser
+
+Perlu export templates 4.3 sekali (~700 MB): Editor → **Manage Export
+Templates** → Download and Install. Manual: unduh
+`Godot_v4.3-stable_export_templates.tpz` lalu pasang lewat dialog yang sama.
+
+Kalau template belum ada, Godot menyebut sendiri berkas yang dicarinya — pesan
+ini terverifikasi dengan menjalankan perintah ekspornya:
+
+```
+ERROR: Cannot export project with preset "Web" due to configuration errors:
+No export template found at the expected path:
+/home/user/.local/share/godot/export_templates/4.3.stable/web_release.zip
+```
+
+Jadi di Linux template berakhir di `~/.local/share/godot/export_templates/4.3.stable/`
+(Windows: `%APPDATA%\Godot\export_templates\4.3.stable\`, macOS:
+`~/Library/Application Support/Godot/export_templates/4.3.stable/`).
+
+```bash
+mkdir -p build/web
+godot --headless --path godot/ --export-release "Web" ../build/web/index.html
+python3 tools/serve_web_build.py 8081      # buka http://localhost:8081/
+```
+
+**Jangan pakai `python3 -m http.server`.** Preset Web diekspor dengan
+`variant/thread_support=true`, jadi build butuh `SharedArrayBuffer`, dan
+browser hanya memberikannya pada halaman yang cross-origin isolated. Tanpa dua
+header berikut, kanvas tinggal hitam dan console cuma bilang
+"SharedArrayBuffer is not defined" — tidak menyebut headernya sama sekali:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+`tools/serve_web_build.py` mengirim keduanya, plus memaksa MIME `.wasm` ke
+`application/wasm` (tabel mimetypes bawaan Python sering tidak punya entri itu,
+dan `WebAssembly.instantiateStreaming` menolak wasm yang datang sebagai
+text/plain). Kalau Anda ingin hosting statis biasa tanpa header khusus, setel
+`variant/thread_support=false` di preset — konsekuensinya performa threading.
+
+### C. APK Android — rasa asli satu jempol
+
+Perlu JDK 17 + Android SDK, lalu set path-nya di Editor → Editor Settings →
+Export → Android. Debug keystore sekali saja:
+
+```bash
+keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android \
+  -keystore debug.keystore -storepass android -validity 9999 \
+  -dname "CN=Android Debug,O=Android,C=US" -deststoretype pkcs12
+```
+
+```bash
+godot --headless --path godot/ --export-debug "Android" ../build/android/chainrider.apk
+adb install -r build/android/chainrider.apk
+```
+
+Ini satu-satunya jalur yang menguji target sebenarnya: portrait, satu jempol,
+60 FPS di Snapdragon 660+.
+
+### Uji tanpa main
+
+Kalau yang Anda mau bukan melihat tapi memastikan, dua perintah ini tidak butuh
+GPU dan menyatakan lulus/gagal sendiri:
+
+```bash
+godot --headless --path godot/ --script res://tests/sim_headless.gd   # balance + determinisme
+godot --headless --path godot/ res://tests/smoke.tscn                 # renderer, UI, audio
+```
