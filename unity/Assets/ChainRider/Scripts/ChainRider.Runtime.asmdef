@@ -1,0 +1,14 @@
+{
+  "name": "ChainRider.Runtime",
+  "rootNamespace": "ChainRider",
+  "references": [
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.TextMeshPro"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "noEngineReferences": false
+}
