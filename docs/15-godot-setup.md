@@ -1,0 +1,131 @@
+# 15 — Menjalankan Project Godot
+
+Project ada di `godot/`. Target: **Godot 4.3**, tanpa modul tambahan, tanpa C#.
+
+```
+godot/
+  project.godot              setting engine, portrait, 60 Hz fixed tick
+  config/arena_config.json   salinan dari Config/ (jangan diedit langsung)
+  scenes/main.tscn           hierarki scene
+  scripts/
+    autoload/game_config.gd  pembaca config yang gagal berisik
+    autoload/save_game.gd    meta progresi
+    sim/det_rng.gd           xorshift128, algoritma sama dengan prototipe JS
+    sim/ricochet.gd          matematika pantulan manual, statis, tanpa physics
+    sim/sim_world.gd         SELURUH aturan main, nol dependensi engine
+    view/arena_view.gd       render MultiMesh
+    view/hud.gd              HUD portrait
+    game.gd                  perekat input / simulasi / tampilan
+```
+
+Buka folder `godot/` di Godot 4.3 lalu tekan Play. Tidak ada langkah impor, tidak ada menu editor yang harus dijalankan lebih dulu.
+
+Setelah mengubah `Config/arena_config.json`, jalankan `python3 tools/sync_config.py`.
+
+---
+
+## Kenapa Godot, dan di mana batasnya di sini
+
+Godot dipilih karena open source, tanpa lisensi, dan punya binary headless yang bisa menjalankan game dari CLI. Alasan terakhir itu yang paling berharga: engine yang bisa dijalankan tanpa GUI berarti balance dan determinisme bisa diuji otomatis.
+
+**Engine kini terpasang dan project sudah benar-benar dijalankan.** Unduhan otomatis tetap diblokir di sandbox ini (hanya npm dan PyPI yang lolos; GitHub release assets dan godotengine.org tertutup), jadi zip `Godot_v4.3-stable_linux.x86_64.zip` dipasok manual ke root repo dan `tools/install_godot.sh` memungutnya dari sana. Riwayat pemeriksaan statis:
+
+| Pemeriksaan | Alat | Hasil |
+|---|---|---|
+| Sintaks GDScript | `gdparse` | 8/8 file lolos |
+| Aturan gaya & struktur | `gdlint` | bersih |
+| Format | `gdformat --check` | 8/8 tidak berubah |
+| Jalur config yang dibaca kode | skrip silang | semua ada di JSON |
+| Simbol lintas file | skrip silang | nol rujukan menggantung |
+| Path resource di `main.tscn` | skrip silang | semua ada |
+| Ekonomi gate | Monte Carlo 500 run × 4 skill | lihat [doc 14](14-lastwar-atm.md) |
+| Loop penuh (prototipe web) | harness 6 seed × 5 varian | median 143 s, 0 buntu, determinisme lulus |
+
+Semua pemeriksaan itu lolos — dan tetap **melewatkan empat bug** yang langsung muncul pada detik pertama engine dijalankan. Catatan ini layak disimpan: analisis statis pada GDScript memberi rasa aman yang jauh melebihi jangkauannya.
+
+Tiga bug ditemukan oleh pemeriksaan silang itu, bukan oleh linter, dan sudah diperbaiki: `GameConfig.dict("")` mengembalikan kosong sehingga simulasi akan lahir tanpa angka sama sekali; sisi kanan gate memakai polaritas yang salah sehingga kedua pintu bisa merugikan; dan steering peluru tidak dibatasi laju sehingga drag cepat memutar 900°/detik, sepuluh kali batas spec.
+
+### Yang hanya terlihat setelah engine dijalankan
+
+| Bug | Gejala | Sebab |
+|---|---|---|
+| `spawnInterval` dibaca sebagai skalar | `Invalid call. Nonexistent 'float' constructor` | Nilainya array per-wave. Error itu **membatalkan sisa `_read_config`**, diam-diam mengembalikan `bossHpScale` ke 1.0 (bukan 0.4), `difficultyPerStage` ke 0, dan mengosongkan `comboMilestones`. Tiga dari lima stage jadi buntu. |
+| Crowd disebar acak | 12 kill dalam 60 detik; kalah di wave 1, kelima varian | Spawner mengabaikan `spawn.formation`/`columnsRange`/`spacing`. Squad menembak lurus ke atas, jadi kerumunan selebar 18 unit mustahil dijangkau. |
+| `_advance_chain` membuang sisa jarak | Peluru merayap di kerumunan; 15 pantulan tak pernah terpakai | `return` setelah kontak pertama, sisa `(1−t)` langkah hilang. |
+| Wave menunggu arena kosong | Menggantung di wave 4 selama 300 detik, nyawa masih 3 | Prototipe yang sudah di-tuning memajukan wave dengan timer `spawnInterval`. Auto-fire mentok 9 tembakan/detik, jadi wave 120 musuh selalu mengalahkan jam. |
+
+Dua perbaikan struktural menyertainya. `SimWorld.tick()` kini **membersihkan `events` sendiri**; sebelumnya konsumen yang wajib melakukannya, dan konsumen yang lupa membuat array tumbuh sepanjang sesi (harness headless pertama menghitung 33.375 "kill" dari 12 kill nyata). Lalu semua pembacaan angka config lewat `_num()` yang fail-soft, supaya satu kunci bertipe salah merugikan satu nilai saja, bukan setiap nilai sesudahnya.
+
+---
+
+## Setup di sandbox / CI
+
+```bash
+bash tools/install_godot.sh 4.3-stable   # engine + gdtoolkit
+python3 tools/validate_godot.py          # cek yang linter tidak bisa
+export PATH="$HOME/.cache/venv/bin:$PATH"
+gdparse godot/scripts/sim/sim_world.gd
+gdlint godot/scripts
+gdformat --check godot/scripts
+```
+
+Skrip installer sengaja berbeda dari one-liner biasa dalam dua hal, keduanya dipelajari dari kegagalan nyata di sandbox ini:
+
+1. **Ia memverifikasi apa yang diunduh.** Jaringan yang diblokir biasanya menjawab dengan halaman HTML error, dan `unzip` pada berkas itu gagal tiga langkah kemudian dengan pesan yang membingungkan. Di sini magic bytes diperiksa sebelum berkas dipercaya.
+2. **Ia selalu memasang gdtoolkit.** Bagian itu tetap berhasil dari PyPI meski unduhan engine diblokir, dan itulah yang memungkinkan validasi GDScript tanpa engine sama sekali.
+
+Ditambah satu hal ketiga setelah engine benar-benar dipasok: **zip lokal diperiksa sebelum jaringan disentuh.** Skrip memungut `Godot_v<versi>_linux.x86_64.zip` dari root repo, cwd, `~/.cache/godot/`, atau `~/Downloads/`. Verifikasi tipe berkas juga tidak lagi memanggil `file` — perintah itu tidak ada di image ramping ini, sehingga zip yang sah pun akan ditolak; sekarang magic bytes `50 4B 03 04` dibaca langsung.
+
+Ekstraksi selalu menuju `~/.cache/godot/`, tidak pernah ke repo: binary-nya 110 MB. Zip 50 MB-nya sendiri sengaja ikut di-commit supaya sandbox offline bisa bootstrap.
+
+Kalau semua mirror tidak terjangkau, skrip keluar dengan kode 3 dan menjelaskan apa yang masih bisa dipakai — bukan gagal diam-diam. Set `GODOT_MIRROR` untuk mirror sendiri.
+
+`tools/validate_godot.py` memeriksa hal-hal yang berada di luar jangkauan linter: setiap jalur `GameConfig.num("...")` benar-benar ada di JSON, setiap simbol lintas file terdefinisi, setiap `res://` di scene dan autoload menunjuk berkas nyata, dan salinan config Godot tidak basi. Tiga bug nyata ditemukan justru oleh pemeriksaan ini, bukan oleh `gdlint`.
+
+### Menjalankan engine
+
+```bash
+godot --headless --path godot/ --import   # bangun cache impor
+godot --headless --path godot/ --quit     # boot main.tscn sekali
+godot --headless --path godot/ --script res://tests/sim_headless.gd
+godot --headless --path godot/ --script res://tests/sim_headless.gd -- --trace
+godot --headless --path godot/ --script res://tests/sim_headless.gd -- --determinism
+```
+
+`--check-only --script <file>` **tidak** bisa dipakai untuk memeriksa berkas yang menyentuh autoload: mode itu memuat skrip tanpa mendaftarkan autoload, jadi `GameConfig` dilaporkan sebagai "Identifier not found" pada lima berkas yang sebenarnya sehat. Boot project penuh adalah pemeriksaan kompilasi yang sah.
+
+`godot/tests/sim_headless.gd` adalah pasangan Godot dari `tools/sim_test.js`: bot bermain lima stage, mencatat hasil, memeriksa invariant tiap tick, lalu membandingkan hash dua run identik sepanjang 7200 tick × 5 varian. Keluar dengan kode 1 bila ada yang gagal, jadi CI bisa menggantung padanya. Keduanya terpisah dengan sengaja — urutan tick-nya berbeda, jadi replay tidak lintas-engine.
+
+Satu pelajaran dari harness ini: **bot yang tidak menyetir peluru membuat harness berbohong.** Chain shot lepas lurus ke atas; tanpa input ia naik, memantul atap, turun lurus, dan keluar — 2 dari 15 pantulan. Bot pertama mengukur permainan yang tidak ada pemainnya. Versi kedua juga keliru dengan cara lain: ia parkir di x=±3 selama gerbang turun, dan karena gerbang hampir selalu ada di layar, ia berhenti menembak selama 45 detik beruntun. Bot sekarang memilih **sisi** gerbang lalu tetap melacak kerumunan di dalam sisi itu.
+
+Catatan sandbox: `.cache` tidak ikut snapshot, jadi tiap sesi baru perlu menjalankan ulang installer. Itu murah — zip-nya sudah ada di repo, ekstraksi ~7 detik.
+
+---
+
+## Aturan arsitektur yang dijaga
+
+**`sim_world.gd` tidak boleh menyentuh engine.** Tidak ada `Node`, `Input`, `delta` dari engine, atau pemanggilan render. Ia maju pada langkah tetap yang diberikan, membaca input dari struct biasa, dan menyimpan state di array datar. Tiga akibatnya: seed yang sama selalu replay identik, aturan bisa diuji headless, dan renderer bisa ditulis ulang tanpa menyentuh satu baris aturan pun.
+
+**Simulasi tidak memakai RNG engine.** `RandomNumberGenerator` milik Godot baik-baik saja, tapi bukan generator yang dipakai harness saat mengukur balance. `det_rng.gd` memakai xorshift128 yang sama persis dengan prototipe web, sehingga satu seed bisa dibandingkan lintas kedua implementasi.
+
+**Tidak ada physics engine untuk pantulan.** Setiap pantulan adalah refleksi bentuk tertutup yang dimiliki simulasi. Physics server akan memantulkan benda dengan senang hati, tapi hasilnya tidak bisa direproduksi: urutan kontak dan akumulasi floating point di dalam engine bukan bagian dari state yang kita simpan.
+
+**Tabrakan memakai sweep, bukan cek jarak.** Pada 25 unit/detik, cek jarak diskrit menembus target kecil di antara dua frame.
+
+**Render pakai MultiMesh, bukan satu node per unit.** 200 musuh ditambah 100 pasukan sebagai node berarti ratusan pembaruan transform per frame di Snapdragon 660.
+
+---
+
+## Yang belum ada
+
+- **Balance Godot belum sampai target.** Ini item nomor satu sekarang. Keadaan terukur: 0 buntu, semua run mencapai wave 4–5, determinisme lulus — tapi rata-rata 55 detik, di bawah jendela 60–180 detik, dan bot belum pernah menang. Throughput kill Godot (~100/run) masih jauh di bawah prototipe (~455/run) dengan config yang sama, jadi masih ada celah paritas yang perlu diukur, bukan ditebak.
+- **Barrel**: config, tabrakan, dan konstanta sudah ada; spawner-nya belum disambung.
+- **Layar non-gameplay** (menu, pause, result) sudah ada di `scripts/ui/screens.gd`, bertema per varian;
+  yang belum: pemilih arena 5 kartu, slider audio, count-up tween baris result.
+- **Boss**: satu pola gerak generik, belum 5 pola unik per varian seperti di [doc 05](05-prefab-spec.md).
+- **Varian arena**: tema warna dibaca dari config, tapi obstacle per varian (bumper, pillar, gravity well, platform) belum di-spawn di Godot. Logikanya sudah ada dan teruji di prototipe web.
+- **Audio, camera shake, partikel**: dirancang di doc 07/08, belum diimplementasikan. Vignette slow-mo sudah ada di HUD, tapi belum ada perlambatan waktu sungguhan.
+- **Layar pemilihan kartu**: `SaveGame` sudah mendukung penuh, UI-nya belum.
+- **Interpolasi render**: tampilan membaca state simulasi langsung, belum ada interpolasi alpha antar tick.
+
+Prototipe web di `prototype/` masih memakai loop lama (player diam, bidik drag) dan **belum** mencerminkan desain Last War ini. Selama Godot belum bisa dijalankan, keduanya sementara berbeda — menyelaraskan prototipe adalah langkah berikutnya yang masuk akal, karena di situlah balance bisa benar-benar diukur.

@@ -1,0 +1,13 @@
+{
+  "name": "ChainRider.Editor",
+  "rootNamespace": "ChainRider.EditorTools",
+  "references": [
+    "ChainRider.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "autoReferenced": true
+}

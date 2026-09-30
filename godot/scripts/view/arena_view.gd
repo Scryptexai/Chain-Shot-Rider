@@ -1,0 +1,314 @@
+extends Node3D
+## Draws the simulation and owns the look of the arena. Owns no rules.
+##
+## Enemies and troops are drawn with MultiMesh rather than one node each. At
+## 200 enemies plus a squad of 100, a node per unit means hundreds of transform
+## updates and draw calls per frame on a Snapdragon 660, which is the whole
+## frame budget spent on bookkeeping. One MultiMesh per unit type is a single
+## draw call regardless of count.
+##
+## Simulation space is (x, z) with z running away from the player. World space
+## maps that to (x, y, -z) so the camera can sit at +Z looking down the lane.
+##
+## The palette comes from the active variant, not from constants here, so the
+## arena, the crowd and the HUD always agree on what colour the world is.
+
+const MAX_TROOPS_DRAWN := 128
+
+## Enemy palette in config enemyTypes order, lifted verbatim from
+## docs/02-visual-style-guide.md so art, prototype and build cannot drift
+## into three different reds.
+const ENEMY_COLORS := [
+	Color("#FF4D3D"),  # grunt    — Enemy Red
+	Color("#FF8A2B"),  # runner   — Enemy Orange
+	Color("#B14DFF"),  # brute    — Bumper Magenta, reads as heavy
+	Color("#FFC93C"),  # shielder — Enemy Yellow
+	Color("#FF3DBE"),  # splitter — Magenta Hot
+	Color("#FF6A1F"),  # bomber   — hot orange
+]
+
+const FLOOR_SHADER := "res://shaders/floor_grid.gdshader"
+
+var _sim: SimWorld
+var _pal: Dictionary = {}
+var _enemy_mm: MultiMeshInstance3D
+var _troop_mm: MultiMeshInstance3D
+var _auto_mm: MultiMeshInstance3D
+var _chain: MeshInstance3D
+var _gate_pool: Array[MeshInstance3D] = []
+var _gate_labels: Array[Label3D] = []
+var _floor: MeshInstance3D
+var _environment: WorldEnvironment
+
+
+## Called by Game before the first frame, with the variant for this stage.
+func build(variant_index: int) -> void:
+	_pal = UiTheme.palette(GameConfig.dict("variants.%d.theme" % variant_index))
+	_build_environment()
+	_build_floor()
+	_build_actors()
+
+
+## Called by Game once a run starts.
+func bind_sim(sim: SimWorld) -> void:
+	_sim = sim
+
+
+## Pushes one frame of simulation state into the scene.
+func render_frame() -> void:
+	if _sim == null:
+		return
+	_render_enemies()
+	_render_troops()
+	_render_auto()
+	_render_chain()
+	_render_gates()
+
+
+func _build_environment() -> void:
+	# Glow is what sells neon. Without it the emissive materials are merely
+	# bright flat colours; with it they bleed and read as light sources.
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = _pal["bg_bottom"]
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = _pal["bg_top"]
+	env.ambient_light_energy = 0.6
+	env.glow_enabled = true
+	env.glow_intensity = 0.9
+	env.glow_bloom = 0.15
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	env.glow_hdr_threshold = 0.85
+	# Fog hides the spawn gate's hard edge and gives the long lane real depth
+	# for free, which a portrait screen badly needs.
+	env.fog_enabled = true
+	env.fog_light_color = _pal["bg_top"]
+	env.fog_density = 0.012
+	env.fog_sky_affect = 0.0
+
+	_environment = WorldEnvironment.new()
+	_environment.environment = env
+	add_child(_environment)
+
+
+func _build_floor() -> void:
+	var width := GameConfig.num("arena.width")
+	var length := GameConfig.num("arena.height")
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(width, length)
+	# Subdivision keeps the shader's derivative-based anti-aliasing stable
+	# across the length of the lane.
+	plane.subdivide_depth = 8
+
+	var shader: Shader = load(FLOOR_SHADER)
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	material.set_shader_parameter("bg_top", _pal["bg_top"])
+	material.set_shader_parameter("bg_bottom", _pal["bg_bottom"])
+	material.set_shader_parameter("grid_color", _pal["grid"])
+	material.set_shader_parameter("arena_length", length)
+	material.set_shader_parameter("defense_line_z", GameConfig.num("arena.defenseLineZ"))
+	material.set_shader_parameter("defense_color", _pal["primary"])
+
+	_floor = MeshInstance3D.new()
+	_floor.mesh = plane
+	_floor.material_override = material
+	_floor.position = Vector3(0.0, 0.0, -length * 0.5)
+	add_child(_floor)
+
+	_build_side_walls(width, length)
+
+
+func _build_side_walls(width: float, length: float) -> void:
+	# Thin emissive strips, not solid walls: the player has to read where the
+	# bounce surface is without the geometry eating the playfield.
+	for side in [-1.0, 1.0]:
+		var strip := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.12, 0.5, length)
+		strip.mesh = box
+		strip.position = Vector3(side * width * 0.5, 0.25, -length * 0.5)
+		strip.material_override = _emissive(_pal["bumper"], 1.4)
+		add_child(strip)
+
+
+func _build_actors() -> void:
+	_enemy_mm = _make_multimesh(_capsule(0.35, 1.0), Color.WHITE, SimWorld.MAX_ENEMIES)
+	_troop_mm = _make_multimesh(_capsule(0.22, 0.8), _pal["primary"], MAX_TROOPS_DRAWN)
+	_auto_mm = _make_multimesh(_sphere(0.12), Color("#FFF1D0"), SimWorld.MAX_AUTO_BULLETS)
+	_chain = MeshInstance3D.new()
+	_chain.mesh = _sphere(0.26)
+	_chain.material_override = _emissive(_pal["primary"], 3.0)
+	add_child(_chain)
+
+
+func _render_enemies() -> void:
+	var mm := _enemy_mm.multimesh
+	mm.visible_instance_count = _sim.enemy_count
+	for i in range(_sim.enemy_count):
+		var pos := Vector3(_sim.enemy_x[i], 0.5, -_sim.enemy_z[i])
+		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
+		var type_index: int = _sim.enemy_type[i] % ENEMY_COLORS.size()
+		mm.set_instance_color(i, ENEMY_COLORS[type_index])
+
+
+func _render_troops() -> void:
+	var mm := _troop_mm.multimesh
+	var shown: int = mini(_sim.troops, MAX_TROOPS_DRAWN)
+	mm.visible_instance_count = shown
+	var columns := 5
+	var spacing := 0.42
+	for i in range(shown):
+		var row := i / columns
+		var col := i % columns
+		var offset_x := (float(col) - float(columns - 1) * 0.5) * spacing
+		var offset_z := float(row) * spacing
+		var pos := Vector3(_sim.squad_x + offset_x, 0.4, -(SimWorld.SQUAD_Z - offset_z))
+		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
+		mm.set_instance_color(i, _pal["primary"] if i == 0 else Color(1, 1, 1, 0.85))
+
+
+func _render_auto() -> void:
+	var mm := _auto_mm.multimesh
+	mm.visible_instance_count = _sim.auto_count
+	for i in range(_sim.auto_count):
+		var pos := Vector3(_sim.auto_x[i], 0.5, -_sim.auto_z[i])
+		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
+		mm.set_instance_color(i, Color("#FFF1D0"))
+
+
+func _render_chain() -> void:
+	_chain.visible = _sim.chain_active
+	if _sim.chain_active:
+		_chain.position = Vector3(_sim.chain_pos.x, 0.6, -_sim.chain_pos.y)
+
+
+func _render_gates() -> void:
+	var needed: int = _sim.gates.size() * 2
+	while _gate_pool.size() < needed:
+		_grow_gate_pool()
+	for i in range(_gate_pool.size()):
+		_gate_pool[i].visible = i < needed
+		_gate_labels[i].visible = i < needed
+	var half := GameConfig.num("arena.width") * 0.5
+	var gap := GameConfig.num("gates.centerGapX") * 0.5
+	for g in range(_sim.gates.size()):
+		var gate: Dictionary = _sim.gates[g]
+		var z := float(gate["z"])
+		var dimmed := bool(gate["squad_done"])
+		_apply_gate_panel(g * 2, gate["left"], -(half + gap) * 0.5, half - gap, z, dimmed)
+		_apply_gate_panel(g * 2 + 1, gate["right"], (half + gap) * 0.5, half - gap, z, dimmed)
+
+
+func _grow_gate_pool() -> void:
+	var panel := MeshInstance3D.new()
+	panel.mesh = BoxMesh.new()
+	add_child(panel)
+	_gate_pool.append(panel)
+	# The decision lives in the world, so the number lives in the world too.
+	# A gate value read off a HUD corner would arrive too late to act on.
+	var label := Label3D.new()
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.font_size = 96
+	label.outline_size = 24
+	label.modulate = UiTheme.INK
+	add_child(label)
+	_gate_labels.append(label)
+
+
+func _apply_gate_panel(
+	index: int, side: Dictionary, x: float, width: float, z: float, dimmed: bool
+) -> void:
+	var panel := _gate_pool[index]
+	var box := panel.mesh as BoxMesh
+	box.size = Vector3(width, 2.4, 0.25)
+	panel.position = Vector3(x, 1.2, -z)
+	var positive := bool(side.get("positive", true))
+	var tint: Color = _pal["primary"] if positive else UiTheme.DANGER
+	var alpha := 0.18 if dimmed else 0.42
+	panel.material_override = _transparent(tint, alpha)
+
+	var label := _gate_labels[index]
+	label.text = "%s%s" % [_op_symbol(String(side.get("op", "add"))), _op_value(side)]
+	label.position = Vector3(x, 1.6, -z + 0.2)
+	label.modulate = Color(1, 1, 1, 0.45) if dimmed else UiTheme.INK
+	label.outline_modulate = Color(0, 0, 0, 0.85)
+
+
+func _op_symbol(op: String) -> String:
+	match op:
+		"mul":
+			return "x"
+		"add":
+			return "+"
+		"sub":
+			return "-"
+		"div":
+			return "/"
+	return "?"
+
+
+func _op_value(side: Dictionary) -> String:
+	return "%d" % int(round(float(side.get("value", 1.0))))
+
+
+func _make_multimesh(mesh: Mesh, tint: Color, capacity: int) -> MultiMeshInstance3D:
+	var instance := MultiMeshInstance3D.new()
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = mesh
+	mm.instance_count = capacity
+	mm.visible_instance_count = 0
+	instance.multimesh = mm
+	var material := StandardMaterial3D.new()
+	material.albedo_color = tint
+	material.vertex_color_use_as_albedo = true
+	material.emission_enabled = true
+	material.emission = tint
+	material.emission_energy_multiplier = 0.6
+	material.roughness = 0.7
+	instance.material_override = material
+	add_child(instance)
+	return instance
+
+
+func _capsule(radius: float, height: float) -> Mesh:
+	var mesh := CapsuleMesh.new()
+	mesh.radius = radius
+	mesh.height = height
+	mesh.radial_segments = 6
+	mesh.rings = 2
+	return mesh
+
+
+func _sphere(radius: float) -> Mesh:
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 8
+	mesh.rings = 4
+	return mesh
+
+
+func _emissive(tint: Color, energy: float) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = tint
+	material.emission_enabled = true
+	material.emission = tint
+	material.emission_energy_multiplier = energy
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return material
+
+
+func _transparent(tint: Color, alpha: float) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(tint.r, tint.g, tint.b, alpha)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.emission_enabled = true
+	material.emission = tint
+	material.emission_energy_multiplier = 1.2
+	return material
