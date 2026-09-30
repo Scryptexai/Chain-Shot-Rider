@@ -14,6 +14,11 @@ extends Node3D
 ## arena, the crowd and the HUD always agree on what colour the world is.
 
 const MAX_TROOPS_DRAWN := 128
+## Impact shells kept alive at once, and how long one lasts. Both are budget
+## decisions: docs 08 caps active particles at 200, and these are the most
+## frequent effect in the game.
+const IMPACT_POOL := 48
+const IMPACT_SECONDS := 0.35
 
 ## Enemy palette in config enemyTypes order, lifted verbatim from
 ## docs/02-visual-style-guide.md so art, prototype and build cannot drift
@@ -41,6 +46,10 @@ var _floor: MeshInstance3D
 var _environment: WorldEnvironment
 var _obstacle_nodes: Array[Node3D] = []
 var _boss: Node3D
+var _impacts: Array[MeshInstance3D] = []
+var _impact_life := PackedFloat32Array()
+var _impact_scale := PackedFloat32Array()
+var _impact_next := 0
 
 
 ## Called by Game before the first frame, with the variant for this stage.
@@ -49,6 +58,7 @@ func build(variant_index: int) -> void:
 	_build_environment()
 	_build_floor()
 	_build_actors()
+	_build_impacts()
 
 
 ## Called by Game once a run starts. The furniture can only be built now:
@@ -69,6 +79,8 @@ func render_frame() -> void:
 	_render_gates()
 	_render_obstacles()
 	_render_boss()
+	_spawn_impacts()
+	_age_impacts()
 
 
 func _build_environment() -> void:
@@ -243,6 +255,88 @@ func _cylinder(radius: float, height: float) -> Mesh:
 	mesh.bottom_radius = radius
 	mesh.height = height
 	return mesh
+
+
+## A fixed ring of impact shells, reused forever. Pooled rather than spawned
+## because a busy frame can produce dozens of kills, and allocating a node
+## per kill is exactly the per-frame garbage the budget forbids.
+func _build_impacts() -> void:
+	for i in range(IMPACT_POOL):
+		var shell := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = 1.0
+		mesh.height = 2.0
+		shell.mesh = mesh
+		var material := StandardMaterial3D.new()
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		material.albedo_color = _pal["primary"]
+		shell.material_override = material
+		shell.visible = false
+		add_child(shell)
+		_impacts.append(shell)
+		_impact_life.append(0.0)
+		_impact_scale.append(1.0)
+
+
+## Reads this tick's events and lights a shell for each one worth seeing.
+func _spawn_impacts() -> void:
+	for entry in _sim.events:
+		var event: Dictionary = entry
+		var kind := String(event.get("type", ""))
+		var radius := 0.0
+		var tint: Color = _pal["primary"]
+		match kind:
+			"kill":
+				radius = 0.9
+				tint = _pal["enemy"]
+			"explosion":
+				radius = float(event.get("radius", 3.0))
+				tint = Color("#FF8A2B")
+			"bounce":
+				radius = 0.6
+				tint = _pal["bumper"]
+			_:
+				continue
+		_light_impact(
+			Vector3(float(event.get("x", 0.0)), 0.6, -float(event.get("z", 0.0))), radius, tint
+		)
+
+
+func _light_impact(where: Vector3, radius: float, tint: Color) -> void:
+	if _impacts.is_empty():
+		return
+	# Oldest slot wins when the pool is exhausted: a dropped effect is far
+	# cheaper than a frame spent growing the pool.
+	var index := _impact_next % _impacts.size()
+	_impact_next += 1
+	var shell := _impacts[index]
+	shell.position = where
+	shell.visible = true
+	_impact_life[index] = 1.0
+	_impact_scale[index] = radius
+	var material := shell.material_override as StandardMaterial3D
+	material.albedo_color = tint
+
+
+## Shells expand and fade on a square curve, which reads as a pop rather than
+## a balloon. Uses unscaled ticks so slow motion stretches them with the world.
+func _age_impacts() -> void:
+	var delta := float(Engine.get_frames_per_second())
+	var step := 1.0 / maxf(delta, 20.0) / IMPACT_SECONDS
+	for i in range(_impacts.size()):
+		if _impact_life[i] <= 0.0:
+			continue
+		_impact_life[i] = maxf(_impact_life[i] - step, 0.0)
+		var shell := _impacts[i]
+		if _impact_life[i] <= 0.0:
+			shell.visible = false
+			continue
+		var grow := 1.0 - _impact_life[i]
+		shell.scale = Vector3.ONE * _impact_scale[i] * (0.25 + grow * 0.9)
+		var material := shell.material_override as StandardMaterial3D
+		material.albedo_color.a = _impact_life[i] * _impact_life[i]
 
 
 func _render_enemies() -> void:

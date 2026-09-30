@@ -18,6 +18,8 @@ var _press_position := Vector2.ZERO
 var _press_time := 0.0
 var _pending_tap := false
 var _pending_drag := 0.0
+var _feel: GameFeel = null
+var _camera_home := Vector3.ZERO
 
 @onready var _view: Node3D = $ArenaView
 @onready var _hud: CanvasLayer = $HUD
@@ -41,6 +43,7 @@ func _ready() -> void:
 	if _screens.has_method("build"):
 		_screens.call("build", variant)
 	_connect_screens()
+	_feel = GameFeel.new(GameConfig.dict(""))
 	set_physics_process(false)
 
 
@@ -90,6 +93,7 @@ func _on_restart() -> void:
 
 
 func _on_menu() -> void:
+	Engine.time_scale = 1.0
 	set_physics_process(false)
 	_screens.call("show_menu")
 
@@ -115,6 +119,23 @@ func _process(_delta: float) -> void:
 		_hud.call("render_frame")
 	if _view.has_method("render_frame"):
 		_view.call("render_frame")
+	_update_feel(_delta)
+
+
+## Slow motion, shake and FOV. Driven from unscaled time so the easing takes
+## the same wall-clock duration however slow the world currently is.
+func _update_feel(delta: float) -> void:
+	if _feel == null:
+		return
+	for entry in _sim.events:
+		_feel.react_to(entry)
+	var unscaled := delta / maxf(Engine.time_scale, 0.01)
+	_feel.update(_sim, unscaled)
+	# The sim keeps its fixed step; this only changes how many steps a real
+	# second buys, so a slowed run still replays identically.
+	Engine.time_scale = _feel.time_scale
+	_camera.fov = _feel.fov
+	_camera.position = _camera_home + _feel.shake_offset()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -168,9 +189,14 @@ func _place_camera() -> void:
 	var origin := Vector3(0.0, maxf(height, 8.0), distance)
 	_camera.look_at_from_position(origin, Vector3(0.0, 0.0, -(defense_z + look_ahead)), Vector3.UP)
 	_camera.fov = GameConfig.num("slowMo.fovNormal")
+	# Remembered so shake can be an offset from it rather than an integration
+	# that slowly walks the camera away from its framing.
+	_camera_home = _camera.position
 
 
 func _finish_run() -> void:
+	# Never leave the engine slowed on the results screen.
+	Engine.time_scale = 1.0
 	var won: bool = _sim.state == SimWorld.State.VICTORY
 	var earned := _sim.score / 10
 	SaveGame.record_run(_stage, won, _sim.score, earned)

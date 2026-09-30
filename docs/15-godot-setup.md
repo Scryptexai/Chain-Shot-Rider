@@ -49,6 +49,7 @@ Tiga bug ditemukan oleh pemeriksaan silang itu, bukan oleh linter, dan sudah dip
 
 | Bug | Gejala | Sebab |
 |---|---|---|
+| `chain_dir = Vector2.UP` | 28 chain shot → **0 kill** | `Vector2.UP` adalah `(0, -1)` karena Y layar menghadap ke bawah. Vektor ini hidup di bidang arena `(x, z)` yang z-nya membesar menjauhi pemain, jadi mekanik andalan game ditembakkan ke belakang dan keluar arena dalam beberapa tick. Sekarang ada `const FORWARD := Vector2(0.0, 1.0)`. |
 | `spawnInterval` dibaca sebagai skalar | `Invalid call. Nonexistent 'float' constructor` | Nilainya array per-wave. Error itu **membatalkan sisa `_read_config`**, diam-diam mengembalikan `bossHpScale` ke 1.0 (bukan 0.4), `difficultyPerStage` ke 0, dan mengosongkan `comboMilestones`. Tiga dari lima stage jadi buntu. |
 | Crowd disebar acak | 12 kill dalam 60 detik; kalah di wave 1, kelima varian | Spawner mengabaikan `spawn.formation`/`columnsRange`/`spacing`. Squad menembak lurus ke atas, jadi kerumunan selebar 18 unit mustahil dijangkau. |
 | `_advance_chain` membuang sisa jarak | Peluru merayap di kerumunan; 15 pantulan tak pernah terpakai | `return` setelah kontak pertama, sisa `(1−t)` langkah hilang. |
@@ -94,6 +95,13 @@ godot --headless --path godot/ --script res://tests/sim_headless.gd -- --determi
 
 `--check-only --script <file>` **tidak** bisa dipakai untuk memeriksa berkas yang menyentuh autoload: mode itu memuat skrip tanpa mendaftarkan autoload, jadi `GameConfig` dilaporkan sebagai "Identifier not found" pada lima berkas yang sebenarnya sehat. Boot project penuh adalah pemeriksaan kompilasi yang sah.
 
+### Dua harness, dua lapisan
+
+`godot/tests/smoke.tscn` menjalankan **scene sungguhan** — Game, ArenaView, HUD, Screens — selama 1800 frame per varian sambil menyuntikkan input seperti jempol. Ia harus berupa scene, bukan `--script`, supaya autoload hidup. Dua hal yang ia tangkap dan tidak bisa ditangkap yang lain:
+
+- Skrip yang **gagal dikompilasi** akan dilewati diam-diam oleh `has_method()`, sehingga game berjalan tanpa menggambar apa pun sambil tetap "lulus". Smoke kini memeriksa tiap node punya skrip dan metodenya.
+- **Test yang tidak bermain tidak menguji apa-apa.** Versi pertama hanya menonton: tanpa tap, chain shot tak pernah lepas, jadi slow-mo, bullet riding, dan semua efek ricochet tetap kode mati yang "lulus".
+
 `godot/tests/sim_headless.gd` adalah pasangan Godot dari `tools/sim_test.js`: bot bermain lima stage, mencatat hasil, memeriksa invariant tiap tick, lalu membandingkan hash dua run identik sepanjang 7200 tick × 5 varian. Keluar dengan kode 1 bila ada yang gagal, jadi CI bisa menggantung padanya. Keduanya terpisah dengan sengaja — urutan tick-nya berbeda, jadi replay tidak lintas-engine.
 
 Satu pelajaran dari harness ini: **bot yang tidak menyetir peluru membuat harness berbohong.** Chain shot lepas lurus ke atas; tanpa input ia naik, memantul atap, turun lurus, dan keluar — 2 dari 15 pantulan. Bot pertama mengukur permainan yang tidak ada pemainnya. Versi kedua juga keliru dengan cara lain: ia parkir di x=±3 selama gerbang turun, dan karena gerbang hampir selalu ada di layar, ia berhenti menembak selama 45 detik beruntun. Bot sekarang memilih **sisi** gerbang lalu tetap melacak kerumunan di dalam sisi itu.
@@ -116,9 +124,26 @@ Catatan sandbox: `.cache` tidak ikut snapshot, jadi tiap sesi baru perlu menjala
 
 ---
 
+## Sistem yang kini ada di engine
+
+| Sistem | Berkas | Catatan |
+|---|---|---|
+| Obstacle per varian | `sim/obstacle_field.gd` | bumper (bonus damage), pillar, gravity well (melengkungkan peluru), shield wall (HP 3), moving platform (menahan crowd), barrel (ledakan berantai). Kelima arena akhirnya berbeda, bukan sekadar ganti warna. |
+| 5 boss unik | `sim/boss.gd` | HP dan pola gerak dari config: `slow_descend_slam`, `mirror_pair_sidestep`, `orbit_pull_pulse`, `barrel_drop_charge`, `teleport_lane_swap`. Aturan facing **menskalakan** damage, tidak pernah menolkannya — run buntu lebih buruk daripada kalah. |
+| Formasi crowd | `sim/formation.gd` | rect / vshape / diamond / circle, fungsi murni supaya replay tetap jujur. |
+| Slow-mo, shake, FOV | `view/game_feel.gd` | `Engine.time_scale` sebagai tuas, jadi tick simulasi tidak berubah dan replay tetap identik. Shake memakai sinus meluruh, bukan noise, supaya 30 fps dan 60 fps sepakat. |
+| Efek hantaman | `view/arena_view.gd` | 48 shell aditif yang dipakai ulang; alokasi per-kill adalah sampah per-frame yang dilarang budget. |
+| Pembacaan config | `sim/cfg.gd` | `Cfg.num()` fail-soft, dipakai bersama oleh sim dan obstacle. |
+
+Hasil terukur setelah semuanya: **0 buntu, 2/5 menang, rata-rata 75,7 detik** (jendela target 60–180), determinisme lulus 7200 tick × 5 varian, dan smoke test menembus renderer di kelima varian dengan slow-mo turun ke 0,30.
+
+---
+
 ## Yang belum ada
 
-- **Balance Godot belum sampai target.** Ini item nomor satu sekarang. Keadaan terukur: 0 buntu, semua run mencapai wave 4–5, determinisme lulus — tapi rata-rata 55 detik, di bawah jendela 60–180 detik, dan bot belum pernah menang. Throughput kill Godot (~100/run) masih jauh di bawah prototipe (~455/run) dengan config yang sama, jadi masih ada celah paritas yang perlu diukur, bukan ditebak.
+- **Audio** (doc 07): belum ada satu pun cue. Ini item nomor satu sekarang.
+- **Kartu upgrade antar-stage**: `SaveGame` sudah mendukung penuh, layarnya belum.
+- **Interpolasi render**: tampilan membaca state simulasi langsung, belum ada interpolasi alpha antar tick.
 - **Barrel**: config, tabrakan, dan konstanta sudah ada; spawner-nya belum disambung.
 - **Layar non-gameplay** (menu, pause, result) sudah ada di `scripts/ui/screens.gd`, bertema per varian;
   yang belum: pemilih arena 5 kartu, slider audio, count-up tween baris result.
