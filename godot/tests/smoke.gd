@@ -31,7 +31,166 @@ func _ready() -> void:
 	var stages := GameConfig.list("meta.variantCycle").size()
 	for stage in range(maxi(stages, 1)):
 		_run_stage(packed, stage)
+	await _run_card_draft(packed)
 	_finish()
+
+
+## Drives the between-stage upgrade draft end to end: open it, press a card,
+## and confirm the pick actually reaches the simulation.
+##
+## The draft is the whole of the meta layer, and every part of it can fail
+## quietly. An empty offer list still renders a screen. A card that is granted
+## but never folded into SimWorld leaves a run that plays identically while
+## the save file fills up with upgrades the player can never feel.
+func _run_card_draft(packed: PackedScene) -> void:
+	SaveGame.reset_progress()
+	var root := packed.instantiate()
+	add_child(root)
+	root.call("_on_play")
+
+	var screens: Object = root.get("_screens")
+	if screens == null or not screens.has_method("show_cards"):
+		_fail("draft: layar kartu tidak ada")
+		root.queue_free()
+		return
+
+	root.call("_on_continue")
+	# Container geometry is resolved during the layout pass, not when the
+	# children are added. Reading rects in the same frame reported 36 px wide
+	# cards stacked on top of each other - stale values, not a broken screen.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var list: Object = screens.get("_card_list")
+	var buttons: Array = []
+	for child in (list as Node).get_children():
+		if child is Button:
+			buttons.append(child)
+	var want: int = int(Cfg.num(GameConfig.dict("meta"), "cardsOffered", 3.0))
+	if buttons.size() != want:
+		_fail("draft: %d kartu ditawarkan, meta.cardsOffered minta %d" % [buttons.size(), want])
+	if buttons.is_empty():
+		root.queue_free()
+		return
+
+	_check_card_layout(buttons)
+
+	var before: int = SaveGame.owned_cards.size()
+	(buttons[0] as Button).pressed.emit()
+
+	if SaveGame.owned_cards.size() != before + 1:
+		_fail("draft: kartu ditekan tapi tidak tersimpan")
+	var upgrades: Dictionary = SaveGame.active_upgrades()
+	if upgrades.is_empty():
+		_fail("draft: kartu dimiliki tapi active_upgrades() kosong")
+	var sim: Object = root.get("_sim")
+	if sim == null:
+		_fail("draft: stage berikutnya tidak dimulai setelah memilih kartu")
+	elif upgrades.has("startTroops"):
+		# The one upgrade whose effect is readable straight off the sim, so
+		# when it is the card drawn, check the number rather than trusting the
+		# plumbing.
+		var base: float = Cfg.num(GameConfig.dict("squad"), "startTroops", 5.0)
+		var expected: int = int(base) + int(upgrades["startTroops"])
+		if int(sim.get("troops")) != expected:
+			_fail(
+				"draft: troop %d, kartu seharusnya memberi %d" % [int(sim.get("troops")), expected]
+			)
+	print(
+		(
+			"  draft: %d kartu ditawarkan, '%s' dipilih, upgrade aktif %s"
+			% [buttons.size(), SaveGame.owned_cards[0], str(upgrades)]
+		)
+	)
+	SaveGame.reset_progress()
+	root.queue_free()
+
+
+## Measures the drafted cards after a layout pass.
+##
+## Nothing here can be seen - there is no GPU in this sandbox - but Godot's
+## layout engine runs headless all the same, so the geometry is real even
+## though the pixels are not. That is enough to catch the failures that
+## actually ship on a phone: a tap target too small for a thumb, cards
+## overlapping each other, or a column running off the bottom of a 19.5:9
+## screen.
+func _check_card_layout(buttons: Array) -> void:
+	var viewport: Vector2 = Vector2(
+		float(ProjectSettings.get_setting("display/window/size/viewport_width", 1080)),
+		float(ProjectSettings.get_setting("display/window/size/viewport_height", 1920))
+	)
+	var previous := Rect2()
+	for i in range(buttons.size()):
+		var rect: Rect2 = (buttons[i] as Button).get_global_rect()
+		if rect.size.y < 120.0:
+			_fail(
+				"draft: kartu %d tinggi %.0f px, docs/06 6.3a minta minimal 120" % [i, rect.size.y]
+			)
+		if rect.size.x < 200.0:
+			_fail("draft: kartu %d lebar cuma %.0f px" % [i, rect.size.x])
+		if rect.position.x < 0.0 or rect.end.x > viewport.x + 1.0:
+			_fail(
+				(
+					"draft: kartu %d keluar layar mendatar (%.0f..%.0f dari %.0f)"
+					% [i, rect.position.x, rect.end.x, viewport.x]
+				)
+			)
+		if rect.end.y > viewport.y + 1.0:
+			_fail(
+				"draft: kartu %d jatuh di bawah layar (%.0f > %.0f)" % [i, rect.end.y, viewport.y]
+			)
+		if i > 0 and rect.position.y < previous.end.y - 1.0:
+			_fail("draft: kartu %d tumpang tindih dengan kartu %d" % [i, i - 1])
+		previous = rect
+	_dump_layout(buttons, viewport)
+	print(
+		(
+			"  draft layout: %d kartu, tinggi %.0f px, lebar %.0f px, dasar %.0f/%.0f"
+			% [
+				buttons.size(),
+				(buttons[0] as Button).get_global_rect().size.y,
+				(buttons[0] as Button).get_global_rect().size.x,
+				previous.end.y,
+				viewport.y,
+			]
+		)
+	)
+
+
+## Writes the measured rects to JSON so tools/draw_layout.py can turn them
+## into a picture. The numbers are real measurements from Godot's layout
+## engine; the picture is a diagram of them, not a screenshot. Nothing in this
+## sandbox can render the actual screen.
+func _dump_layout(buttons: Array, viewport: Vector2) -> void:
+	var entries: Array = []
+	for i in range(buttons.size()):
+		var button := buttons[i] as Button
+		var rect: Rect2 = button.get_global_rect()
+		var caption := ""
+		for child in button.get_children():
+			for leaf in (child as Node).get_children():
+				if leaf is Label and caption.is_empty():
+					caption = (leaf as Label).text
+		(
+			entries
+			. append(
+				{
+					"label": caption if not caption.is_empty() else "card %d" % i,
+					"x": rect.position.x,
+					"y": rect.position.y,
+					"w": rect.size.x,
+					"h": rect.size.y,
+				}
+			)
+		)
+	var payload := {
+		"screen": "upgrade draft",
+		"viewport": {"w": viewport.x, "h": viewport.y},
+		"rects": entries,
+	}
+	var file := FileAccess.open("res://../screenshots/layout-cards.json", FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify(payload, "  "))
+		file.close()
 
 
 func _run_stage(packed: PackedScene, stage: int) -> void:

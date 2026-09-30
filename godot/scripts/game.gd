@@ -83,9 +83,50 @@ func _connect_screens() -> void:
 	_screens.connect("resume_pressed", _on_resume)
 	_screens.connect("restart_pressed", _on_restart)
 	_screens.connect("menu_pressed", _on_menu)
+	_screens.connect("continue_pressed", _on_continue)
+	_screens.connect("card_chosen", _on_card_chosen)
 
 
 func _on_play() -> void:
+	_screens.call("hide_all")
+	start_stage(_stage)
+	set_physics_process(true)
+
+
+## A win leads into the upgrade draft. The offer is drawn with a generator
+## seeded from the stage, never the sim RNG: pulling from the sim to pick cards
+## would shift every later draw and break replay determinism.
+func _on_continue() -> void:
+	_screens.call("show_cards", _draw_offers())
+
+
+## Picks the cards to offer. Cards already owned are filtered out while there
+## are enough left to fill the hand; once the pool runs low they come back, so
+## the screen never shows fewer options than meta.cardsOffered.
+func _draw_offers() -> Array:
+	var all: Array = GameConfig.list("meta.cards")
+	# GameConfig.num() takes no fallback and logs an error on a missing key,
+	# so read the meta block and let Cfg supply the default instead.
+	var want: int = int(Cfg.num(GameConfig.dict("meta"), "cardsOffered", 3.0))
+	var pool: Array = []
+	for entry in all:
+		var card: Dictionary = entry
+		if not SaveGame.owned_cards.has(String(card.get("id", ""))):
+			pool.append(card)
+	if pool.size() < want:
+		pool = all.duplicate()
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = STAGE_SEED_BASE + _stage * 104729
+	var offers: Array = []
+	for i in range(mini(want, pool.size())):
+		offers.append(pool.pop_at(rng.randi_range(0, pool.size() - 1)))
+	return offers
+
+
+func _on_card_chosen(card_id: String) -> void:
+	if not card_id.is_empty():
+		SaveGame.grant_card(card_id)
 	_screens.call("hide_all")
 	start_stage(_stage)
 	set_physics_process(true)

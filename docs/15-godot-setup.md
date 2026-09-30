@@ -201,10 +201,33 @@ yang menyentuh simulasi.
   `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`. Semuanya
   tersambung dan file-nya ada, tapi butuh run lebih panjang atau kondisi spesifik
   (boss di wave 5, 50 kill, combo 10) daripada smoke 30 detik.
-- **Kartu upgrade antar-stage**: `SaveGame` sudah mendukung penuh, layarnya belum.
+- **Kartu upgrade antar-stage: selesai.** Menang → layar result (tombol jadi
+  CONTINUE) → draft 3 kartu → stage berikutnya. Kartu dipilih dengan RNG
+  terpisah ber-seed stage, bukan RNG sim. Yang belum: peta stage 15 level dan
+  pemilih arena 5 kartu.
 - **Interpolasi render**: tampilan membaca state simulasi langsung, belum ada
   interpolasi alpha antar tick — terasa di 30 fps, tidak di 60.
 - **Pemilih arena 5 kartu**, slider volume, dan count-up tween di layar result.
+
+### Verifikasi layout tanpa render
+
+Render Godot tidak bisa ditangkap di sandbox ini, tapi **layout engine-nya tetap
+berjalan headless**. Smoke test membaca `Control.get_global_rect()` pada scene
+hidup dan menegakkan aturan docs/06: tap target ≥ 120 px, tidak tumpang tindih,
+tidak keluar layar. Rect-nya di-dump ke `screenshots/layout-cards.json` dan
+`tools/draw_layout.py` menggambarnya jadi diagram.
+
+Itu langsung berguna. Percobaan pertama melaporkan kartu selebar **36 px yang
+saling tumpang tindih** — ternyata rect dibaca sebelum layout pass, jadi
+nilainya basi; uji sekarang `await get_tree().process_frame` dulu. Setelah
+benar, diagramnya menunjukkan hal yang tidak terlihat dari angka: kartu berhenti
+di y=1120 dari layar 1920 dan menyisakan 800 px mati di bawahnya, menaruh semua
+target tap di atas tengah layar. Untuk game satu jempol itu salah, jadi kolomnya
+diturunkan ke y 888–1440.
+
+**Diagram itu bukan screenshot.** Geometrinya hasil pengukuran sungguhan; warna,
+tipografi, dan segala detail visual di dalamnya dikarang oleh skrip penggambar
+dan tidak membuktikan apa pun.
 - **Prototipe vs Godot**: prototipe masih memakai loop lama (player diam, bidik drag)
   dan belum mencerminkan desain Last War. Keduanya berbagi config dan palet, bukan kode.
 - **27 file `.cs` Unity warisan** di `unity/` — sudah tidak jadi target, tapi masih ada

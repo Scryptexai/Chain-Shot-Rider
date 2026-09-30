@@ -104,6 +104,11 @@ if ! "$VENV/bin/gdparse" --help >/dev/null 2>&1; then
   echo "Installing GDScript toolchain (gdtoolkit)..."
   python3 -m venv "$VENV" >/dev/null 2>&1
   "$VENV/bin/pip" install --quiet gdtoolkit==4.5.0 || log "gdtoolkit install failed"
+  # Asset pipeline: numpy and soundfile synthesise and encode the audio
+  # (soundfile bundles the only Vorbis encoder on the box), pillow draws the
+  # layout diagrams. The venv is not persisted between sessions, so these are
+  # installed here rather than by hand every time.
+  "$VENV/bin/pip" install --quiet numpy soundfile pillow || log "asset tooling install failed"
 fi
 if "$VENV/bin/gdparse" --help >/dev/null 2>&1; then
   log "gdtoolkit ready: $("$VENV/bin/gdlint" --version 2>/dev/null)"

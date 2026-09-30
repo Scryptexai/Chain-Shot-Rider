@@ -1,0 +1,30 @@
+{
+  "rects": [
+    {
+      "h": 168,
+      "label": "Light Boots",
+      "w": 900,
+      "x": 90,
+      "y": 888
+    },
+    {
+      "h": 168,
+      "label": "Good Intel",
+      "w": 900,
+      "x": 90,
+      "y": 1080
+    },
+    {
+      "h": 168,
+      "label": "Hollow Points",
+      "w": 900,
+      "x": 90,
+      "y": 1272
+    }
+  ],
+  "screen": "upgrade draft",
+  "viewport": {
+    "h": 1920,
+    "w": 1080
+  }
+}
