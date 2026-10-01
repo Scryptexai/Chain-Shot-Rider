@@ -4,7 +4,7 @@
  *
  * sim_test.js menguji simulasi tempur dengan DOM yang distub habis, sehingga
  * layar meta sengaja dilewati (UI_READY tetap false di sana). File ini menutup
- * celah itu: memuat prototype/index.html di dalam jsdom — DOM sungguhan, event
+ * celah itu: memuat index.html di dalam jsdom — DOM sungguhan, event
  * klik sungguhan, localStorage sungguhan — lalu menelusuri alur kampanye:
  *
  *   peta 15 stage -> main stage 1 -> menang -> draft 3 kartu -> pilih kartu
@@ -23,7 +23,7 @@ const path = require('path');
 const { JSDOM } = require('jsdom');
 
 const ROOT = path.resolve(__dirname, '..');
-const HTML = path.join(ROOT, 'prototype/index.html');
+const HTML = path.join(ROOT, 'index.html');
 const CONFIG = path.join(ROOT, 'Config/arena_config.json');
 
 let failures = 0;
@@ -54,7 +54,7 @@ function openPage(seedStorage) {
   const cfgText = fs.readFileSync(CONFIG, 'utf8');
 
   const dom = new JSDOM(html, {
-    url: 'http://localhost/prototype/',
+    url: 'http://localhost/',
     runScripts: 'dangerously',
     beforeParse(window) {
       if (seedStorage) {

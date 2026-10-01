@@ -2,7 +2,7 @@
 /**
  * sim_test.js — Harness simulasi headless untuk CHAIN RIDER.
  *
- * Memuat logika gameplay langsung dari prototype/index.html (satu sumber
+ * Memuat logika gameplay langsung dari index.html (satu sumber
  * kebenaran — tidak ada duplikasi aturan), menstub DOM/Canvas/WebAudio, lalu
  * menjalankan run penuh dengan BOT agar balance bisa diukur, bukan ditebak.
  *
@@ -76,9 +76,9 @@ function makeEnv() {
 // MEMUAT LOGIKA DARI PROTOTIPE
 // ---------------------------------------------------------------------------
 function loadGame() {
-  const html = fs.readFileSync(path.join(ROOT, 'prototype/index.html'), 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   let code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-  code = code.replace(/fetch\('\.\.\/Config[\s\S]*$/, '');   // buang boot browser
+  code = code.replace(/fetch\('Config[\s\S]*$/, '');   // buang boot browser
   code += `
     CFG = JSON.parse(require('fs').readFileSync(${JSON.stringify(path.join(ROOT, 'Config/arena_config.json'))}, 'utf8'));
     module.exports = { get S(){return S;}, CFG, loadVariant, resetRun, simulate,
