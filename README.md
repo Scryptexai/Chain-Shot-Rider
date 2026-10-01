@@ -13,7 +13,7 @@ Repo ini berisi **paket desain + implementasi arena** lengkap: blueprint, style 
 
 | Kalau kamu… | Buka ini |
 |---|---|
-| Ingin **merasakan** mekaniknya dulu | `prototype/index.html` → jalankan server lokal (lihat di bawah) |
+| Ingin **main sekarang tanpa memasang apa pun** | `python3 tools/serve_prototype.py 8080` → buka `http://localhost:8080/` |
 | Level designer | [`docs/01-arena-blueprint.md`](docs/01-arena-blueprint.md) → [`docs/10-level-variations.md`](docs/10-level-variations.md) |
 | Technical artist | [`docs/02-visual-style-guide.md`](docs/02-visual-style-guide.md) → [`docs/05-prefab-spec.md`](docs/05-prefab-spec.md) |
 | Programmer | [`docs/04-script-skeleton.md`](docs/04-script-skeleton.md) → `unity/Assets/ChainRider/Scripts/` |
@@ -87,18 +87,39 @@ godot --headless --path godot/ res://tests/smoke.tscn                 # renderer
 
 ---
 
-## Prototipe Interaktif (bukan MVP)
+## Build Web — cara melihat game TANPA memasang apa pun
 
-Prototipe web menjalankan **aturan yang sama** dengan spec Unity: fixed-step 60 Hz, ricochet analitik tanpa physics engine, bullet riding + slow-mo, 5 varian arena yang dibaca langsung dari `Config/arena_config.json`.
+Butuh satu perintah, tanpa Godot, tanpa unduhan, tanpa akun:
 
 ```bash
 python3 tools/serve_prototype.py 8080
 # buka http://localhost:8080/  (diarahkan ke /prototype/)
 ```
 
-**Kontrol:** `tap`/`klik` = tembak (atau rem saat riding) · `drag` = belokkan peluru · `←` `→` = steer keyboard · `1`–`5` = ganti arena · `R` = restart
+Yang terbuka adalah **MVP yang bisa dimainkan**, bukan demo teknis. Alurnya penuh:
 
-Prototipe ini **lebih lama dari MVP** dan belum memakai desain Last War: tidak ada peta stage, kartu upgrade, gate, maupun squad yang bisa digeser. Gunakan untuk iterasi layout arena — memindahkan bumper di JSON lalu me-refresh browser jauh lebih cepat daripada menjalankan ulang engine.
+**peta 15 stage → main → menang → draft 3 kartu → kartu tersimpan → stage berikutnya**
+
+Isinya sama dengan build Godot karena keduanya membaca **satu sumber kebenaran
+yang sama**, `Config/arena_config.json`: 8 kartu di `meta.cards`, `stageCount`,
+`cardsOffered`, `variantCycle`, dan `difficultyPerStage`. Tidak ada definisi
+kartu yang ditulis ulang di JavaScript, jadi kedua build tidak bisa menyimpang
+diam-diam.
+
+Loop tempur Last War sudah lengkap di sini: squad yang digeser kiri-kanan, gate
+matematika (dilewati squad **dan** peluru), auto-fire yang skalanya mengikuti
+jumlah pasukan, tekanan 5 wave, elite, dan boss di ujung stage — ditambah
+ricochet analitik tanpa physics engine, bullet riding, dan slow-mo. Simulasinya
+fixed-step 60 Hz dan deterministik: stage yang sama selalu bermain sama persis.
+
+**Kontrol:** `tap`/`klik` = tembak (atau rem saat riding) · `drag` = belokkan peluru · `←` `→` = geser squad · `R` = restart · tombol `1`–`5` di panel = intip arena
+
+**Progres** disimpan di `localStorage` browser; tombol `RESET PROGRESS` di peta
+mengosongkannya.
+
+Perbedaan dengan build Godot: prototipe menggambar lewat Canvas 2D dengan
+proyeksi 2.5D, sedangkan Godot merender 3D sungguhan lewat WebGL2. Aturan main,
+angka, dan progresinya sama.
 
 ---
 
@@ -151,6 +172,20 @@ node tools/sim_test.js                 # semua varian, bot standar
 node tools/sim_test.js --bot=skilled   # bot mahir
 node tools/sim_test.js --determinism   # uji replay 120 detik x 5 varian
 ```
+
+`sim_test.js` menstub DOM habis-habisan, jadi layar meta sengaja dilewati di
+sana. Lapisan meta diuji terpisah di DOM sungguhan dengan jsdom — klik asli,
+`localStorage` asli:
+
+```bash
+npm install --no-save jsdom && node tools/meta_test.js
+```
+
+Uji itu menelusuri peta 15 stage → main → menang → draft kartu → kartu tersimpan
+→ stage berikutnya terbuka, lalu membuktikan kartunya **benar-benar mengubah
+parameter simulasi** (bukan hiasan), determinisme tetap utuh, dan progres
+terbaca kembali setelah halaman dimuat ulang. Status terakhir: **34 pemeriksaan,
+0 gagal**.
 
 Kondisi saat ini (6 seed × 5 varian = 30 run, bot skilled):
 

@@ -98,6 +98,38 @@
   .keys { color:#7E90AC; font-size:11px; line-height:1.9; }
   .keys kbd { background:#1B2740; border-radius:4px; padding:1px 6px; font-size:10px; color:#C6D8F0; }
   @media (max-width:820px) { #panel { display:none; } }
+
+  /* ---- Meta layer: stage ladder + upgrade draft ---- */
+  #meta { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+          background:rgba(3,6,15,.78); backdrop-filter:blur(3px); z-index:40; }
+  .metaPanel { width:86%; max-height:86%; display:flex; flex-direction:column; align-items:stretch; }
+  .metaPanel h2 { margin:0; text-align:center; font-size:30px; letter-spacing:1px;
+                  color:var(--accentLit); text-shadow:0 2px 14px #000; }
+  .metaPanel h2.lose { color:#FF1744; }
+  .metaSub { margin:4px 0 14px; text-align:center; font-size:12px; color:#8A9BB8; letter-spacing:.5px; }
+  .stageList { overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px; }
+  .stageRow { position:relative; text-align:left; padding:10px 12px; border-radius:10px; cursor:pointer;
+              background:rgba(0,229,255,.08); border:1px solid rgba(0,229,255,.45); color:#F5F9FF;
+              font-family:inherit; display:block; min-height:48px; }
+  .stageRow:hover:not(:disabled) { background:rgba(0,229,255,.16); }
+  .stageRow.cleared { border-color:rgba(255,213,79,.6); background:rgba(255,213,79,.08); }
+  .stageRow.locked { border-color:rgba(138,155,184,.35); background:rgba(138,155,184,.05);
+                     color:#8A9BB8; cursor:not-allowed; }
+  .stageMain { display:block; font-size:14px; font-weight:800; }
+  .stageSub { display:block; font-size:10px; color:#8A9BB8; margin-top:2px; letter-spacing:.4px; }
+  .stageState { position:absolute; right:12px; top:50%; transform:translateY(-50%);
+                font-size:11px; letter-spacing:.6px; }
+  .stageRow.cleared .stageState { color:#FFD54F; }
+  .stageRow.locked .stageState { color:#8A9BB8; }
+  .cardList { display:flex; flex-direction:column; gap:10px; }
+  .upCard { text-align:left; padding:14px; border-radius:12px; cursor:pointer; color:#F5F9FF;
+            background:rgba(0,229,255,.10); border:1px solid rgba(0,229,255,.5); font-family:inherit; }
+  .upCard:hover { background:rgba(0,229,255,.2); }
+  .upCard span { display:block; font-size:17px; font-weight:800; }
+  .upCard em { display:block; font-style:normal; font-size:12px; color:#8A9BB8; margin-top:3px; }
+  .metaBtn { margin-top:12px; padding:12px; border-radius:10px; cursor:pointer; font-family:inherit;
+             font-weight:800; letter-spacing:.6px; color:#03060F; background:var(--accentLit); border:0; }
+  .metaBtn.ghost { background:transparent; color:#8A9BB8; border:1px solid rgba(138,155,184,.4); }
 </style>
 </head>
 <body>
@@ -133,6 +165,7 @@
         </div>
       </div>
       <div id="flash"></div>
+      <div id="meta"></div>
     </div>
   </div>
 
@@ -207,6 +240,7 @@ let CFG = null;               // diisi dari Config/arena_config.json
 const S = {
   variant:0, rng:null, tick:0, acc:0,
   state:'playing',            // playing | victory | defeat
+  stage:0, diff:1, upg:{},    // meta: ladder position, difficulty, active card stats
   score:0, combo:0, bestCombo:0, kills:0, lives:3, coins:0,
   waveIndex:-1, waveTimer:1.5, waveActive:false, leaked:0,
   ammo:5, reload:0,
@@ -366,6 +400,53 @@ function mixHex(a, b, t){
   return '#'+m(ar,br)+m(ag,bg)+m(ab,bb);
 }
 
+// =============================================================================
+// META — stage ladder + upgrade cards. Mirrors the Godot SaveGame autoload so
+// the browser build shows the same campaign the engine build does.
+// =============================================================================
+// Only the browser boot path sets this. The headless harness (tools/sim_test.js)
+// loads this same file with a stubbed DOM, so meta screens must stay out of its way.
+let UI_READY = false;
+const SAVE_KEY = 'chainrider.meta.v1';
+const META = { unlocked:0, cards:[], best:0 };
+
+function metaLoad(){
+  try{
+    const raw = localStorage.getItem(SAVE_KEY); if(!raw) return;
+    const d = JSON.parse(raw);
+    META.unlocked = d.unlocked|0;
+    META.cards = Array.isArray(d.cards) ? d.cards : [];
+    META.best = d.best|0;
+  }catch(e){ /* a corrupt save starts fresh rather than refusing to boot */ }
+}
+function metaSave(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(META)); }catch(e){} }
+
+function stageCount(){ return (CFG.meta && CFG.meta.stageCount) || 15; }
+function variantForStage(s){
+  const cyc = (CFG.meta && CFG.meta.variantCycle) || [0,1,2,3,4];
+  return cyc[s % cyc.length]|0;
+}
+function difficultyForStage(s){
+  return 1 + ((CFG.meta && CFG.meta.difficultyPerStage) || 0.12) * s;
+}
+
+// Folds owned cards into stat multipliers. Same rule as SaveGame.active_upgrades():
+// "mul" stacks multiplicatively, "add" additively.
+function activeUpgrades(){
+  const out = {};
+  const cards = (CFG.meta && CFG.meta.cards) || [];
+  for(const id of META.cards){
+    for(const c of cards){
+      if(c.id !== id) continue;
+      if(c.mul !== undefined) out[c.stat] = (out[c.stat] === undefined ? 1 : out[c.stat]) * c.mul;
+      else if(c.add !== undefined) out[c.stat] = (out[c.stat] === undefined ? 0 : out[c.stat]) + c.add;
+    }
+  }
+  return out;
+}
+function upMul(stat){ const v = S.upg[stat]; return v === undefined ? 1 : v; }
+function upAdd(stat){ const v = S.upg[stat]; return v === undefined ? 0 : v; }
+
 function loadVariant(idx){
   S.variant = idx;
   const v = CFG.variants[idx];
@@ -381,7 +462,10 @@ function loadVariant(idx){
 }
 
 function resetRun(){
-  S.rng = Rng(CFG.determinism.defaultSeed + S.variant*7919);
+  // Seeded from the stage, matching Godot: the same stage always plays the same way.
+  S.upg = activeUpgrades();
+  S.diff = difficultyForStage(S.stage);
+  S.rng = Rng(CFG.determinism.defaultSeed + S.stage*7919);
   S.tick=0; S.acc=0; S.state='playing';
   S.score=0; S.combo=0; S.bestCombo=0; S.kills=0; S.lives=CFG.player.lives; S.coins=0;
   S.waveIndex=-1; S.waveTimer=1.2; S.waveActive=false; S.leaked=0;
@@ -391,7 +475,7 @@ function resetRun(){
   S.aimAngle=0; S.aimDir=1; S.aimInput=0; S.boss=null; S.invul=0;
   const SQ=CFG.squad;
   S.squadX=0; S.squadTargetX=0; S.squadInput=null;
-  S.troops=SQ.startTroops; S.autoBullets=[]; S.autoCd=0;
+  S.troops=SQ.startTroops + upAdd('startTroops'); S.autoBullets=[]; S.autoCd=0;
   S.gates=[]; S.gateNextAt=CFG.gates.firstAtSeconds;
   S.chainCharge=0; S.chainCharges=0;
   for(const o of S.obstacles){ o.alive=true; o.hp = o.kind==='barrel'?1:(o.kind==='shieldWall'?3:Infinity); }
@@ -405,7 +489,7 @@ function resetRun(){
 const TYPES = ['grunt','runner','brute','shielder','splitter','bomber'];
 function typeStats(t){
   const e = CFG.enemyTypes.find(x=>x.id===t) || CFG.enemyTypes[0];
-  return { hp:e.hp, speed:e.speed, color:e.color,
+  return { hp:e.hp*S.diff, speed:e.speed*S.diff, color:e.color,
     score:e.score, r: t==='brute'?0.55:(t==='shielder'?0.5:0.38),
     armored: t==='brute'||t==='shielder',
     explode: t==='bomber', split: t==='splitter' };
@@ -454,7 +538,7 @@ function spawnBoss(){
   const def = CFG.bosses.find(b=>b.id===v.boss) || CFG.bosses[0];
   // Model damage berubah total (auto-fire kini DPS utama), jadi HP boss
   // diskalakan lewat satu lever yang bisa diukur, bukan diedit satu per satu.
-  const hpScale = (CFG.balance && CFG.balance.bossHpScale) || 1;
+  const hpScale = ((CFG.balance && CFG.balance.bossHpScale) || 1) * S.diff;
   const mk = (x,z,hp,r)=>({x,z,hp:hp*hpScale,maxHp:hp*hpScale,r,
                            shieldAngle:Math.PI,hit:0,alive:true,deadAt:-1});
 
@@ -614,8 +698,8 @@ function fire(){
   S.bullets.push({
     x:S.squadX, z:CFG.arena.playerSpawn.z + CFG.arena.muzzleOffset.z,
     px:S.squadX, pz:CFG.arena.playerSpawn.z,
-    dx:Math.sin(a), dz:Math.cos(a), speed:bc.baseSpeed, spdMul:1, dmgMul:1,
-    bounces:bc.maxBounce, bounceCount:0, riding:false,
+    dx:Math.sin(a), dz:Math.cos(a), speed:bc.baseSpeed, spdMul:1, dmgMul:upMul('chainDamageMul'),
+    bounces:bc.maxBounce + upAdd('bounceBudget'), bounceCount:0, riding:false,
     steer:0, steerMax:bc.steerMeterDuration, pending:0,
     alive:true, life:0, trail:[]
   });
@@ -858,7 +942,9 @@ function detonate(o, depth){
 function tickAutoFire(dt){
   const AF = CFG.squad.autoFire;
   if(S.troops > 0){
-    let rate = Math.min(AF.baseRatePerSec + AF.ratePerTroop*S.troops, AF.maxRatePerSec);
+    // Cap first, then the card multiplier - same order as Godot.
+    let rate = Math.min(AF.baseRatePerSec + AF.ratePerTroop*S.troops, AF.maxRatePerSec)
+               * upMul('fireRateMul');
     S.autoCd -= dt;
     if(S.autoCd <= 0){
       S.autoCd = 1/Math.max(rate, .01);
@@ -880,7 +966,7 @@ function tickAutoFire(dt){
         if(e.hp<=0) continue;
         const dx=b.x-e.x, dz=b.z-e.z;
         if(dx*dx+dz*dz <= (e.r+AF.projectileRadius)*(e.r+AF.projectileRadius)){
-          damageEnemy(e, AF.damage); gone=true; break;
+          damageEnemy(e, AF.damage*upMul('autoDamageMul')); gone=true; break;
         }
       }
     }
@@ -920,7 +1006,7 @@ function tickGates(dt){
   if(!G.enabled) return;
   const simTime = S.tick*FIXED_DT;
   if(simTime >= S.gateNextAt){
-    const left = pickGateOp(S.rng.f() < G.negativeSideChance);
+    const left = pickGateOp(S.rng.f() < G.negativeSideChance*upMul('negativeSideChance'));
     // Sisi kanan selalu berlawanan polaritas: gate yang kedua pintunya
     // merugikan bukan pilihan, melainkan pungutan.
     const right = pickGateOp(left.positive);
@@ -930,7 +1016,7 @@ function tickGates(dt){
   const pz = CFG.arena.playerSpawn.z;
   for(let i=S.gates.length-1;i>=0;i--){
     const g=S.gates[i];
-    g.z -= G.descendSpeed*dt;
+    g.z -= G.descendSpeed*S.diff*dt;
 
     if(!g.squadDone && g.z <= pz + G.height){
       const side = S.squadX >= 0 ? g.right : g.left;
@@ -998,12 +1084,12 @@ function simulate(dt){
     S.squadInput = null;
   }
   {
-    const d = S.squadTargetX - S.squadX, lim = SQ.moveSpeedMax*dt;
+    const d = S.squadTargetX - S.squadX, lim = SQ.moveSpeedMax*upMul('moveSpeedMul')*dt;
     S.squadX += Math.max(-lim, Math.min(lim, d*SQ.moveSmoothing*dt));
   }
   // Charge chain shot: waktu + bonus tiap kill.
   if(S.chainCharges < SQ.chainShot.maxCharges){
-    S.chainCharge += dt / SQ.chainShot.chargeSeconds;
+    S.chainCharge += dt * upMul('chargeRateMul') / SQ.chainShot.chargeSeconds;
     if(S.chainCharge >= 1){ S.chainCharge -= 1; S.chainCharges++; }
   }
   tickAutoFire(dt);
@@ -1112,6 +1198,110 @@ function endRun(victory){
   S.state = victory?'victory':'defeat';
   banner(victory?'VICTORY':'GAME OVER', victory?CFG.variants[S.variant].theme.primary:'#FF1744');
   S.targetTimeScale = victory?0.35:0.2; S.holdSlow = 1.2;
+  if(victory && S.stage+1 > META.unlocked) META.unlocked = Math.min(S.stage+1, stageCount());
+  if(S.score > META.best) META.best = S.score;
+  metaSave();
+  if(!UI_READY) return;
+  // Let the slow-mo and banner land before the meta screen takes over.
+  setTimeout(()=>{
+    if(S.state!=='victory' && S.state!=='defeat') return;  // already left this run
+    if(victory && META.cards.length < (CFG.meta.cards||[]).length) showCards(S.stage);
+    else showResult(victory);
+  }, 1600);
+}
+
+// =============================================================================
+// META SCREENS — stage map, card draft, result
+// =============================================================================
+function metaEl(){ return document.getElementById('meta'); }
+
+function hideMeta(){ const m = metaEl(); m.style.display='none'; m.innerHTML=''; }
+
+function startStage(stage){
+  S.stage = stage;
+  hideMeta();
+  loadVariant(variantForStage(stage));  // calls resetRun(), which applies cards
+}
+
+function showMap(){
+  S.state = 'menu';
+  const total = stageCount();
+  const highest = Math.min(META.unlocked, total-1);
+  let rows = '';
+  for(let i=0;i<total;i++){
+    const v = CFG.variants[variantForStage(i)];
+    const cleared = i < META.unlocked, locked = i > highest;
+    const label = cleared ? 'CLEARED' : (locked ? 'LOCKED' : 'PLAY');
+    rows += `<button class="stageRow ${cleared?'cleared':''} ${locked?'locked':''}" data-s="${i}" ${locked?'disabled':''}>
+        <span class="stageMain">STAGE ${String(i+1).padStart(2,'0')} \u00B7 ${v.name}</span>
+        <span class="stageSub">BOSS ${String(v.boss||'-').toUpperCase()} \u00B7 DIFFICULTY x${difficultyForStage(i).toFixed(2)}</span>
+        <b class="stageState">${label}</b></button>`;
+  }
+  const owned = META.cards.length
+    ? META.cards.map(id=>{ const c=(CFG.meta.cards||[]).find(x=>x.id===id); return c?c.name:id; }).join(' \u00B7 ')
+    : 'no upgrades yet';
+  const m = metaEl();
+  m.innerHTML = `<div class="metaPanel">
+      <h2>CAMPAIGN</h2>
+      <p class="metaSub">${Math.min(META.unlocked,total)} / ${total} CLEARED \u00B7 BEST ${META.best}<br>${owned}</p>
+      <div class="stageList" id="stageList">${rows}</div>
+      <button class="metaBtn ghost" id="mapReset">RESET PROGRESS</button>
+    </div>`;
+  m.style.display='flex';
+  m.querySelectorAll('.stageRow').forEach(btn=>
+    btn.addEventListener('click', ()=>startStage(+btn.dataset.s)));
+  document.getElementById('mapReset').addEventListener('click', ()=>{
+    META.unlocked=0; META.cards=[]; META.best=0; metaSave(); showMap();
+  });
+  // Centre the next playable stage, same intent as the Godot map auto-scroll.
+  const list = document.getElementById('stageList'), row = list.children[highest];
+  if(row) list.scrollTop = Math.max(0, row.offsetTop - list.clientHeight/2 + row.clientHeight/2);
+}
+
+// Drawn from a stage-derived seed, never from S.rng: pulling cosmetic draws out
+// of the sim stream would shift every later roll and break replay determinism.
+function drawOffers(stage){
+  const all = (CFG.meta && CFG.meta.cards) || [];
+  const want = (CFG.meta && CFG.meta.cardsOffered) || 3;
+  let pool = all.filter(c=>META.cards.indexOf(c.id) < 0);
+  if(pool.length < want) pool = all.slice();
+  const rng = Rng(CFG.determinism.defaultSeed + stage*104729);
+  const offers = [];
+  while(offers.length < want && pool.length)
+    offers.push(pool.splice(Math.floor(rng.f()*pool.length), 1)[0]);
+  return offers;
+}
+
+function showCards(stage){
+  S.state = 'menu';
+  const offers = drawOffers(stage);
+  const m = metaEl();
+  m.innerHTML = `<div class="metaPanel">
+      <h2>CHOOSE UPGRADE</h2>
+      <p class="metaSub">kept for the rest of the campaign</p>
+      <div class="cardList">${offers.map(c=>
+        `<button class="upCard" data-id="${c.id}"><span>${c.name}</span><em>${c.desc||''}</em></button>`
+      ).join('')}</div>
+    </div>`;
+  m.style.display='flex';
+  m.querySelectorAll('.upCard').forEach(btn=>btn.addEventListener('click', ()=>{
+    META.cards.push(btn.dataset.id); metaSave(); showMap();
+  }));
+}
+
+function showResult(victory){
+  S.state = 'menu';
+  const m = metaEl();
+  m.innerHTML = `<div class="metaPanel">
+      <h2 class="${victory?'':'lose'}">${victory?'VICTORY':'DEFEAT'}</h2>
+      <p class="metaSub">STAGE ${S.stage+1} \u00B7 SCORE ${S.score} \u00B7 KILLS ${S.kills}
+         \u00B7 BEST COMBO ${S.bestCombo}</p>
+      <button class="metaBtn" id="againBtn">RETRY STAGE</button>
+      <button class="metaBtn ghost" id="mapBtn">BACK TO MAP</button>
+    </div>`;
+  m.style.display='flex';
+  document.getElementById('againBtn').addEventListener('click', ()=>startStage(S.stage));
+  document.getElementById('mapBtn').addEventListener('click', showMap);
 }
 
 // =============================================================================
@@ -1446,7 +1636,7 @@ function setScore(){ el.score.textContent = S.score.toLocaleString('en-US'); }
 function setCombo(){ el.combo.textContent = S.combo>1?('x'+S.combo):'';
   el.combo.style.transform = 'scale(1.18)'; setTimeout(()=>el.combo.style.transform='scale(1)',80); }
 function setWaveLabel(){
-  el.wave.textContent = `WAVE ${Math.max(S.waveIndex+1,1)}/${CFG.spawn.waveCount}`; }
+  el.wave.textContent = `S${S.stage+1} \u00B7 WAVE ${Math.max(S.waveIndex+1,1)}/${CFG.spawn.waveCount}`; }
 function setSquadLabel(){
   el.squad.textContent = `SQUAD x${S.troops}`;
   el.squad.classList.toggle('low', S.troops <= 5);
@@ -1503,6 +1693,7 @@ cv.addEventListener('pointerup', e=>{
   if(dur<0.25 && moved<0.015) fire();
 });
 window.addEventListener('keydown', e=>{
+  if(S.state==='menu') return;
   if(e.key===' '){ e.preventDefault(); fire(); }
   if(e.key==='ArrowLeft'){ queueSteer(-1); queueAim(-6); }
   if(e.key==='ArrowRight'){ queueSteer(1); queueAim(6); }
@@ -1577,7 +1768,11 @@ fetch('../Config/arena_config.json')
     document.querySelectorAll('.vbtn').forEach(b=>
       b.addEventListener('click', ()=>loadVariant(+b.dataset.i)));
     resize();
-    loadVariant(0);
+    UI_READY = true;
+    metaLoad();
+    S.stage = Math.min(META.unlocked, stageCount()-1);
+    loadVariant(variantForStage(S.stage));
+    showMap();
     setScore(); setAmmo(); setHp(); setWaveLabel();
     requestAnimationFrame(frame);
   })
