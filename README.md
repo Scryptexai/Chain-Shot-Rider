@@ -126,9 +126,31 @@ fixed-step 60 Hz dan deterministik: stage yang sama selalu bermain sama persis.
 **Progres** disimpan di `localStorage` browser; tombol `RESET PROGRESS` di peta
 mengosongkannya.
 
-Perbedaan dengan build Godot: prototipe menggambar lewat Canvas 2D dengan
-proyeksi 2.5D, sedangkan Godot merender 3D sungguhan lewat WebGL2. Aturan main,
-angka, dan progresinya sama.
+### Bagaimana game ini dirender di web
+
+Pakai pendekatan yang sama dengan Last Harbor: **Three.js yang di-vendor**, bukan
+engine yang diekspor.
+
+| | Cara kerja |
+|---|---|
+| Library | `js/vendor/three.min.js` (r128, UMD, 603 KB) **ikut di repo** — tanpa CDN, tanpa npm saat runtime |
+| Pemuatan | `<script src="...">` biasa, bukan ES module, jadi host statis apa pun melayaninya |
+| Kanvas | `<canvas id="webgl-canvas">` dengan `THREE.WebGLRenderer` |
+| Kamera | `PerspectiveCamera` FOV 41, tinggi 51, miring 33,7 derajat ke arena 20x40 |
+| Cahaya | `HemisphereLight` + matahari `DirectionalLight` + fill — tanpa shadow map demi HP kentang |
+| Mesh | dibentuk prosedural dari primitif Three.js; tekstur grid dan label gate digambar ke `<canvas>` saat runtime, jadi **nol file aset** |
+| Build step | tidak ada |
+
+`js/render3d.js` hanya **menggambar**. Ia membaca `S` sekali per frame dan
+memindahkan mesh; ia tidak pernah menyentuh state simulasi dan tidak pernah
+memakai RNG simulasi. Itu yang menjaga build web dan build Godot tetap sejalan.
+
+Kalau WebGL tidak tersedia, `draw()` otomatis jatuh ke renderer Canvas 2D lama,
+jadi halamannya tidak pernah blank.
+
+Perbedaan dengan build Godot: Godot merender lewat WebGL2 dari engine yang
+dikompilasi ke WebAssembly. Keduanya 3D, dan aturan main, angka, serta
+progresinya sama karena membaca config yang sama.
 
 ---
 
@@ -189,6 +211,21 @@ sana. Lapisan meta diuji terpisah di DOM sungguhan dengan jsdom — klik asli,
 ```bash
 npm install --no-save jsdom && node tools/meta_test.js
 ```
+
+Renderer WebGL diuji tanpa GPU oleh `tools/render3d_test.js`. Three.js menghitung
+matriks proyeksi di CPU, jadi framing kamera bisa **dibuktikan secara matematis**:
+tes memproyeksikan sudut-sudut arena lewat kamera yang sama persis yang dipakai
+game, lalu memastikan tidak ada yang terpotong. Tes itu juga membangun scene
+graph sungguhan (hanya `WebGLRenderer` yang distub) untuk memastikan pemetaan
+`(x, y, -z)` benar, mesh dipakai ulang alih-alih dialokasikan tiap frame, dan
+renderer tidak mengubah state simulasi.
+
+```bash
+node tools/render3d_test.js
+```
+
+Yang **tidak** bisa dibuktikan tanpa GPU: warna, cahaya, dan rasa. Itu hanya
+bisa dinilai mata di browser sungguhan.
 
 Uji itu menelusuri peta 15 stage → main → menang → draft kartu → kartu tersimpan
 → stage berikutnya terbuka, lalu membuktikan kartunya **benar-benar mengubah

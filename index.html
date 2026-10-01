@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>CHAIN RIDER — Arena Prototype 2.5D</title>
+<title>CHAIN RIDER</title>
+<script src="js/vendor/three.min.js"></script>
+<script src="js/render3d.js"></script>
 <style>
   :root {
     /* --accent* is rewritten per arena variant by applyTheme(); every HUD
@@ -21,6 +23,9 @@
     border-radius:18px; overflow:hidden; box-shadow:0 0 70px rgba(var(--accentRGB),.16), 0 0 0 1px rgba(var(--accentRGB),.18);
     transition:box-shadow .35s ease; }
   canvas { display:block; width:100%; height:100%; touch-action:none; }
+  #webgl-canvas { position:absolute; inset:0; display:none; }
+  #webgl-canvas.on { display:block; }
+  #c.hidden { display:none; }
 
   /* ---------- HUD ---------- */
   .hud { position:absolute; inset:0; pointer-events:none; font-variant-numeric:tabular-nums; }
@@ -135,6 +140,7 @@
 <body>
 <div id="wrap">
   <div id="stage">
+    <canvas id="webgl-canvas"></canvas>
     <canvas id="c"></canvas>
     <div class="hud">
       <div id="vig"></div>
@@ -451,6 +457,7 @@ function loadVariant(idx){
   S.variant = idx;
   const v = CFG.variants[idx];
   applyTheme(v.theme);
+  if(R3D_ON) R3D.setAccent(parseInt(v.theme.primary.replace('#',''), 16));
   S.obstacles = v.obstacles.map(o=>({
     kind:o.type, x:o.x, z:o.z, bx:o.x,
     r:o.radius ?? (CFG.obstacleDefaults[o.type]?.radius ?? 0.9),
@@ -1311,6 +1318,7 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let W=0,H=0,DPR=1;
 function resize(){
   const r = cv.getBoundingClientRect();
+  if(R3D_ON) R3D.resize(r.width, r.height);
   DPR = Math.min(2, window.devicePixelRatio||1);
   cv.width = Math.floor(r.width*DPR); cv.height = Math.floor(r.height*DPR);
   W = r.width; H = r.height;
@@ -1361,6 +1369,9 @@ function proj(x, z){
 }
 
 function draw(){
+  // WebGL is the real renderer. The 2D path below stays as a fallback for
+  // machines without WebGL and for the headless harness, which has no GPU.
+  if(R3D_ON){ R3D.sync(S, CFG); return; }
   setSquadLabel();
   const v = CFG.variants[S.variant], th = v.theme;
   ctx.save(); ctx.scale(DPR,DPR);
@@ -1755,6 +1766,26 @@ const P = {};
 ['sFps','sTick','sEnemies','sBounce','sDmg','sSpd','sTs','sKills']
   .forEach(id=>P[id]=document.getElementById(id));
 
+/**
+ * Brings up the WebGL renderer. Returns false when Three.js is missing or the
+ * context cannot be created (old device, blocked GPU, headless test), and the
+ * 2D canvas takes over instead of the page breaking.
+ */
+let R3D_ON = false;
+function startRenderer3D(){
+  try{
+    const gl = document.getElementById('webgl-canvas');
+    if(!gl || typeof THREE === 'undefined' || !window.R3D) return false;
+    if(!R3D.init(gl)) return false;
+    gl.classList.add('on');
+    cv.classList.add('hidden');
+    return true;
+  }catch(err){
+    console.warn('WebGL tidak tersedia, memakai kanvas 2D:', err);
+    return false;
+  }
+}
+
 // =============================================================================
 // BOOT
 // =============================================================================
@@ -1767,6 +1798,7 @@ fetch('Config/arena_config.json')
       `<button class="vbtn" data-i="${i}">${v.index}. ${v.name}<em>${v.description}</em></button>`).join('');
     document.querySelectorAll('.vbtn').forEach(b=>
       b.addEventListener('click', ()=>loadVariant(+b.dataset.i)));
+    R3D_ON = startRenderer3D();
     resize();
     UI_READY = true;
     metaLoad();
