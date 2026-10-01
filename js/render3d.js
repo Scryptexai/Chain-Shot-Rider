@@ -132,10 +132,10 @@
   function makeTroop(color) {
     var grp = new THREE.Group();
     var mat = new THREE.MeshLambertMaterial({ color: color, emissive: color, emissiveIntensity: 0.22 });
-    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.52, 7), mat);
-    body.position.y = 0.26;
-    var head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), mat);
-    head.position.y = 0.62;
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.32, 0.85, 8), mat);
+    body.position.y = 0.42;
+    var head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), mat);
+    head.position.y = 1.02;
     grp.add(body); grp.add(head);
     return grp;
   }
@@ -156,12 +156,12 @@
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(PAL.bg);
-    scene.fog = new THREE.FogExp2(PAL.bg, 0.016);
+    scene.fog = new THREE.FogExp2(PAL.bg, 0.009);
 
     camera = makeCamera(9 / 16);
 
-    scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x0a1030, 1.05));
-    var sun = new THREE.DirectionalLight(0xfff0e0, 1.35);
+    scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x16224a, 1.3));
+    var sun = new THREE.DirectionalLight(0xfff0e0, 1.7);
     sun.position.set(16, 34, 18); scene.add(sun);
     var fill = new THREE.DirectionalLight(0x4da6ff, 0.55);
     fill.position.set(-18, 20, -16); scene.add(fill);
@@ -260,11 +260,12 @@
     pools.troops.begin();
     var shown = Math.min(S.troops || 0, 48);
     var perRow = 6, sx = S.squadX || 0;
+    var spread = 0.62;
     var sz = (CFG.arena && CFG.arena.playerSpawn ? CFG.arena.playerSpawn.z : 2);
     for (var i = 0; i < shown; i++) {
       var row = Math.floor(i / perRow), col = i % perRow;
       var t = pools.troops.take();
-      t.position.set(sx + (col - (perRow - 1) / 2) * 0.42, 0, -(sz - row * 0.45));
+      t.position.set(sx + (col - (perRow - 1) / 2) * spread, 0, -(sz - row * 0.6));
     }
     pools.troops.end();
 
@@ -274,9 +275,9 @@
     for (var e = 0; e < list.length; e++) {
       var en = list[e];
       var m = pools.enemies.take();
-      var r = en.r || 0.4;
-      m.scale.set(r, r * 1.15, r);
-      m.position.set(en.x, r * 1.1, -en.z);
+      var r = (en.r || 0.4) * 1.75;
+      m.scale.set(r, r * 1.35, r);
+      m.position.set(en.x, r * 1.25, -en.z);
       m.material.color.set(en.color || '#ff4d3d');
       m.material.emissive.set(en.hit > 0 ? 0xffffff : 0x000000);
     }
@@ -287,7 +288,7 @@
     var ab = S.autoBullets || [];
     for (var a = 0; a < ab.length; a++) {
       var bm = pools.bullets.take();
-      bm.scale.setScalar(0.13);
+      bm.scale.setScalar(0.2);
       bm.position.set(ab[a].x, 0.45, -ab[a].z);
       bm.material.color.setHex(PAL.bullet);
     }
@@ -295,7 +296,7 @@
     for (var b = 0; b < cb.length; b++) {
       if (!cb[b].alive) continue;
       var cm = pools.bullets.take();
-      cm.scale.setScalar(0.3);
+      cm.scale.setScalar(0.46);
       cm.position.set(cb[b].x, 0.5, -cb[b].z);
       cm.material.color.setHex(PAL.chain);
     }
