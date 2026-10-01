@@ -71,7 +71,7 @@ Sebuah build dinyatakan lolos hanya kalau **seluruh item wajib (⚑)** hijau di 
 | B-4 ⚑ | **Lintas frame rate** | Jalankan replay pada 30, 60, 120 FPS (cap manual) | Hasil identik (fixed-step bekerja) |
 | B-5 | **Dengan slow-mo** | Replay yang memicu bullet time berkali-kali | Identik — slow-mo hanya mengubah frekuensi tick |
 | B-6 | **Audit `UnityEngine.Random`** | `grep -rn "Random\." Scripts/` | Hanya muncul di kode kosmetik (VFX/pitch), **tidak** di jalur simulasi |
-| B-6b | **Audit `Math.random()` di prototipe** | `grep -n "Math.random()" prototype/index.html` | Hanya 2 kemunculan, keduanya bertanda `// kosmetik` (pitch SFX, shake render). Semua keacakan simulasi lewat `S.rng` |
+| B-6b | **Audit `Math.random()` di prototipe** | `grep -n "Math.random()" index.html` | Hanya 2 kemunculan, keduanya bertanda `// kosmetik` (pitch SFX, shake render). Semua keacakan simulasi lewat `S.rng` |
 | B-7 | **Audit `Time.deltaTime`** | `grep -rn "Time.deltaTime\|Time.time" Scripts/` | Hanya di kode render/UI; simulasi memakai `SimClock` |
 | B-8 | **Urutan iterasi** | Review kode | Tidak ada `foreach` `Dictionary`/`HashSet` yang memengaruhi state |
 | B-9 | Pause/resume | Pause 10 detik di tengah run, lanjutkan | Tidak ada lompatan posisi; akumulator waktu dibuang dengan benar |

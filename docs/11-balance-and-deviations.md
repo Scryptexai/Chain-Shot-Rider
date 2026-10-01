@@ -2,7 +2,7 @@
 
 Dokumen ini mencatat **perubahan yang menyimpang dari spesifikasi awal**, alasannya,
 dan angka yang mendasarinya. Semua angka berasal dari `tools/sim_test.js` — harness
-headless yang memuat logika gameplay langsung dari `prototype/index.html`, jadi yang
+headless yang memuat logika gameplay langsung dari `index.html`, jadi yang
 diukur adalah aturan yang benar-benar berjalan, bukan salinannya.
 
 Metode baku: **6 seed × 5 varian = 30 run per konfigurasi**, bot "skilled".

@@ -5,7 +5,8 @@ serve_web_build.py - Static server for the exported Godot web build.
     godot --headless --path godot/ --export-release "Web" ../build/web/index.html
     python3 tools/serve_web_build.py [port]        # default 8081
 
-This is NOT tools/serve_prototype.py. That one serves the old JavaScript
+This is NOT the plain `python3 -m http.server` used for the web build at the
+repo root. That one serves the JavaScript
 prototype from the repo root; this one serves the real engine build from
 build/web and is the only way to see the actual MVP in a browser.
 

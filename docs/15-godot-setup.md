@@ -232,7 +232,7 @@ dan tidak membuktikan apa pun.
   dan belum mencerminkan desain Last War. Keduanya berbagi config dan palet, bukan kode.
 - **27 file `.cs` Unity warisan** di `unity/` — sudah tidak jadi target, tapi masih ada
   di repo dan bisa membingungkan.
-- **Komentar Bahasa Indonesia di `prototype/index.html`** melanggar aturan "komentar kode
+- **Komentar Bahasa Indonesia di `index.html`** melanggar aturan "komentar kode
   dalam English" yang berlaku di repo ini. File `.gd` sudah patuh.
 
 ---
@@ -280,7 +280,7 @@ Tanpa engine, yang masih berjalan hanya gerbang statis: `gdparse`, `gdlint`,
 
 ## Menjalankan MVP asli di mesin sendiri
 
-Yang dilayani `tools/serve_prototype.py` adalah **prototipe JavaScript lama**,
+Yang dilayani `python3 -m http.server` adalah **build web JavaScript**,
 bukan MVP. MVP hidup di `godot/` dan butuh engine untuk dijalankan. Sandbox
 agent tidak punya GL/X sehingga tidak bisa merendernya; mesin Anda bisa.
 

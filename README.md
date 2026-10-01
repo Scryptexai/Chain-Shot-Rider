@@ -13,7 +13,7 @@ Repo ini berisi **paket desain + implementasi arena** lengkap: blueprint, style 
 
 | Kalau kamu… | Buka ini |
 |---|---|
-| Ingin **main sekarang tanpa memasang apa pun** | `python3 tools/serve_prototype.py 8080` → buka `http://localhost:8080/` |
+| Ingin **main sekarang tanpa memasang apa pun** | `python3 -m http.server 8000` → buka `http://localhost:8000` |
 | Level designer | [`docs/01-arena-blueprint.md`](docs/01-arena-blueprint.md) → [`docs/10-level-variations.md`](docs/10-level-variations.md) |
 | Technical artist | [`docs/02-visual-style-guide.md`](docs/02-visual-style-guide.md) → [`docs/05-prefab-spec.md`](docs/05-prefab-spec.md) |
 | Programmer | [`docs/04-script-skeleton.md`](docs/04-script-skeleton.md) → `unity/Assets/ChainRider/Scripts/` |
@@ -92,9 +92,18 @@ godot --headless --path godot/ res://tests/smoke.tscn                 # renderer
 Butuh satu perintah, tanpa Godot, tanpa unduhan, tanpa akun:
 
 ```bash
-python3 tools/serve_prototype.py 8080
-# buka http://localhost:8080/  (diarahkan ke /prototype/)
+python3 -m http.server 8000
+# buka http://localhost:8000
 ```
+
+Tanpa build step, tanpa dependency, tanpa Godot, tanpa npm. `index.html` ada di
+root repo, jadi perintah standar itu sudah cukup — tidak ada skrip server buatan
+sendiri dan tidak ada pengalihan URL.
+
+Karena letaknya di root, repo ini juga bisa langsung disajikan **GitHub Pages**:
+`Settings → Pages → Source: Deploy from a branch → Branch:
+arena/01a0ee17-chain-shot-rider, folder: / (root)`. Setelah itu game bisa dibuka
+dari HP lewat URL biasa, tanpa memasang apa pun sama sekali.
 
 Yang terbuka adalah **MVP yang bisa dimainkan**, bukan demo teknis. Alurnya penuh:
 
@@ -164,7 +173,7 @@ Pemisahan 70,6 vs 3,0 pasukan adalah buktinya: kemahiran terbayar.
 ## Harness Simulasi & Status Balance
 
 Balance game ini **diukur, bukan ditebak**. `tools/sim_test.js` memuat logika
-gameplay langsung dari `prototype/index.html` (tidak ada duplikasi aturan),
+gameplay langsung dari `index.html` (tidak ada duplikasi aturan),
 menstub DOM/Canvas/WebAudio, lalu menjalankan run penuh dengan bot.
 
 ```bash
@@ -210,7 +219,7 @@ Splitter yang lolos karena uji lama terlalu pendek. Keduanya dijelaskan di
 ```text
 Config/arena_config.json     ← SUMBER KEBENARAN TUNGGAL (arena, bullet, spawn, 5 varian)
 tools/blueprint_gen.py       ← generator docs/01 dari JSON di atas
-prototype/index.html         ← prototipe 2.5D playable (canvas, tanpa dependency)
+index.html                   ← GAME: build web playable (2.5D canvas, tanpa dependency)
 docs/                        ← 10 dokumen deliverable + referensi visual
 unity/Assets/ChainRider/
   Scripts/

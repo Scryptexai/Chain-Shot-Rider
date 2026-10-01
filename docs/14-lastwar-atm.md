@@ -84,7 +84,7 @@ Monotonik dan berjarak lebar: tiap kenaikan kemahiran kira-kira menggandakan has
 
 ## Hasil porting ke prototipe web
 
-Loop ini sudah berjalan di `prototype/index.html` dan diukur harness. 6 seed × 5 varian per baris, bot mahir vs bot acak:
+Loop ini sudah berjalan di `index.html` dan diukur harness. 6 seed × 5 varian per baris, bot mahir vs bot acak:
 
 | | Bot mahir | Bot acak |
 |---|---|---|

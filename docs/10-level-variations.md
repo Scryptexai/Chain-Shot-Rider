@@ -98,7 +98,7 @@ Setiap varian harus mengubah **cara pemain berpikir**, bukan sekadar warna. Atur
 ## Boss: Status Implementasi
 
 Kelima boss sudah **diimplementasikan dan berjalan**, bukan sekadar deskripsi desain.
-Prototipe: `prototype/index.html` (`spawnBoss` / `tickBoss` / `damageBoss`).
+Prototipe: `index.html` (`spawnBoss` / `tickBoss` / `damageBoss`).
 Unity: `Boss/BossController.cs`.
 
 | Varian | Boss | `BossPattern` | HP | Aturan perisai |
@@ -131,4 +131,4 @@ kelima varian. Detail angka di [`11-balance-and-deviations.md`](11-balance-and-d
    di `BossPattern` dan satu metode `TickX` di `BossController`.
 4. Validasi dengan aturan penempatan di `docs/01-arena-blueprint.md` §1.6:
    koridor ≥ 2.0 u, tidak ada obstacle di `Z < 7` atau `Z > 32`, simetri kiri-kanan, gravity well tidak tumpang-tindih.
-5. Uji di prototipe web (`prototype/index.html`) sebelum masuk Unity — iterasi layout di sana **10× lebih cepat**.
+5. Uji di prototipe web (`index.html`) sebelum masuk Unity — iterasi layout di sana **10× lebih cepat**.
