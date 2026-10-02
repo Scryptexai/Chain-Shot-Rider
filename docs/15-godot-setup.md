@@ -192,6 +192,24 @@ demi kosmetik akan menggeser urutan acak dan merusak replay. Setelah kedua
 perubahan, `tools/sim_test.js` tetap 3/5 menang, rata-rata 146,9 s: tidak ada
 yang menyentuh simulasi.
 
+## Menjalankan build web Godot
+
+```bash
+bash tools/export_web.sh --serve
+```
+
+Ekspor WebAssembly resmi dari `godot/`, lalu disajikan di `:8080`. Engine
+(`Godot_v4.3-stable_linux.x86_64.zip`) dan template web
+(`tools/web_template/web_nothreads_release.zip`) dikomit di repo karena tidak
+ada satu pun host unduhan Godot yang bisa dijangkau dari sandbox ini: aset
+rilis GitHub dilayani `release-assets.githubusercontent.com` (185.199.111.133)
+yang koneksinya ditolak, sama seperti tuxfamily, jsDelivr, unpkg, archive.org,
+Docker Hub, dan ghcr.io. Yang terbuka hanya PyPI, npm, `github.com`,
+`api.github.com`, dan `codeload.github.com`.
+
+Preset Web memakai `thread_support=false` dan renderer `gl_compatibility`;
+alasan kedua pilihan itu ada di README dan di `tools/web_template/README.md`.
+
 ## Yang belum ada
 
 Status ini memisahkan dua build dengan sengaja: **build web** adalah artefak

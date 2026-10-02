@@ -41,6 +41,9 @@ common/max_physics_steps_per_frame=4
 
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="mobile"
+; Web export in Godot 4.3 runs on WebGL2 only: Vulkan-based Forward+/Mobile
+; are not available in the browser, so the web build uses Compatibility.
+renderer/rendering_method.web="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 lights_and_shadows/directional_shadow/size=2048
 anti_aliasing/quality/msaa_3d=1

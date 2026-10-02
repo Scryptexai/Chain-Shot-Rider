@@ -13,7 +13,8 @@ Repo ini berisi **paket desain + implementasi arena** lengkap: blueprint, style 
 
 | Kalau kamu… | Buka ini |
 |---|---|
-| Ingin **main sekarang tanpa memasang apa pun** | `python3 -m http.server 8000` → buka `http://localhost:8000` |
+| Ingin **main game Godot yang sebenarnya** | `bash tools/export_web.sh --serve` → buka `http://localhost:8080` |
+| Ingin **main cepat tanpa build** | klik dua kali `chain-rider.html` |
 | Level designer | [`docs/01-arena-blueprint.md`](docs/01-arena-blueprint.md) → [`docs/10-level-variations.md`](docs/10-level-variations.md) |
 | Technical artist | [`docs/02-visual-style-guide.md`](docs/02-visual-style-guide.md) → [`docs/05-prefab-spec.md`](docs/05-prefab-spec.md) |
 | Programmer | [`docs/04-script-skeleton.md`](docs/04-script-skeleton.md) → `unity/Assets/ChainRider/Scripts/` |
@@ -99,6 +100,43 @@ HP dan tetap jalan.
 Dibangun ulang dengan `python3 tools/build_standalone.py` setiap kali sumbernya
 berubah. Diverifikasi dibuka lewat `file://` di Chromium sungguhan: WebGL
 aktif, 11 model termuat, simulasi berjalan, konsol bersih.
+
+## Build utama: Godot 4.3 → WebAssembly
+
+Ini **game Godot yang sesungguhnya** — `godot/` dikompilasi ke WebAssembly dan
+dijalankan browser. Bukan tiruan, bukan port: `.pck`-nya berisi scene dan
+script `.gd` yang sama persis dengan build mobile.
+
+```bash
+bash tools/export_web.sh --serve      # ekspor + sajikan di :8080
+```
+
+Satu perintah, sekitar 10 detik, tanpa unduhan. Engine dan template-nya sudah
+ada di repo karena **semua host unduhan Godot diblokir dari sandbox ini**
+(rinciannya di [`tools/web_template/README.md`](tools/web_template/README.md)).
+
+Terverifikasi di Chromium sungguhan: `Godot Engine v4.3.stable.official.77dcf97d8`,
+`WebGL 2.0 — Compatibility`, menu → peta 15 stage → gameplay, konsol bersih.
+
+Tiga hal yang membuat build ini jalan di mana saja, termasuk di dalam iframe:
+
+| Keputusan | Alasan |
+|---|---|
+| `variant/thread_support=false` | Build ber-thread butuh `SharedArrayBuffer`, yang butuh header COOP/COEP. Di dalam iframe preview dokumen induk tidak *cross-origin isolated*, jadi build ber-thread hanya menampilkan kanvas kosong. |
+| `renderer/rendering_method.web="gl_compatibility"` | Forward+/Mobile memakai Vulkan. Di browser tidak ada Vulkan; Godot 4.3 web hanya jalan di WebGL2. |
+| `tools/serve_web.py`, bukan `http.server` | `.wasm` wajib dikirim sebagai `application/wasm`, kalau tidak `WebAssembly.instantiateStreaming()` menolaknya. |
+
+Keluarannya ada di `godot-web/` (48 MB) dan **tidak di-commit** — regenerasi
+jauh lebih murah daripada menyimpannya di git.
+
+### Hubungannya dengan build JavaScript
+
+`index.html` / `chain-rider.html` adalah **prototipe web terpisah** yang ditulis
+tangan dengan Three.js. Gunanya: dibuka tanpa build apa pun dan dipakai
+bereksperimen cepat. Itu **bukan** hasil ekspor Godot, dan kalau yang Anda mau
+adalah "game Godot di browser", yang benar adalah `tools/export_web.sh`.
+
+---
 
 ## Build Web — versi folder (untuk pengembangan)
 

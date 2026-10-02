@@ -48,3 +48,6 @@ Godot_v*_macos.universal
 # Node (only used by the headless screenshot renderer)
 node_modules/
 package-lock.json
+
+# Godot WebAssembly build output (48 MB, regenerate with tools/export_web.sh)
+godot-web/
