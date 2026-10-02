@@ -113,10 +113,24 @@ Tanpa build step, tanpa dependency, tanpa Godot, tanpa npm. `index.html` ada di
 root repo, jadi perintah standar itu sudah cukup — tidak ada skrip server buatan
 sendiri dan tidak ada pengalihan URL.
 
-Karena letaknya di root, repo ini juga bisa langsung disajikan **GitHub Pages**:
-`Settings → Pages → Source: Deploy from a branch → Branch:
-arena/01a0ee17-chain-shot-rider, folder: / (root)`. Setelah itu game bisa dibuka
-dari HP lewat URL biasa, tanpa memasang apa pun sama sekali.
+### GitHub Pages tidak diperlukan
+
+Pages **tidak dipakai dan tidak perlu diaktifkan**. Untuk memainkan game cukup
+klik dua kali `chain-rider.html`; untuk mengembangkannya cukup `http.server` di
+atas. Pages hanya relevan pada satu kasus: Anda ingin membuka game dari
+perangkat lain (HP) lewat URL internet, tanpa menyalin berkasnya. Kalau itu yang
+dibutuhkan: `Settings → Pages → Source: Deploy from a branch → Branch:
+arena/01a0ee17-chain-shot-rider, folder: / (root)`. Selain kasus itu, abaikan.
+
+### Kenapa versi folder butuh server, sedangkan satu-berkas tidak
+
+Browser memberlakukan CORS pada berkas yang dibuka lewat `file://`: asalnya
+dianggap `null`, sehingga `fetch()` dan `<script type="module">` diblokir.
+Versi folder mengambil `Config/arena_config.json` dan 11 `.glb` lewat `fetch()`,
+jadi ia **wajib** disajikan dari sebuah origin HTTP. `chain-rider.html` tidak
+kena aturan itu karena config, three.js, loader, dan seluruh model sudah
+ditanam sebagai base64 di dalam satu berkas — tidak ada satu pun permintaan
+jaringan saat boot.
 
 Yang terbuka adalah **MVP yang bisa dimainkan**, bukan demo teknis. Alurnya penuh:
 
