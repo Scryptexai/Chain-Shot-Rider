@@ -33,15 +33,174 @@ func _ready() -> void:
 		_run_stage(packed, stage)
 	await _run_card_draft(packed)
 	await _run_stage_map(packed)
+	await _run_hud_layout(packed)
 	_finish()
 
 
-## Drives the fifteen stage ladder: open it, measure every rung, and press one.
+## Mengukur HUD saat sebuah run benar-benar berjalan.
 ##
-## A ladder screen fails in ways a screenshot would not show. Rows can collapse
-## to a few pixels, locked stages can stay pressable, and the scroll can sit at
-## the top so the stage you are actually on is off screen. All three are
-## checked here against real geometry from the layout pass.
+## HUD adalah satu-satunya layar yang tidak pernah bisa dilihat di sandbox ini
+## (tidak ada GPU), tapi mesin layout Godot tetap jalan headless, jadi semua
+## angka di bawah ini nyata. Yang diperiksa adalah hal-hal yang membuat sebuah
+## HUD gagal di ponsel sungguhan dan tidak pernah terlihat di kode:
+##   · tombol aksi terlalu kecil untuk ibu jari, atau berada di luar
+##     jangkauannya (bagian atas layar),
+##   · tombol jeda masuk ke wilayah notch,
+##   · pod informasi menindih tombol aksi,
+##   · dan tombol yang terpasang tapi tidak tersambung ke apa pun.
+func _run_hud_layout(packed: PackedScene) -> void:
+	SaveGame.reset_progress()
+	var root := packed.instantiate()
+	add_child(root)
+	root.call("_on_stage_chosen", 0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var hud: Object = root.get("_hud")
+	var screens: Object = root.get("_screens")
+	var fire := hud.get("_fire_button") as Button
+	var pause := hud.get("_pause_button") as Button
+	if fire == null or pause == null:
+		_fail("hud: tombol chain shot / jeda tidak ada")
+		root.queue_free()
+		return
+
+	var viewport: Vector2 = Vector2(
+		float(ProjectSettings.get_setting("display/window/size/viewport_width", 1080)),
+		float(ProjectSettings.get_setting("display/window/size/viewport_height", 1920))
+	)
+	var fire_rect: Rect2 = fire.get_global_rect()
+	var pause_rect: Rect2 = pause.get_global_rect()
+
+	if fire_rect.size.x < 200.0 or fire_rect.size.y < 200.0:
+		_fail("hud: tombol chain shot %.0fx%.0f px, terlalu kecil untuk ibu jari" % [fire_rect.size.x, fire_rect.size.y])
+	# Zona ibu jari: aksi utama harus duduk di sepertiga bawah layar.
+	if fire_rect.get_center().y < viewport.y * 0.62:
+		_fail("hud: tombol chain shot di luar zona ibu jari (y %.0f dari %.0f)" % [fire_rect.get_center().y, viewport.y])
+	if fire_rect.end.x > viewport.x + 1.0 or fire_rect.end.y > viewport.y + 1.0:
+		_fail("hud: tombol chain shot keluar layar")
+	if absf(pause_rect.size.x - pause_rect.size.y) > 8.0:
+		_fail("hud: tombol jeda tidak persegi (%.0fx%.0f)" % [pause_rect.size.x, pause_rect.size.y])
+	if pause_rect.size.x < 100.0 or pause_rect.size.y < 100.0:
+		_fail("hud: tombol jeda %.0fx%.0f px, di bawah lantai 100 px" % [pause_rect.size.x, pause_rect.size.y])
+	if pause_rect.position.y < 80.0:
+		_fail("hud: tombol jeda masuk wilayah notch (y %.0f)" % pause_rect.position.y)
+	if pause_rect.end.x > viewport.x + 1.0:
+		_fail("hud: tombol jeda keluar layar")
+
+	_check_hud_overlap(hud, viewport)
+
+	# Tombol jeda harus benar-benar menjeda: sebelum ini tidak ada satu pun
+	# jalan keluar dari run selain kalah.
+	pause.pressed.emit()
+	if root.call("is_physics_processing"):
+		_fail("hud: tombol jeda tidak menghentikan simulasi")
+	var pause_screen := screens.get("_pause") as Control
+	if pause_screen == null or not pause_screen.visible:
+		_fail("hud: layar jeda tidak muncul")
+	root.call("_on_resume")
+
+	# Dan tombol chain shot harus memicu tembakan yang sama dengan tap arena.
+	root.set("_pending_tap", false)
+	fire.pressed.emit()
+	if not bool(root.get("_pending_tap")):
+		_fail("hud: tombol chain shot tidak memicu tembakan")
+
+	_dump_hud_layout(hud, viewport)
+	print(
+		(
+			"  hud: chain shot %.0fx%.0f px @ y %.0f/%.0f, jeda %.0f px, jeda+tembak tersambung"
+			% [fire_rect.size.x, fire_rect.size.y, fire_rect.position.y, viewport.y, pause_rect.size.y]
+		)
+	)
+	Engine.time_scale = 1.0
+	root.queue_free()
+
+
+## Tidak ada dua elemen HUD tetap yang boleh saling menindih, dan tidak satu
+## pun boleh keluar layar.
+##
+## Ini satu-satunya pemeriksaan yang menangkap kegagalan paling umum di HUD
+## yang ditaruh pada koordinat tetap: teks pada font perangkat ternyata lebih
+## tinggi dari dugaan, kotaknya memuai, dan dua pod saling tumpuk. Tanpa GPU
+## tidak ada cara lain melihatnya selain mengukurnya.
+func _check_hud_overlap(hud: Object, viewport: Vector2) -> void:
+	var names: Array = [
+		"_score_pod",
+		"_chip_column",
+		"_pause_button",
+		"_squad_pod",
+		"_steer_bar",
+		"_hp_row",
+		"_fire_button",
+	]
+	var rects: Array = []
+	var labels: Array = []
+	for field in names:
+		var control := hud.get(String(field)) as Control
+		if control == null:
+			_fail("hud: %s hilang" % field)
+			continue
+		var rect: Rect2 = control.get_global_rect()
+		if rect.position.x < -1.0 or rect.end.x > viewport.x + 1.0:
+			_fail("hud: %s keluar layar mendatar (%.0f..%.0f)" % [field, rect.position.x, rect.end.x])
+		if rect.position.y < -1.0 or rect.end.y > viewport.y + 1.0:
+			_fail("hud: %s keluar layar tegak (%.0f..%.0f)" % [field, rect.position.y, rect.end.y])
+		rects.append(rect)
+		labels.append(String(field))
+	for i in range(rects.size()):
+		for j in range(i + 1, rects.size()):
+			var a: Rect2 = rects[i]
+			var b: Rect2 = rects[j]
+			# Kempiskan 1 px: tepi yang bersentuhan tepat bukan tumpang tindih.
+			if a.grow(-1.0).intersects(b.grow(-1.0)):
+				_fail("hud: %s menindih %s" % [labels[i], labels[j]])
+
+
+## Menulis rect HUD ke JSON supaya tools/draw_layout.py bisa menggambarnya.
+func _dump_hud_layout(hud: Object, viewport: Vector2) -> void:
+	var entries: Array = []
+	for pair in [
+		["_score_pod", "SCORE"],
+		["_chip_column", "STAGE + WAVE"],
+		["_pause_button", "JEDA"],
+		["_squad_pod", "PASUKAN"],
+		["_steer_bar", "STEER"],
+		["_hp_row", "NYAWA"],
+		["_fire_button", "CHAIN SHOT"],
+		["_hint", "HINT"],
+	]:
+		var control := hud.get(String(pair[0])) as Control
+		if control == null:
+			continue
+		var rect: Rect2 = control.get_global_rect()
+		entries.append(
+			{
+				"label": String(pair[1]),
+				"x": rect.position.x,
+				"y": rect.position.y,
+				"w": rect.size.x,
+				"h": rect.size.y,
+			}
+		)
+	var payload := {
+		"screen": "hud",
+		"viewport": {"w": viewport.x, "h": viewport.y},
+		"rects": entries,
+	}
+	var file := FileAccess.open("res://../screenshots/layout-hud.json", FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify(payload, "  "))
+		file.close()
+
+
+## Menggiring tangga 15 stage: buka, ukur tiap kartu, tekan satu.
+##
+## Sejak peta jadi rel kartu mendatar di layar markas, pemeriksaannya ikut
+## mendatar — tapi jaminannya sama: kartu tidak boleh menciut di bawah ukuran
+## target sentuh, tidak boleh saling tumpang tindih, harus berada di dalam rel,
+## dan stage yang sedang dimainkan harus tergulir ke dalam pandangan. Tidak
+## satu pun dari itu terlihat di screenshot.
 func _run_stage_map(packed: PackedScene) -> void:
 	SaveGame.reset_progress()
 	var root := packed.instantiate()
@@ -61,6 +220,7 @@ func _run_stage_map(packed: PackedScene) -> void:
 		return
 
 	_check_map_layout(rows, screens)
+	_check_home_layout(screens)
 	var row_h: float = (rows[0] as Button).get_global_rect().size.y
 	var row_count: int = rows.size()
 
@@ -96,16 +256,48 @@ func _run_stage_map(packed: PackedScene) -> void:
 	else:
 		print(
 			(
-				"  peta stage: %d baris, tinggi %d px, stage 8 terlihat, tekan stage 1 jalan"
+				"  rel stage: %d kartu, tinggi %d px, stage 8 tergulir ke pandangan, tekan stage 1 jalan"
 				% [row_count, int(row_h)]
 			)
 		)
 	root.queue_free()
 
 
+## Markas harus muat di layar acuan dan menaruh aksi utamanya di bawah.
+##
+## Kolom markas disusun dari spacer yang memuai, jadi satu elemen yang terlalu
+## tinggi mendorong tombol MAIN keluar layar tanpa suara — headless maupun di
+## perangkat.
+func _check_home_layout(screens: Object) -> void:
+	var viewport: Vector2 = (screens as CanvasLayer).get_viewport().get_visible_rect().size
+	var play := screens.get("_play_button") as Button
+	if play == null:
+		_fail("markas: tombol MAIN tidak ada")
+		return
+	var rect: Rect2 = play.get_global_rect()
+	if rect.size.y < 120.0:
+		_fail("markas: tombol MAIN tinggi %.0f px" % rect.size.y)
+	if rect.end.y > viewport.y + 1.0:
+		_fail("markas: tombol MAIN jatuh di bawah layar (%.0f > %.0f)" % [rect.end.y, viewport.y])
+	if rect.position.y < viewport.y * 0.6:
+		_fail("markas: tombol MAIN di luar zona ibu jari (y %.0f)" % rect.position.y)
+	var rail := screens.get("_map_scroll") as Control
+	if rail != null and rail.get_global_rect().intersects(rect):
+		_fail("markas: rel stage menindih tombol MAIN")
+	print(
+		(
+			"  markas: tombol MAIN %.0fx%.0f px @ y %.0f/%.0f, rel stage terpisah"
+			% [rect.size.x, rect.size.y, rect.position.y, viewport.y]
+		)
+	)
+
+
 ## Opens the map and waits for the layout pass before handing back the rows.
 func _open_map(root: Node, screens: Object) -> Array:
 	root.call("_show_stage_map")
+	# show_stage_map() menggulir sendiri setelah dua layout pass; tunggu lebih
+	# lama dari itu supaya yang terbaca adalah posisi akhir, bukan posisi awal.
+	await get_tree().process_frame
 	await get_tree().process_frame
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -117,25 +309,34 @@ func _open_map(root: Node, screens: Object) -> Array:
 	return rows
 
 
-## Measured geometry, not assumptions: tap height, width, and no overlap.
+## Geometri terukur, bukan asumsi: ukuran target sentuh, tanpa tumpang tindih,
+## dan rel yang benar-benar memperlihatkan lebih dari satu kartu.
 func _check_map_layout(rows: Array, screens: Object) -> void:
 	var viewport: Vector2 = (screens as CanvasLayer).get_viewport().get_visible_rect().size
-	var previous_bottom := -1.0
+	var rail: Rect2 = (screens.get("_map_scroll") as Control).get_global_rect()
+	var previous_right := -1.0
+	var visible_cards := 0
 	for i in range(rows.size()):
 		var rect: Rect2 = (rows[i] as Button).get_global_rect()
-		if rect.size.y < 100.0:
-			_fail("peta: baris %d tinggi %d px, di bawah lantai 100 px" % [i + 1, rect.size.y])
+		if rect.size.y < 200.0:
+			_fail("peta: kartu %d tinggi %d px, di bawah lantai 200 px" % [i + 1, rect.size.y])
 			break
 		if rect.size.x < 200.0:
-			_fail("peta: baris %d lebar %d px" % [i + 1, rect.size.x])
+			_fail("peta: kartu %d lebar %d px, di bawah lantai 200 px" % [i + 1, rect.size.x])
 			break
-		if rect.position.x < 0.0 or rect.position.x + rect.size.x > viewport.x + 1.0:
-			_fail("peta: baris %d keluar layar mendatar" % [i + 1])
+		# Rel mendatar: kartu boleh keluar layar ke kanan (itu gunanya bisa
+		# digeser), tapi tidak boleh keluar dari rel secara vertikal.
+		if rect.position.y < rail.position.y - 2.0 or rect.end.y > rail.end.y + 2.0:
+			_fail("peta: kartu %d keluar dari rel secara vertikal" % [i + 1])
 			break
-		if previous_bottom >= 0.0 and rect.position.y < previous_bottom - 0.5:
-			_fail("peta: baris %d tumpang tindih dengan baris sebelumnya" % [i + 1])
+		if previous_right >= 0.0 and rect.position.x < previous_right - 0.5:
+			_fail("peta: kartu %d tumpang tindih dengan kartu sebelumnya" % [i + 1])
 			break
-		previous_bottom = rect.position.y + rect.size.y
+		previous_right = rect.end.x
+		if rail.intersects(rect):
+			visible_cards += 1
+	if visible_cards < 2:
+		_fail("peta: hanya %d kartu terlihat di rel, harusnya bisa dibandingkan" % visible_cards)
 	_dump_map_layout(rows, screens, viewport)
 
 

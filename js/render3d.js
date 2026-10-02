@@ -34,6 +34,11 @@
   };
 
   var ARENA = { halfWidth: 10, depth: 40, defenseLineZ: 5 };
+  // Lantai dan dinding dipanjangkan ke arah kamera melewati garis pertahanan.
+  // Arena logis tetap 0..40; tambahan ini murni visual, supaya tanah mengisi
+  // tepi bawah layar alih-alih berhenti di tengah-tengah dan menyisakan pita
+  // hitam di bawah HUD — persis cacat yang terlihat di build sebelumnya.
+  var APRON = 14;
 
   var PAL = {
     bg: 0x060b1e,
@@ -249,17 +254,18 @@
 
     // --- static world ---
     var floorMat = new THREE.MeshLambertMaterial({ map: makeGridTexture() });
-    var floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA.halfWidth * 2, ARENA.depth), floorMat);
+    var floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(ARENA.halfWidth * 2, ARENA.depth + APRON), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, -ARENA.depth / 2);
+    floor.position.set(0, 0, -ARENA.depth / 2 + APRON / 2);
     scene.add(floor);
 
     var wallMat = new THREE.MeshLambertMaterial({
       color: PAL.wall, emissive: PAL.grid, emissiveIntensity: 0.18,
     });
     [-1, 1].forEach(function (s) {
-      var w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, ARENA.depth), wallMat);
-      w.position.set(s * (ARENA.halfWidth + 0.25), 0.7, -ARENA.depth / 2);
+      var w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, ARENA.depth + APRON), wallMat);
+      w.position.set(s * (ARENA.halfWidth + 0.25), 0.7, -ARENA.depth / 2 + APRON / 2);
       scene.add(w);
     });
 
@@ -318,11 +324,36 @@
     });
   }
 
+  /**
+   * Resizes the drawing buffer. `w`/`h` are DEVICE pixels, not CSS pixels: the
+   * page owns the 1080x1920 reference frame and already knows the scale factor
+   * it is displayed at, so letting three.js apply a second device-pixel-ratio
+   * on top would either waste a quarter of the fill rate on desktop or render
+   * below panel resolution on a 3x phone.
+   */
   function resize(w, h) {
     if (!renderer) return;
-    renderer.setSize(w, h, false);
+    renderer.setPixelRatio(1);
+    renderer.setSize(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)), false);
     camera.aspect = w / h;
+    // Lebar yang dipertahankan, bukan tinggi. Arena itu lorong selebar 20 unit:
+    // kalau layar lebih jangkung dari 9:16 dan FOV vertikal dibiarkan tetap,
+    // dinding samping terpotong. Dengan mengunci FOV horizontal, layar yang
+    // lebih jangkung memperlihatkan lorong LEBIH PANJANG — persis perilaku
+    // "keep_width" di project Godot, jadi dua build membingkai dunia yang sama.
+    baseFov = widthMatchedFov(camera.aspect);
+    camera.fov = baseFov;
     camera.updateProjectionMatrix();
+  }
+
+  /** FOV vertikal yang menjaga bukaan horizontal tetap sama seperti pada 9:16. */
+  function widthMatchedFov(aspect) {
+    var rad = Math.PI / 180;
+    var tanH = Math.tan(CAM.fov * 0.5 * rad) * (9 / 16);   // setengah lebar pada 9:16
+    var fov = 2 * Math.atan(tanH / Math.max(0.0001, aspect)) / rad;
+    // Batas atas: pada layar sangat jangkung, lorong yang terlalu panjang
+    // membuat musuh jauh jadi beberapa piksel saja.
+    return Math.min(58, Math.max(CAM.fov * 0.85, fov));
   }
 
   // ---------------------------------------------------------------------------

@@ -45,6 +45,12 @@ func _ready() -> void:
 	if _screens.has_method("build"):
 		_screens.call("build", variant)
 	_connect_screens()
+	_connect_hud()
+	_apply_aspect_guard()
+	# Satu-satunya tempat framing portrait bisa rusak adalah jendela yang
+	# berubah bentuk, jadi penjaganya dipasang di sana dan bukan dipanggil
+	# tiap frame.
+	get_window().size_changed.connect(_apply_aspect_guard)
 	_feel = GameFeel.new(GameConfig.dict(""))
 	_audio = AudioDirector.new(GameConfig.dict(""))
 	add_child(_audio)
@@ -66,6 +72,8 @@ func start_stage(stage: int) -> void:
 		_hud.call("bind_sim", _sim)
 	if _hud.has_method("bind_camera"):
 		_hud.call("bind_camera", _camera)
+	if _hud.has_method("set_stage"):
+		_hud.call("set_stage", stage)
 	if _music != null:
 		_music.start(_variant_for_stage(stage))
 
@@ -76,6 +84,49 @@ func _variant_for_stage(stage: int) -> int:
 	if cycle.is_empty():
 		return 0
 	return int(cycle[stage % cycle.size()])
+
+
+## Project settings lock the game to 1080x1920 match-width, yang benar untuk
+## ponsel: layar lebih jangkung dari 9:16 hanya menambah ruang vertikal.
+## Tapi aturan yang sama di jendela lanskap atau desktop melebarkan dunia
+## sampai lorongnya terpotong di atas dan bawah, dan UI yang di-anchor ke
+## tepi bawah terlempar keluar layar. Di sana portrait dipertahankan dengan
+## pillarbox, bukan dengan merusak bingkainya.
+func _apply_aspect_guard() -> void:
+	var window := get_window()
+	var size := window.size
+	if size.x <= 0 or size.y <= 0:
+		return
+	var aspect := float(size.x) / float(size.y)
+	# 9/16 = 0.5625 (portrait acuan), 9/21 ≈ 0.4286 (ponsel paling jangkung).
+	if aspect > 0.5625 or aspect < 9.0 / 21.0:
+		window.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+	else:
+		window.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP_WIDTH
+
+
+## HUD baru memegang dua aksi: jeda dan chain shot. Keduanya dialirkan lewat
+## sinyal supaya HUD tetap read-only terhadap simulasi.
+func _connect_hud() -> void:
+	if _hud.has_signal("pause_pressed"):
+		_hud.connect("pause_pressed", _on_pause)
+	if _hud.has_signal("fire_pressed"):
+		_hud.connect("fire_pressed", _on_hud_fire)
+
+
+## Tombol chain shot melewati jalur yang sama dengan tap di arena, jadi tidak
+## ada aturan tembak kedua yang bisa berbeda perilakunya.
+func _on_hud_fire() -> void:
+	if _sim != null and is_physics_processing():
+		_pending_tap = true
+
+
+func _on_pause() -> void:
+	if _sim == null or not is_physics_processing():
+		return
+	Engine.time_scale = 1.0
+	set_physics_process(false)
+	_screens.call("show_pause")
 
 
 func _connect_screens() -> void:
@@ -221,6 +272,14 @@ func _update_feel(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Esc/back menjeda, bukan menutup game: di Android tombol back memetakan ke
+	# ui_cancel, dan keluar dari run tanpa peringatan adalah cara tercepat
+	# membuang progres pemain.
+	if event.is_action_pressed("ui_cancel"):
+		if is_physics_processing():
+			_on_pause()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventScreenTouch:
 		_handle_touch(event as InputEventScreenTouch)
 	elif event is InputEventScreenDrag:

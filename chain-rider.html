@@ -3679,6 +3679,11 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
   };
 
   var ARENA = { halfWidth: 10, depth: 40, defenseLineZ: 5 };
+  // Lantai dan dinding dipanjangkan ke arah kamera melewati garis pertahanan.
+  // Arena logis tetap 0..40; tambahan ini murni visual, supaya tanah mengisi
+  // tepi bawah layar alih-alih berhenti di tengah-tengah dan menyisakan pita
+  // hitam di bawah HUD — persis cacat yang terlihat di build sebelumnya.
+  var APRON = 14;
 
   var PAL = {
     bg: 0x060b1e,
@@ -3900,17 +3905,18 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
 
     // --- static world ---
     var floorMat = new THREE.MeshLambertMaterial({ map: makeGridTexture() });
-    var floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA.halfWidth * 2, ARENA.depth), floorMat);
+    var floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(ARENA.halfWidth * 2, ARENA.depth + APRON), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, -ARENA.depth / 2);
+    floor.position.set(0, 0, -ARENA.depth / 2 + APRON / 2);
     scene.add(floor);
 
     var wallMat = new THREE.MeshLambertMaterial({
       color: PAL.wall, emissive: PAL.grid, emissiveIntensity: 0.18,
     });
     [-1, 1].forEach(function (s) {
-      var w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, ARENA.depth), wallMat);
-      w.position.set(s * (ARENA.halfWidth + 0.25), 0.7, -ARENA.depth / 2);
+      var w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, ARENA.depth + APRON), wallMat);
+      w.position.set(s * (ARENA.halfWidth + 0.25), 0.7, -ARENA.depth / 2 + APRON / 2);
       scene.add(w);
     });
 
@@ -3969,11 +3975,36 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
     });
   }
 
+  /**
+   * Resizes the drawing buffer. `w`/`h` are DEVICE pixels, not CSS pixels: the
+   * page owns the 1080x1920 reference frame and already knows the scale factor
+   * it is displayed at, so letting three.js apply a second device-pixel-ratio
+   * on top would either waste a quarter of the fill rate on desktop or render
+   * below panel resolution on a 3x phone.
+   */
   function resize(w, h) {
     if (!renderer) return;
-    renderer.setSize(w, h, false);
+    renderer.setPixelRatio(1);
+    renderer.setSize(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)), false);
     camera.aspect = w / h;
+    // Lebar yang dipertahankan, bukan tinggi. Arena itu lorong selebar 20 unit:
+    // kalau layar lebih jangkung dari 9:16 dan FOV vertikal dibiarkan tetap,
+    // dinding samping terpotong. Dengan mengunci FOV horizontal, layar yang
+    // lebih jangkung memperlihatkan lorong LEBIH PANJANG — persis perilaku
+    // "keep_width" di project Godot, jadi dua build membingkai dunia yang sama.
+    baseFov = widthMatchedFov(camera.aspect);
+    camera.fov = baseFov;
     camera.updateProjectionMatrix();
+  }
+
+  /** FOV vertikal yang menjaga bukaan horizontal tetap sama seperti pada 9:16. */
+  function widthMatchedFov(aspect) {
+    var rad = Math.PI / 180;
+    var tanH = Math.tan(CAM.fov * 0.5 * rad) * (9 / 16);   // setengah lebar pada 9:16
+    var fov = 2 * Math.atan(tanH / Math.max(0.0001, aspect)) / rad;
+    // Batas atas: pada layar sangat jangkung, lorong yang terlalu panjang
+    // membuat musuh jauh jadi beberapa piksel saja.
+    return Math.min(58, Math.max(CAM.fov * 0.85, fov));
   }
 
   // ---------------------------------------------------------------------------
@@ -4147,228 +4178,515 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
 <style>
+  /* ===========================================================================
+     CHAIN RIDER — skin UI mobile-first.
+
+     SATU kerangka acuan: 1080 x 1920 (9:16), persis seperti project Godot.
+     Semua angka di file ini adalah piksel acuan pada kerangka itu; #frame
+     diskalakan utuh lewat transform:scale() di fitFrame(). Konsekuensinya:
+       · rasio layar TIDAK PERNAH berubah — di ponsel 20:9 maupun desktop
+         ultrawide yang terlihat tetap 9:16, sisanya jadi backdrop;
+       · tata letak tidak perlu media query sama sekali;
+       · satu angka di sini = satu piksel di mockup = satu piksel di Godot.
+
+     Bahasa visualnya mengikuti game squad-runner mobile (Last War, Top War,
+     Survivor.io): tombol tebal bertumpuk (bevel + shadow bawah), chip
+     melengkung, angka besar, aksi utama di zona jempol bawah, dan TIDAK ADA
+     panel data gaya aplikasi di layar permainan.
+     ========================================================================= */
   :root {
-    /* --accent* is rewritten per arena variant by applyTheme(); every HUD
-       element reads it so the interface always matches the arena behind it. */
+    /* --accent* ditulis ulang per arena oleh applyTheme(); seluruh UI membacanya
+       supaya antarmuka selalu sewarna dengan arena di belakangnya. */
     --accent:#00E5FF; --accentRGB:0,229,255; --accentLit:#7CFFEA;
     --enemy:#FF4D3D; --enemyRGB:255,77,61;
     --magenta:#B14DFF; --gold:#FFD54F; --danger:#FF1744;
     --bg0:#05070F; --bgTop:#0A1030; --panel:#0B1120; --track:#12233A;
+    --ink:#F5F9FF; --inkDim:#93A6C4;
+    --go:#5BE34B; --goDark:#1E7A2B; --goLit:#B6FF8A;
+    --display:"Arial Black","Archivo Black","Segoe UI Black",
+      system-ui,-apple-system,"Helvetica Neue",sans-serif;
+    --body:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
   }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { margin:0; height:100%; background:var(--bg0); overflow:hidden;
-    font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:#E8F0FF; }
-  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; gap:24px; padding:12px; }
-  #stage { position:relative; height:100%; aspect-ratio:9/16; max-width:100%;
-    border-radius:18px; overflow:hidden; box-shadow:0 0 70px rgba(var(--accentRGB),.16), 0 0 0 1px rgba(var(--accentRGB),.18);
+  html,body { margin:0; height:100%; overflow:hidden; background:#02030A;
+    font-family:var(--body); color:var(--ink);
+    overscroll-behavior:none; user-select:none; -webkit-user-select:none; }
+
+  /* ---------- Shell: backdrop + bingkai 9:16 ---------- */
+  #app { position:fixed; inset:0; overflow:hidden;
+    background:
+      radial-gradient(120% 70% at 50% -10%, rgba(var(--accentRGB),.16), transparent 60%),
+      radial-gradient(100% 60% at 50% 110%, rgba(var(--enemyRGB),.10), transparent 60%),
+      linear-gradient(180deg,#070C1C 0%, #04060F 55%, #02030A 100%);
+  }
+  /* Garis diagonal tipis di backdrop: memberi tekstur tanpa menarik perhatian
+     dari layar permainan. Tidak pernah terlihat di ponsel (frame menutup penuh). */
+  #app::after { content:""; position:absolute; inset:-20%; pointer-events:none; opacity:.5;
+    background:repeating-linear-gradient(115deg, rgba(255,255,255,.028) 0 2px, transparent 2px 26px); }
+
+  /* Diposisikan absolut, bukan sebagai item grid: kotak layout 1080x1920 jauh
+     lebih besar dari viewport ponsel, dan item grid yang meluap dipaksa
+     rata-awal oleh browser sehingga bingkai melompat keluar layar. */
+  #frame { position:absolute; left:50%; top:50%; width:1080px; height:1920px;
+    transform-origin:50% 50%; transform:translate(-50%,-50%) scale(var(--k,1));
+    border-radius:52px; overflow:hidden; isolation:isolate;
+    background:var(--bg0);
+    box-shadow:
+      0 0 0 3px rgba(var(--accentRGB),.22),
+      0 0 0 10px rgba(4,8,18,.9),
+      0 60px 160px rgba(0,0,0,.8),
+      0 0 180px rgba(var(--accentRGB),.14);
     transition:box-shadow .35s ease; }
-  canvas { display:block; width:100%; height:100%; touch-action:none; }
-  #webgl-canvas { position:absolute; inset:0; display:none; }
+  /* Di ponsel bingkai mengisi layar: sudut membulat dan bayangan hanya bikin
+     tepi kotor, jadi dimatikan lewat kelas yang dipasang fitFrame(). */
+  #frame.full { border-radius:0; box-shadow:none; }
+
+  #stage { position:absolute; inset:0; overflow:hidden; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #webgl-canvas { display:none; }
   #webgl-canvas.on { display:block; }
   #c.hidden { display:none; }
 
-  /* ---------- HUD ---------- */
+  /* =========================================================================
+     HUD — hanya empat hal yang boleh dibaca saat bermain:
+     skor, progres wave, jumlah pasukan, dan kesiapan chain shot.
+     ========================================================================= */
   .hud { position:absolute; inset:0; pointer-events:none; font-variant-numeric:tabular-nums; }
-  .top { position:absolute; top:0; left:0; right:0; padding:16px 18px;
-    display:flex; align-items:flex-start; justify-content:space-between; }
-  .score { font-size:34px; font-weight:800; letter-spacing:-.5px; line-height:1; text-shadow:0 2px 12px #000; }
-  .score small { display:block; font-size:11px; font-weight:700; color:#8A9BB8; letter-spacing:2px; margin-top:4px; }
-  .combo { font-size:38px; font-weight:900; color:var(--gold); text-shadow:0 0 18px rgba(255,213,79,.55);
-    transition:transform .08s ease-out; }
-  .wave { font-size:14px; font-weight:800; letter-spacing:1.5px; padding:7px 13px; border-radius:999px;
-    border:2px solid rgba(var(--accentRGB),.55); color:var(--accent);
-    background:rgba(var(--accentRGB),.07); backdrop-filter:blur(2px); }
-    .waveCol{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
-    /* Jumlah pasukan adalah angka terpenting di loop ini: ia sekaligus HP dan
-       DPS. Diberi tempatnya sendiri, bukan diselipkan ke label wave. */
-    .squad{ font:800 15px/1 ui-monospace,monospace; letter-spacing:.08em;
-      color:var(--accent); border:2px solid rgba(var(--accentRGB),.45); border-radius:999px;
-      padding:4px 10px; background:rgba(var(--accentRGB),.08); }
-    .squad.low{ color:#FF1744; border-color:rgba(255,23,68,.5);
-      background:rgba(255,23,68,.10); }
-  .bottom { position:absolute; left:0; right:0; bottom:0; padding:14px 18px 18px; }
-  .steerRow { display:flex; align-items:center; gap:10px; margin-bottom:12px; opacity:.28; transition:opacity .15s; }
-  .steerRow.on { opacity:1; }
-  .steerLbl { font-size:10px; font-weight:800; letter-spacing:2px; color:var(--accent); }
-  .steerTrack { flex:1; height:12px; border-radius:999px; background:var(--track);
-    box-shadow:inset 0 0 0 1px rgba(var(--accentRGB),.18); overflow:hidden; }
+  /* Chip HUD tidak boleh menembus layar menu: itu yang bikin layar home tadi
+     terlihat seperti dua antarmuka yang ditumpuk. */
+  .hud.off { display:none; }
+  .hud button { pointer-events:auto; }
+
+  /* 88px teratas tidak pernah dipakai: itu wilayah notch / punch-hole. */
+  .topBar { position:absolute; top:88px; left:40px; right:40px; height:150px;
+    display:grid; grid-template-columns:1fr auto 1fr; align-items:start; gap:18px; }
+
+  .scorePod { justify-self:start; display:flex; flex-direction:column; gap:4px;
+    padding:14px 28px 16px; border-radius:30px; min-width:250px;
+    background:linear-gradient(180deg, rgba(8,16,36,.86), rgba(4,8,20,.86));
+    box-shadow:inset 0 2px 0 rgba(255,255,255,.10), inset 0 0 0 2px rgba(var(--accentRGB),.28),
+      0 10px 24px rgba(0,0,0,.5); }
+  .scorePod span { font:800 20px/1 var(--body); letter-spacing:5px; color:var(--inkDim); }
+  .scorePod b { font:900 62px/1 var(--display); letter-spacing:-1px; color:var(--ink);
+    text-shadow:0 5px 0 rgba(0,0,0,.45); }
+
+  .stageChip { justify-self:center; display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .stageChip .chipRow { display:flex; align-items:center; gap:12px;
+    padding:12px 26px; border-radius:999px;
+    background:rgba(var(--accentRGB),.12);
+    box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.5), 0 8px 20px rgba(0,0,0,.45); }
+  .stageChip .st { font:900 30px/1 var(--display); color:var(--accentLit); letter-spacing:1px; }
+  .stageChip .wv { font:800 26px/1 var(--body); color:var(--ink); letter-spacing:2px; }
+  .waveDots { display:flex; gap:9px; }
+  .waveDots i { width:52px; height:11px; border-radius:999px; background:rgba(255,255,255,.14);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); transition:background .2s, box-shadow .2s; }
+  .waveDots i.on { background:linear-gradient(90deg,var(--accent),var(--accentLit));
+    box-shadow:0 0 16px rgba(var(--accentRGB),.8); }
+
+  /* Tombol bundar: satu bahasa untuk pause, tutup, dan ikon lain. */
+  .iconBtn { justify-self:end; width:112px; height:112px; border:0; border-radius:34px; cursor:pointer;
+    font:900 40px/1 var(--display); color:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(180deg, rgba(20,34,66,.95), rgba(8,14,32,.95));
+    box-shadow:inset 0 3px 0 rgba(255,255,255,.14), inset 0 0 0 3px rgba(var(--accentRGB),.35),
+      0 8px 0 rgba(2,6,16,.9), 0 14px 26px rgba(0,0,0,.5);
+    transition:transform .08s ease, box-shadow .08s ease; }
+  .iconBtn:active { transform:translateY(6px);
+    box-shadow:inset 0 3px 0 rgba(255,255,255,.1), inset 0 0 0 3px rgba(var(--accentRGB),.5),
+      0 2px 0 rgba(2,6,16,.9), 0 6px 14px rgba(0,0,0,.5); }
+
+  .combo { position:absolute; top:430px; left:0; right:0; text-align:center;
+    font:900 86px/1 var(--display); color:var(--gold); opacity:0; transform:scale(.8);
+    text-shadow:0 0 36px rgba(255,213,79,.6), 0 7px 0 rgba(0,0,0,.45);
+    transition:transform .12s ease-out, opacity .25s ease; }
+  .combo.on { opacity:1; transform:scale(1); }
+
+  /* ---------- Boss ---------- */
+  .bossBar { position:absolute; top:268px; left:120px; right:120px; opacity:0;
+    transition:opacity .3s; }
+  .bossBar.on { opacity:1; }
+  .bossName { font:900 26px/1 var(--display); letter-spacing:5px; color:#FF8A8A;
+    margin-bottom:10px; text-align:center; text-shadow:0 4px 0 rgba(0,0,0,.5); }
+  .bossTrack { height:28px; border-radius:999px; background:#2A1020; overflow:hidden;
+    box-shadow:inset 0 0 0 3px rgba(255,80,80,.45), inset 0 4px 10px rgba(0,0,0,.6); }
+  .bossFill { height:100%; width:100%; border-radius:999px;
+    background:linear-gradient(180deg,#FF6A5A,#FF1744 60%,#C1102F);
+    box-shadow:0 0 22px rgba(255,60,60,.7), inset 0 3px 0 rgba(255,255,255,.35);
+    transition:width .12s linear; }
+
+  /* ---------- Pasukan: angka terpenting dalam loop ini ---------- */
+  .troopPod { position:absolute; left:40px; bottom:430px;
+    display:flex; align-items:center; gap:14px; padding:12px 26px 14px 18px; border-radius:28px;
+    background:linear-gradient(180deg, rgba(8,18,40,.9), rgba(4,8,20,.9));
+    box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.4), 0 10px 24px rgba(0,0,0,.5);
+    transition:box-shadow .2s, transform .12s; }
+  .troopPod .glyph { width:56px; height:56px; border-radius:18px; display:grid; place-items:center;
+    background:rgba(var(--accentRGB),.18); font:900 30px/1 var(--display); color:var(--accentLit); }
+  .troopPod .num { font:900 58px/1 var(--display); color:var(--ink); text-shadow:0 5px 0 rgba(0,0,0,.45); }
+  .troopPod .cap { font:800 18px/1 var(--body); letter-spacing:4px; color:var(--inkDim); }
+  .troopPod.low { box-shadow:inset 0 0 0 3px rgba(255,23,68,.65), 0 0 36px rgba(255,23,68,.35); }
+  .troopPod.low .num { color:#FF6B7F; }
+  .troopPod.bump { transform:scale(1.08); }
+
+  /* ---------- Dek kendali bawah (zona jempol) ---------- */
+  .deck { position:absolute; left:0; right:0; bottom:0; height:400px; padding:0 40px 72px;
+    display:flex; align-items:flex-end; justify-content:space-between; gap:28px;
+    background:linear-gradient(180deg, transparent, rgba(3,6,16,.55) 45%, rgba(3,6,16,.86)); }
+  .deckLeft { flex:1; display:flex; flex-direction:column; gap:18px; padding-bottom:12px; }
+
+  .hp { display:flex; gap:12px; }
+  .hp i { width:62px; height:62px; border-radius:20px; display:block;
+    background:linear-gradient(180deg,#FF5C7A,#D11034);
+    box-shadow:inset 0 3px 0 rgba(255,255,255,.4), 0 6px 0 rgba(90,8,24,.9), 0 10px 18px rgba(0,0,0,.45);
+    position:relative; transition:filter .2s, opacity .2s, transform .12s; }
+  .hp i::after { content:"♥"; position:absolute; inset:0; display:grid; place-items:center;
+    font-size:34px; color:rgba(255,255,255,.92); text-shadow:0 2px 0 rgba(0,0,0,.25); }
+  .hp i.e { background:linear-gradient(180deg,#223049,#121B2C); box-shadow:inset 0 0 0 2px rgba(255,255,255,.07);
+    opacity:.55; }
+  .hp i.e::after { color:rgba(255,255,255,.18); }
+
+  .steerRow { display:flex; align-items:center; gap:16px; opacity:0; transform:translateY(10px);
+    transition:opacity .15s, transform .15s; }
+  .steerRow.on { opacity:1; transform:none; }
+  .steerLbl { font:900 22px/1 var(--display); letter-spacing:4px; color:var(--accentLit); }
+  .steerTrack { flex:1; height:26px; border-radius:999px; background:rgba(4,10,24,.9);
+    box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.3), inset 0 4px 10px rgba(0,0,0,.6); overflow:hidden; }
   .steerFill { height:100%; width:0%; border-radius:999px;
     background:linear-gradient(90deg,var(--accent),var(--accentLit));
-    box-shadow:0 0 14px rgba(var(--accentRGB),.8); }
-  .steerSec { font-size:12px; font-weight:800; color:var(--accentLit); min-width:34px; text-align:right; }
-  .row { display:flex; align-items:center; justify-content:space-between; }
-  .ammo { display:flex; gap:6px; }
-  .ammo i { width:14px; height:26px; border-radius:4px; background:var(--track); display:block;
-    box-shadow:inset 0 0 0 1px rgba(var(--accentRGB),.25); transition:background .12s, box-shadow .12s; }
-  .ammo i.f { background:var(--accent); box-shadow:0 0 12px rgba(var(--accentRGB),.75); }
-  .hp { display:flex; gap:7px; font-size:20px; }
-  .hp span { filter:drop-shadow(0 0 6px rgba(255,23,68,.7)); }
-  .hp span.e { opacity:.2; filter:none; }
-  .center { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
-  .popup { font-size:64px; font-weight:900; color:var(--gold); opacity:0;
-    text-shadow:0 0 30px rgba(255,213,79,.8), 0 4px 0 rgba(0,0,0,.4); }
-  .bossBar { position:absolute; top:96px; left:18px; right:18px; opacity:0; transition:opacity .3s; }
-  .bossBar.on { opacity:1; }
-  .bossName { font-size:11px; font-weight:800; letter-spacing:3px; color:#FF6A6A; margin-bottom:5px; text-align:center; }
-  .bossTrack { height:10px; border-radius:999px; background:#2A1020; overflow:hidden;
-    box-shadow:0 0 0 1px rgba(255,80,80,.35); }
-  .bossFill { height:100%; width:100%; border-radius:999px;
-    background:linear-gradient(90deg,#FF1744,#FF8A2B); box-shadow:0 0 14px rgba(255,60,60,.8);
-    transition:width .12s linear; }
-  .hint { position:absolute; left:0; right:0; bottom:4.5%; text-align:center; font-size:11px;
-    color:#9FB3CF; letter-spacing:.4px; line-height:1.7; text-shadow:0 2px 10px #000;
-    transition:opacity .4s; }
-  .banner { position:absolute; left:0; right:0; top:46%; text-align:center; font-size:30px;
-    font-weight:900; letter-spacing:1px; opacity:0; }
+    box-shadow:0 0 20px rgba(var(--accentRGB),.8), inset 0 3px 0 rgba(255,255,255,.4); }
+  .steerSec { font:900 28px/1 var(--display); color:var(--accentLit); min-width:92px; text-align:right; }
+
+  /* Tombol aksi utama: bundar, besar, di pojok kanan bawah — satu jempol. */
+  .fireBtn { position:relative; width:230px; height:230px; border:0; border-radius:50%; cursor:pointer;
+    display:grid; place-items:center; gap:0; padding:0; color:#04121B;
+    background:
+      conic-gradient(from -90deg, var(--accentLit) calc(var(--p,0) * 1turn), rgba(255,255,255,.10) 0);
+    box-shadow:0 14px 0 rgba(2,8,18,.85), 0 22px 40px rgba(0,0,0,.6);
+    transition:transform .08s ease, box-shadow .08s ease, filter .2s; }
+  .fireBtn::before { content:""; position:absolute; inset:16px; border-radius:50%;
+    background:linear-gradient(180deg, rgba(14,28,56,.98), rgba(6,12,28,.98));
+    box-shadow:inset 0 4px 0 rgba(255,255,255,.1); }
+  .fireBtn .lbl { position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .fireBtn .ico { font:900 64px/1 var(--display); color:#2B3A55; text-shadow:none; transition:color .2s; }
+  .fireBtn .cap { font:900 22px/1 var(--display); letter-spacing:4px; color:#48597A; transition:color .2s; }
+  .fireBtn .pips { position:relative; display:flex; gap:8px; margin-top:4px; }
+  .fireBtn .pips span { width:22px; height:22px; border-radius:50%; background:rgba(255,255,255,.14);
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.1); }
+  .fireBtn .pips span.on { background:var(--accentLit); box-shadow:0 0 14px rgba(var(--accentRGB),.9); }
+  .fireBtn.ready { animation:firePulse 1.4s ease-in-out infinite; }
+  .fireBtn.ready .ico { color:var(--accentLit); text-shadow:0 0 28px rgba(var(--accentRGB),.8); }
+  .fireBtn.ready .cap { color:var(--accentLit); }
+  .fireBtn:active { transform:translateY(10px); box-shadow:0 4px 0 rgba(2,8,18,.85), 0 10px 20px rgba(0,0,0,.6); }
+  @keyframes firePulse {
+    0%,100% { box-shadow:0 14px 0 rgba(2,8,18,.85), 0 22px 40px rgba(0,0,0,.6), 0 0 0 0 rgba(var(--accentRGB),.5); }
+    50%     { box-shadow:0 14px 0 rgba(2,8,18,.85), 0 22px 40px rgba(0,0,0,.6), 0 0 0 26px rgba(var(--accentRGB),0); }
+  }
+
+  /* Petunjuk kontrol: toast yang hilang sendiri, bukan paragraf permanen. */
+  /* Toast petunjuk duduk di tengah lapangan: ruang itu kosong selama detik
+     pertama (musuh masih di ujung jauh, squad di bawah), jadi tidak ada yang
+     tertutup saat pemain paling butuh melihat keduanya. */
+  .toast { position:absolute; left:100px; right:100px; top:46%; transform:translateY(-50%); text-align:center;
+    padding:20px 28px; border-radius:26px; opacity:0; transition:opacity .45s ease;
+    font:700 28px/1.45 var(--body); color:#DCE8FA; letter-spacing:.3px;
+    background:rgba(4,10,24,.82); box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.25); }
+  .toast b { color:var(--accentLit); font-weight:900; }
+
+  .popupWrap { position:absolute; inset:0; display:grid; place-items:center; }
+  .popup { font:900 120px/1 var(--display); color:var(--gold); opacity:0;
+    text-shadow:0 0 50px rgba(255,213,79,.75), 0 8px 0 rgba(0,0,0,.45); }
+  .banner { position:absolute; left:0; right:0; top:44%; text-align:center;
+    font:900 110px/1 var(--display); letter-spacing:2px; opacity:0;
+    text-shadow:0 10px 0 rgba(0,0,0,.5), 0 0 60px rgba(0,0,0,.6); }
   #flash { position:absolute; inset:0; background:var(--danger); opacity:0; }
   #vig { position:absolute; inset:0; pointer-events:none; opacity:0;
     background:radial-gradient(ellipse at center, transparent 42%, rgba(0,52,77,.85) 100%);
     transition:opacity .2s; }
 
-  /* ---------- Panel ---------- */
-  #panel { width:280px; max-height:100%; overflow:auto; background:var(--panel); border-radius:16px;
-    padding:18px; box-shadow:0 0 0 1px rgba(255,255,255,.06); font-size:13px; }
-  #panel h1 { font-size:16px; margin:0 0 3px; letter-spacing:1px; }
-  #panel h1 b { color:var(--accent); }
-  #score, #combo { font-variant-numeric:tabular-nums; }
-  #panel .sub { color:#7E90AC; font-size:11px; margin-bottom:16px; line-height:1.6; }
-  #panel h2 { font-size:10px; letter-spacing:2px; color:#7E90AC; margin:18px 0 8px; font-weight:800; }
-  .vbtn { display:block; width:100%; text-align:left; padding:9px 11px; margin-bottom:6px; border-radius:9px;
-    border:1px solid rgba(255,255,255,.08); background:#111A2C; color:#D6E4F7; cursor:pointer;
-    font-size:12px; font-weight:600; transition:.12s; }
-  .vbtn:hover { border-color:rgba(var(--accentRGB),.45); }
-  .vbtn.sel { background:rgba(var(--accentRGB),.13); border-color:var(--accent); color:#fff; }
-  .vbtn em { display:block; font-style:normal; font-size:10px; color:#7E90AC; margin-top:3px; font-weight:500; }
-  .stat { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.05); }
-  .stat b { color:var(--accent); font-weight:700; }
-  .keys { color:#7E90AC; font-size:11px; line-height:1.9; }
-  .keys kbd { background:#1B2740; border-radius:4px; padding:1px 6px; font-size:10px; color:#C6D8F0; }
-  @media (max-width:820px) { #panel { display:none; } }
+  /* =========================================================================
+     LAYAR META — home, draft kartu, hasil, pause.
+     Semua di dalam bingkai yang sama, jadi tidak pernah ada "halaman web"
+     di sebelah permainan.
+     ========================================================================= */
+  #meta { position:absolute; inset:0; display:none; flex-direction:column; z-index:40;
+    background:
+      radial-gradient(120% 60% at 50% 0%, rgba(var(--accentRGB),.16), transparent 62%),
+      linear-gradient(180deg, rgba(3,7,18,.92), rgba(2,4,12,.97)); }
+  #meta.on { display:flex; }
 
-  /* ---- Meta layer: stage ladder + upgrade draft ---- */
-  #meta { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-          background:rgba(3,6,15,.78); backdrop-filter:blur(3px); z-index:40; }
-  .metaPanel { width:86%; max-height:86%; display:flex; flex-direction:column; align-items:stretch; }
-  .metaPanel h2 { margin:0; text-align:center; font-size:30px; letter-spacing:1px;
-                  color:var(--accentLit); text-shadow:0 2px 14px #000; }
-  .metaPanel h2.lose { color:#FF1744; }
-  .metaSub { margin:4px 0 14px; text-align:center; font-size:12px; color:#8A9BB8; letter-spacing:.5px; }
-  .stageList { overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px; }
-  .stageRow { position:relative; text-align:left; padding:10px 12px; border-radius:10px; cursor:pointer;
-              background:rgba(0,229,255,.08); border:1px solid rgba(0,229,255,.45); color:#F5F9FF;
-              font-family:inherit; display:block; min-height:48px; }
-  .stageRow:hover:not(:disabled) { background:rgba(0,229,255,.16); }
-  .stageRow.cleared { border-color:rgba(255,213,79,.6); background:rgba(255,213,79,.08); }
-  .stageRow.locked { border-color:rgba(138,155,184,.35); background:rgba(138,155,184,.05);
-                     color:#8A9BB8; cursor:not-allowed; }
-  .stageMain { display:block; font-size:14px; font-weight:800; }
-  .stageSub { display:block; font-size:10px; color:#8A9BB8; margin-top:2px; letter-spacing:.4px; }
-  .stageState { position:absolute; right:12px; top:50%; transform:translateY(-50%);
-                font-size:11px; letter-spacing:.6px; }
-  .stageRow.cleared .stageState { color:#FFD54F; }
-  .stageRow.locked .stageState { color:#8A9BB8; }
-  .cardList { display:flex; flex-direction:column; gap:10px; }
-  .upCard { text-align:left; padding:14px; border-radius:12px; cursor:pointer; color:#F5F9FF;
-            background:rgba(0,229,255,.10); border:1px solid rgba(0,229,255,.5); font-family:inherit; }
-  .upCard:hover { background:rgba(0,229,255,.2); }
-  .upCard span { display:block; font-size:17px; font-weight:800; }
-  .upCard em { display:block; font-style:normal; font-size:12px; color:#8A9BB8; margin-top:3px; }
-  .metaBtn { margin-top:12px; padding:12px; border-radius:10px; cursor:pointer; font-family:inherit;
-             font-weight:800; letter-spacing:.6px; color:#03060F; background:var(--accentLit); border:0; }
-  .metaBtn.ghost { background:transparent; color:#8A9BB8; border:1px solid rgba(138,155,184,.4); }
-  /* Pemilih arena: 5 kartu bertema warna (docs/06 baris 140). */
-  .arenaRow { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin:4px 0 10px; }
-  .arenaCard { position:relative; padding:0 0 6px; border-radius:9px; cursor:pointer; overflow:hidden;
-    border:1px solid rgba(var(--accentRGB),.30); background:rgba(10,16,48,.55);
-    display:flex; flex-direction:column; align-items:center; gap:4px; }
-  .arenaCard:hover:not(:disabled) { border-color:var(--accent); transform:translateY(-1px); }
-  .arenaThumb { display:block; width:100%; height:30px;
-    background:linear-gradient(180deg,var(--cardTop),var(--cardBot));
-    box-shadow:inset 0 -3px 0 var(--cardKey), inset 0 0 22px rgba(0,0,0,.5); }
-  .arenaName { font-size:8.5px; font-weight:800; letter-spacing:.3px; color:#F5F9FF;
-    line-height:1.15; text-align:center; padding:0 3px;
-    /* "Gravity Chamber" pecah dua baris; tinggi dikunci agar 5 kartu sejajar. */
-    min-height:2.3em; display:flex; align-items:center; justify-content:center; }
-  .arenaState { font-size:7px; font-weight:800; letter-spacing:.7px; color:var(--cardKey); }
-  .arenaCard.locked { opacity:.42; cursor:not-allowed; filter:saturate(.25); }
-  .arenaCard.locked .arenaState { color:#8A9BB8; }
-  /* Baris result: label kiri, angka kanan dengan count-up. */
-  .resRows { display:flex; flex-direction:column; gap:6px; margin:12px 0 16px; }
-  .resRow { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
-    padding:7px 12px; border-radius:9px; background:rgba(var(--accentRGB),.07);
-    box-shadow:inset 0 0 0 1px rgba(var(--accentRGB),.16); }
-  .resRow span { font-size:10px; font-weight:800; letter-spacing:1.4px; color:#8A9BB8; }
-  .resRow b { font-size:19px; font-weight:800; color:var(--accentLit);
-    font-variant-numeric:tabular-nums; }
-  .resRow.gold b { color:#FFD54F; }
-  .volRow { display:flex; align-items:center; gap:10px; margin-top:14px; font-size:11px;
-            letter-spacing:.8px; color:#8A9BB8; }
-  .volRow input { flex:1; accent-color:var(--accentLit); }
-  .volRow b { min-width:28px; text-align:right; color:#F5F9FF; }
+  .screen { flex:1; display:flex; flex-direction:column; min-height:0; padding:88px 48px 64px; }
+
+  /* --- bar profil + sumber daya --- */
+  .homeTop { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+  .profile { display:flex; align-items:center; gap:18px; padding:10px 28px 10px 10px; border-radius:999px;
+    background:rgba(8,16,36,.85); box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.3); }
+  .avatar { width:96px; height:96px; border-radius:30px; display:grid; place-items:center;
+    font:900 40px/1 var(--display); color:#04121B;
+    background:linear-gradient(180deg,var(--accentLit),var(--accent));
+    box-shadow:inset 0 4px 0 rgba(255,255,255,.5), 0 6px 0 rgba(0,40,60,.7); }
+  .profile .who { display:flex; flex-direction:column; gap:6px; }
+  .profile .who b { font:900 30px/1 var(--display); letter-spacing:1px; }
+  .profile .who span { font:800 22px/1 var(--body); letter-spacing:3px; color:var(--inkDim); }
+  .resPills { display:flex; gap:14px; }
+  .pill { display:flex; align-items:center; gap:10px; padding:16px 26px; border-radius:999px;
+    font:900 30px/1 var(--display); color:var(--ink);
+    background:rgba(8,16,36,.85); box-shadow:inset 0 0 0 3px rgba(255,255,255,.08); }
+  .pill i { font-style:normal; font-size:30px; }
+  .pill.gold { color:var(--gold); box-shadow:inset 0 0 0 3px rgba(255,213,79,.35); }
+
+  /* --- logo --- */
+  .logo { margin:40px 0 26px; text-align:center; font:900 112px/0.94 var(--display);
+    letter-spacing:-2px; color:var(--ink); text-shadow:0 10px 0 rgba(0,0,0,.45); }
+  .logo span { display:block; font-size:112px; color:var(--accent);
+    text-shadow:0 10px 0 rgba(0,0,0,.45), 0 0 60px rgba(var(--accentRGB),.5); }
+  .logo em { display:block; margin-top:14px; font:800 24px/1 var(--body); font-style:normal;
+    letter-spacing:9px; color:var(--inkDim); }
+
+  /* --- tab bawah ala game, bukan menu aplikasi --- */
+  .tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:26px; }
+  .tab { border:0; cursor:pointer; padding:22px 10px 20px; border-radius:26px; font-family:var(--display);
+    font-size:28px; font-weight:900; letter-spacing:3px; color:var(--inkDim);
+    background:rgba(8,16,36,.8); box-shadow:inset 0 0 0 2px rgba(255,255,255,.06);
+    transition:color .15s, box-shadow .15s, transform .1s; }
+  .tab.sel { color:#04121B; background:linear-gradient(180deg,var(--accentLit),var(--accent));
+    box-shadow:inset 0 4px 0 rgba(255,255,255,.45), 0 8px 0 rgba(0,45,65,.75); }
+  .tab:active { transform:translateY(4px); }
+
+  .pane { flex:1; min-height:0; display:none; flex-direction:column; gap:26px;
+    justify-content:space-evenly; }
+  .pane[data-pane="squad"], .pane[data-pane="setup"] { justify-content:flex-start; }
+  .pane.sel { display:flex; }
+
+  /* --- kartu chapter: fokus layar home --- */
+  .chapter { position:relative; border-radius:40px; overflow:hidden; padding:36px 40px;
+    background:linear-gradient(170deg, var(--cardTop,#0A1030), var(--cardBot,#03060F));
+    box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.4), 0 20px 50px rgba(0,0,0,.6); }
+  .chapter::after { content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      repeating-linear-gradient(90deg, rgba(var(--accentRGB),.09) 0 2px, transparent 2px 72px),
+      radial-gradient(90% 70% at 50% 115%, rgba(var(--accentRGB),.28), transparent 70%); }
+  /* Pratinjau lorong: trapesium ber-grid dengan warna tema varian. Dibuat dari
+     CSS, bukan gambar, supaya 5 arena otomatis punya seni sendiri. */
+  .chapter .preview { position:relative; height:230px; margin:-16px -20px 20px; overflow:hidden;
+    border-radius:26px; background:linear-gradient(180deg, var(--cardBot,#03060F), var(--cardTop,#0A1030)); }
+  .chapter .lane { position:absolute; left:50%; bottom:-10px; width:560px; height:250px;
+    transform:translateX(-50%); clip-path:polygon(28% 0, 72% 0, 100% 100%, 0% 100%);
+    background:
+      repeating-linear-gradient(0deg, rgba(var(--accentRGB),.22) 0 2px, transparent 2px 26px),
+      linear-gradient(180deg, rgba(var(--accentRGB),.10), rgba(var(--accentRGB),.30));
+    box-shadow:inset 0 0 60px rgba(0,0,0,.6); }
+  .chapter .crowd { position:absolute; top:34px; left:50%; transform:translateX(-50%);
+    display:flex; gap:7px; }
+  .chapter .crowd i { width:9px; height:18px; border-radius:3px; background:var(--enemy);
+    box-shadow:0 0 10px rgba(var(--enemyRGB),.7); }
+  .chapter .me { position:absolute; bottom:26px; left:50%; transform:translateX(-50%);
+    display:flex; gap:9px; }
+  .chapter .me i { width:13px; height:26px; border-radius:4px; background:var(--accentLit);
+    box-shadow:0 0 14px rgba(var(--accentRGB),.9); }
+  .chapter .kicker { position:relative; font:800 24px/1 var(--body); letter-spacing:8px; color:var(--accentLit); }
+  .chapter h3 { position:relative; margin:14px 0 0; font:900 68px/1 var(--display); letter-spacing:-1px; }
+  .chapter .meta { position:relative; margin-top:18px; display:flex; flex-wrap:wrap; gap:12px; }
+  .chapter .tagx { padding:12px 22px; border-radius:999px; font:900 24px/1 var(--display); letter-spacing:2px;
+    color:var(--ink); background:rgba(0,0,0,.35); box-shadow:inset 0 0 0 2px rgba(255,255,255,.12); }
+  .chapter .tagx.boss { color:#FFB3B3; box-shadow:inset 0 0 0 2px rgba(255,90,90,.4); }
+  .chapter .desc { position:relative; margin:18px 0 0; font:600 26px/1.5 var(--body); color:#C3D3EA; }
+  .stars { position:relative; margin-top:18px; display:flex; gap:8px; font-size:34px; color:var(--gold); }
+  .stars span.off { color:rgba(255,255,255,.16); }
+
+  /* --- rel stage horizontal (chapter select), bukan daftar panjang --- */
+  .railHead { display:flex; align-items:baseline; justify-content:space-between; }
+  .railHead b { font:900 30px/1 var(--display); letter-spacing:3px; }
+  .railHead span { font:800 22px/1 var(--body); letter-spacing:3px; color:var(--inkDim); }
+  .stageRail { display:flex; gap:18px; overflow-x:auto; overflow-y:hidden; padding:6px 4px 18px;
+    scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; }
+  .stageRail::-webkit-scrollbar { height:8px; }
+  .stageRail::-webkit-scrollbar-thumb { background:rgba(var(--accentRGB),.35); border-radius:999px; }
+  .stageRow { position:relative; flex:0 0 232px; scroll-snap-align:center; cursor:pointer; border:0;
+    padding:0 0 18px; border-radius:30px; overflow:hidden; text-align:center; font-family:var(--body);
+    color:var(--ink); background:linear-gradient(180deg, var(--cardTop,#0A1030), var(--cardBot,#03060F));
+    box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.35), 0 10px 22px rgba(0,0,0,.5);
+    transition:transform .12s ease, box-shadow .12s ease; }
+  .stageRow .art { display:block; height:118px;
+    background:linear-gradient(180deg, rgba(255,255,255,.1), transparent 60%),
+      repeating-linear-gradient(90deg, rgba(var(--accentRGB),.14) 0 2px, transparent 2px 26px),
+      linear-gradient(180deg, var(--cardTop,#0A1030), var(--cardBot,#03060F));
+    box-shadow:inset 0 -4px 0 rgba(var(--accentRGB),.5); }
+  .stageRow .num { display:block; margin-top:14px; font:900 44px/1 var(--display); }
+  .stageMain { display:block; margin-top:8px; font:900 22px/1.2 var(--display); letter-spacing:1px;
+    min-height:2.4em; padding:0 10px; color:#D8E6FA; }
+  .stageSub { display:block; margin-top:6px; font:800 18px/1 var(--body); letter-spacing:2px; color:var(--inkDim); }
+  .stageState { position:absolute; top:12px; left:50%; transform:translateX(-50%); padding:7px 14px;
+    border-radius:999px; font:900 17px/1 var(--display); letter-spacing:1px; color:#04121B; white-space:nowrap;
+    background:var(--accentLit); box-shadow:0 4px 0 rgba(0,45,65,.6); }
+  .stageRow.cleared .stageState { background:var(--gold); }
+  .stageRow.cur { transform:translateY(-6px); box-shadow:inset 0 0 0 4px var(--accent), 0 0 44px rgba(var(--accentRGB),.4); }
+  .stageRow.locked { filter:saturate(.25) brightness(.7); cursor:not-allowed; }
+  .stageRow.locked .stageState { background:#3A4765; color:#AEBCD6; box-shadow:none; }
+  .stageRow:active:not(:disabled) { transform:translateY(2px); }
+
+  /* --- pane squad: kartu upgrade yang dimiliki --- */
+  .ownList { display:flex; flex-direction:column; gap:16px; overflow-y:auto; min-height:0; padding-right:6px; }
+  .ownRow { display:flex; align-items:center; gap:20px; padding:22px 26px; border-radius:26px;
+    background:rgba(8,16,36,.8); box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.22); }
+  .ownRow .badge { width:72px; height:72px; flex:none; border-radius:22px; display:grid; place-items:center;
+    font:900 32px/1 var(--display); color:#04121B;
+    background:linear-gradient(180deg,var(--accentLit),var(--accent)); }
+  .ownRow b { display:block; font:900 30px/1 var(--display); letter-spacing:1px; }
+  .ownRow em { display:block; font-style:normal; margin-top:6px; font:700 24px/1 var(--body); color:var(--inkDim); }
+  .empty { padding:60px 30px; text-align:center; font:700 28px/1.5 var(--body); color:var(--inkDim); }
+
+  /* --- pane setup: volume, arena, reset, diagnostik --- */
+  .setupScroll { overflow-y:auto; min-height:0; display:flex; flex-direction:column; gap:22px; padding-right:6px; }
+  .block { padding:26px 28px; border-radius:30px; background:rgba(8,16,36,.8);
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.07); }
+  .block h4 { margin:0 0 18px; font:900 26px/1 var(--display); letter-spacing:4px; color:var(--inkDim); }
+  .volRow { display:flex; align-items:center; gap:20px; font:900 26px/1 var(--display); letter-spacing:3px; }
+  .volRow input { flex:1; height:26px; accent-color:var(--accent); }
+  .volRow b { min-width:70px; text-align:right; color:var(--accentLit); }
+  .arenaRow { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  .vbtn { border:0; cursor:pointer; padding:0 0 12px; border-radius:22px; overflow:hidden;
+    font-family:var(--body); color:var(--ink);
+    background:linear-gradient(180deg, rgba(14,24,50,.9), rgba(6,12,28,.9));
+    box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.25); }
+  .vbtn .art { display:block; height:54px; background:linear-gradient(180deg,var(--cardTop),var(--cardBot));
+    box-shadow:inset 0 -3px 0 var(--cardKey); }
+  .vbtn span { display:block; margin-top:10px; padding:0 6px; font:900 17px/1.15 var(--display); }
+  .vbtn.sel { box-shadow:inset 0 0 0 3px var(--accent), 0 0 24px rgba(var(--accentRGB),.35); }
+  .kv { display:grid; grid-template-columns:1fr auto; gap:10px 18px; font:800 24px/1.6 var(--body);
+    color:var(--inkDim); }
+  .kv b { color:var(--accentLit); font-weight:900; font-variant-numeric:tabular-nums; }
+  .keys { font:700 24px/1.9 var(--body); color:var(--inkDim); }
+  .keys kbd { display:inline-block; min-width:44px; text-align:center; background:#17233C; border-radius:10px;
+    padding:4px 12px; margin-right:8px; font:900 20px/1.3 var(--display); color:#CFE0F7; }
+
+  /* --- tombol besar ala game: bevel + bayangan bawah tebal --- */
+  .btn3d { border:0; cursor:pointer; width:100%; border-radius:34px; padding:34px 28px;
+    font-family:var(--display); font-size:52px; font-weight:900; letter-spacing:3px; color:#06240E;
+    background:linear-gradient(180deg, var(--goLit), var(--go) 55%, #35B23F);
+    box-shadow:inset 0 5px 0 rgba(255,255,255,.55), inset 0 -6px 0 rgba(0,0,0,.18),
+      0 14px 0 var(--goDark), 0 22px 34px rgba(0,0,0,.55);
+    transition:transform .08s ease, box-shadow .08s ease; }
+  .btn3d:active { transform:translateY(12px);
+    box-shadow:inset 0 5px 0 rgba(255,255,255,.4), 0 2px 0 var(--goDark), 0 8px 16px rgba(0,0,0,.5); }
+  .btn3d small { display:block; margin-top:10px; font:800 24px/1 var(--body); letter-spacing:3px;
+    color:rgba(6,36,14,.75); }
+  .btn3d.cyan { color:#042029; background:linear-gradient(180deg,#B9FFF4,var(--accent) 55%,#00A5BF);
+    box-shadow:inset 0 5px 0 rgba(255,255,255,.55), inset 0 -6px 0 rgba(0,0,0,.18),
+      0 14px 0 #006A7D, 0 22px 34px rgba(0,0,0,.55); }
+  .btn3d.cyan:active { box-shadow:inset 0 5px 0 rgba(255,255,255,.4), 0 2px 0 #006A7D, 0 8px 16px rgba(0,0,0,.5); }
+  .btn3d.ghost { color:#C7D7EE; background:linear-gradient(180deg, rgba(26,38,66,.95), rgba(12,20,40,.95));
+    box-shadow:inset 0 3px 0 rgba(255,255,255,.12), 0 10px 0 rgba(4,10,22,.9), 0 16px 26px rgba(0,0,0,.5);
+    font-size:40px; }
+  .btn3d.ghost:active { box-shadow:inset 0 3px 0 rgba(255,255,255,.1), 0 2px 0 rgba(4,10,22,.9); }
+  .btn3d.danger { color:#FFE3E8; background:linear-gradient(180deg,#FF6D84,#D01437);
+    box-shadow:inset 0 4px 0 rgba(255,255,255,.35), 0 12px 0 #7A0A20, 0 18px 30px rgba(0,0,0,.5);
+    font-size:36px; }
+  .btn3d.danger:active { box-shadow:inset 0 4px 0 rgba(255,255,255,.3), 0 2px 0 #7A0A20; }
+
+  .playBar { padding-top:26px; }
+
+  /* --- draft kartu upgrade --- */
+  .screenTitle { text-align:center; font:900 76px/1 var(--display); letter-spacing:1px;
+    text-shadow:0 8px 0 rgba(0,0,0,.45); }
+  .screenTitle.lose { color:var(--danger); }
+  .screenTitle.win { color:var(--accentLit); }
+  .screenSub { margin:16px 0 36px; text-align:center; font:800 26px/1.5 var(--body); letter-spacing:3px;
+    color:var(--inkDim); }
+  .cardList { display:flex; flex-direction:column; gap:24px; overflow-y:auto; min-height:0; padding:4px; }
+  .upCard { position:relative; border:0; cursor:pointer; text-align:left; padding:30px 34px; border-radius:34px;
+    font-family:var(--body); color:var(--ink); overflow:hidden;
+    background:linear-gradient(160deg, rgba(16,32,64,.96), rgba(6,12,28,.96));
+    box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.45), 0 14px 0 rgba(2,8,18,.8), 0 20px 36px rgba(0,0,0,.55);
+    transition:transform .1s ease, box-shadow .1s ease; }
+  .upCard::after { content:""; position:absolute; right:-60px; top:-60px; width:220px; height:220px;
+    border-radius:50%; background:radial-gradient(circle, rgba(var(--accentRGB),.3), transparent 70%); }
+  .upCard:active { transform:translateY(10px); box-shadow:inset 0 0 0 3px rgba(var(--accentRGB),.6), 0 4px 0 rgba(2,8,18,.8); }
+  .upCard span { display:block; font:900 44px/1 var(--display); letter-spacing:1px; color:var(--accentLit); }
+  .upCard em { display:block; font-style:normal; margin-top:12px; font:700 28px/1.4 var(--body); color:#C7D7EE; }
+
+  /* --- hasil run --- */
+  .resRows { display:flex; flex-direction:column; gap:16px; margin-bottom:36px; }
+  .resRow { display:flex; justify-content:space-between; align-items:center; gap:24px;
+    padding:22px 30px; border-radius:26px; background:rgba(8,16,36,.85);
+    box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.22); }
+  .resRow span { font:900 26px/1 var(--display); letter-spacing:4px; color:var(--inkDim); }
+  .resRow b { font:900 48px/1 var(--display); color:var(--accentLit); font-variant-numeric:tabular-nums; }
+  .resRow.gold b { color:var(--gold); }
+  .spacer { flex:1; min-height:20px; }
+  .btnCol { display:flex; flex-direction:column; gap:20px; }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="stage">
-    <canvas id="webgl-canvas"></canvas>
-    <canvas id="c"></canvas>
-    <div class="hud">
-      <div id="vig"></div>
-      <div class="top">
-        <div class="score"><span id="score">0</span><small>SCORE</small></div>
+<!-- Shell: backdrop + satu bingkai 9:16. Tidak ada apa pun di luar bingkai yang
+     bisa diklik, jadi di layar lebar pun ini tetap terbaca sebagai "game di
+     layar ponsel", bukan halaman web dengan kanvas di tengah. -->
+<div id="app">
+  <div id="frame">
+    <div id="stage">
+      <canvas id="webgl-canvas"></canvas>
+      <canvas id="c"></canvas>
+
+      <div class="hud" id="hud">
+        <div id="vig"></div>
+
+        <div class="topBar">
+          <div class="scorePod"><span>SCORE</span><b id="score">0</b></div>
+          <div class="stageChip">
+            <div class="chipRow">
+              <span class="st" id="stageTag">ST 01</span>
+              <span class="wv" id="wave">WAVE 1/5</span>
+            </div>
+            <div class="waveDots" id="waveDots"></div>
+          </div>
+          <button class="iconBtn" id="btnPause" aria-label="Jeda">&#10073;&#10073;</button>
+        </div>
+
         <div class="combo" id="combo"></div>
-        <div class="waveCol">
-          <div class="wave" id="wave">WAVE 1/5</div>
-          <div class="squad" id="squad">SQUAD x5</div>
+
+        <div class="bossBar" id="bossBar">
+          <div class="bossName" id="bossName">BOSS</div>
+          <div class="bossTrack"><div class="bossFill" id="bossFill"></div></div>
+        </div>
+
+        <div class="popupWrap"><div class="popup" id="popup"></div></div>
+        <div class="banner" id="banner"></div>
+
+        <!-- Jumlah pasukan = HP sekaligus DPS. Diberi pod sendiri, dekat zona
+             baca saat menggeser jempol. -->
+        <div class="troopPod" id="squadPod">
+          <div class="glyph">&#9650;</div>
+          <div>
+            <div class="num" id="squad">5</div>
+            <div class="cap">PASUKAN</div>
+          </div>
+        </div>
+
+        <div class="toast" id="hint">
+          <b>GESER</b> untuk menggerakkan squad — posisinya adalah bidikanmu.<br>
+          <b>TAP</b> untuk chain shot, lalu <b>GESER</b> membelokkan peluru.
+        </div>
+
+        <div class="deck">
+          <div class="deckLeft">
+            <div class="steerRow" id="steerRow">
+              <span class="steerLbl">STEER</span>
+              <div class="steerTrack"><div class="steerFill" id="steerFill"></div></div>
+              <span class="steerSec" id="steerSec">0.0s</span>
+            </div>
+            <div class="hp" id="hp"></div>
+          </div>
+          <button class="fireBtn" id="btnFire" aria-label="Chain shot">
+            <span class="lbl">
+              <span class="ico">&#9678;</span>
+              <span class="cap">CHAIN</span>
+              <span class="pips" id="ammo"></span>
+            </span>
+          </button>
         </div>
       </div>
-      <div class="bossBar" id="bossBar">
-        <div class="bossName" id="bossName">BOSS</div>
-        <div class="bossTrack"><div class="bossFill" id="bossFill"></div></div>
-      </div>
-      <div class="center"><div class="popup" id="popup"></div></div>
-      <div class="banner" id="banner"></div>
-      <div class="hint" id="hint">GESER untuk menggerakkan squad — posisi Anda adalah bidikannya<br>TAP untuk chain shot &nbsp;·&nbsp; saat riding: GESER membelokkan, TAP mengerem</div>
-      <div class="bottom">
-        <div class="steerRow" id="steerRow">
-          <span class="steerLbl">STEER</span>
-          <div class="steerTrack"><div class="steerFill" id="steerFill"></div></div>
-          <span class="steerSec" id="steerSec">0.0s</span>
-        </div>
-        <div class="row">
-          <div class="ammo" id="ammo"></div>
-          <div class="hp" id="hp"></div>
-        </div>
-      </div>
+
       <div id="flash"></div>
       <div id="meta"></div>
-    </div>
-  </div>
-
-  <div id="panel">
-    <h1>CHAIN <b>RIDER</b></h1>
-    <div class="sub">Prototipe arena 2.5D. Menjalankan aturan yang sama dengan spec:
-      fixed-step 60 Hz, ricochet analitik (tanpa physics engine), bullet riding + slow-mo.</div>
-
-    <h2>ARENA VARIANT</h2>
-    <div id="variants"></div>
-
-    <h2>LIVE STATS</h2>
-    <div class="stat"><span>FPS</span><b id="sFps">—</b></div>
-    <div class="stat"><span>Sim tick</span><b id="sTick">0</b></div>
-    <div class="stat"><span>Musuh aktif</span><b id="sEnemies">0</b></div>
-    <div class="stat"><span>Bounce</span><b id="sBounce">0</b></div>
-    <div class="stat"><span>Damage ×</span><b id="sDmg">1.00</b></div>
-    <div class="stat"><span>Speed ×</span><b id="sSpd">1.00</b></div>
-    <div class="stat"><span>timeScale</span><b id="sTs">1.00</b></div>
-    <div class="stat"><span>Total kill</span><b id="sKills">0</b></div>
-
-    <h2>KONTROL</h2>
-    <div class="keys">
-      <kbd>tap</kbd> tembak / rem<br>
-      <kbd>drag</kbd> belokkan peluru (maks 15°/swipe)<br>
-      <kbd>←</kbd> <kbd>→</kbd> steer via keyboard<br>
-      <kbd>R</kbd> restart · <kbd>1-5</kbd> ganti arena
     </div>
   </div>
 </div>
@@ -4715,7 +5033,7 @@ function resetRun(){
   S.chainCharge=0; S.chainCharges=0;
   for(const o of S.obstacles){ o.alive=true; o.hp = o.kind==='barrel'?1:(o.kind==='shieldWall'?3:Infinity); }
   banner('', 0);
-  el.hint.style.opacity = 1;
+  showHint();
 }
 
 // =============================================================================
@@ -4918,7 +5236,7 @@ function damageBoss(part, dmg, bdx, bdz){
 function fire(){
   if(S.state!=='playing') return;
   initAudio();
-  el.hint.style.opacity = 0;
+  hideHint();
 
   // Tap saat riding = REM (constraint: tidak ada tombol terpisah)
   const riding = S.bullets.find(b=>b.riding&&b.alive);
@@ -5461,7 +5779,27 @@ function endRun(victory){
 // =============================================================================
 function metaEl(){ return document.getElementById('meta'); }
 
-function hideMeta(){ const m = metaEl(); m.style.display='none'; m.innerHTML=''; }
+function setHudVisible(on){
+  if(el && el.hud && el.hud.classList) el.hud.classList.toggle('off', !on);
+}
+
+function hideMeta(){
+  setHudVisible(true);
+  const m = metaEl();
+  if(!m) return;
+  if(m.classList) m.classList.remove('on');
+  m.style.display='none';
+  m.innerHTML='';
+}
+function openMeta(html){
+  setHudVisible(false);
+  const m = metaEl();
+  if(!m) return m;
+  m.innerHTML = html;
+  if(m.classList) m.classList.add('on');
+  m.style.display='flex';
+  return m;
+}
 
 function startStage(stage){
   S.stage = stage;
@@ -5469,88 +5807,225 @@ function startStage(stage){
   loadVariant(variantForStage(stage));  // calls resetRun(), which applies cards
 }
 
-/**
- * Lima kartu arena untuk layar peta (docs/06 baris 140): thumbnail bertema
- * warna masing-masing variant + status locked/unlocked. Kartu yang terbuka
- * langsung memainkan stage TERBARU yang memakai arena itu, supaya tingkat
- * kesulitannya sepadan dengan kemajuan pemain.
- */
-function latestStageOfVariant(variantIndex){
+/** Jeda: satu-satunya jalan keluar dari run tanpa harus kalah dulu. */
+function showPause(){
+  if(S.state !== 'playing') return;
+  S.state = 'paused';
+  openMeta(`<div class="screen">
+      <div class="spacer"></div>
+      <h2 class="screenTitle">JEDA</h2>
+      <p class="screenSub">STAGE ${String(S.stage+1).padStart(2,'0')} \u00B7 ${CFG.variants[S.variant].name.toUpperCase()}</p>
+      <div class="btnCol">
+        <button class="btn3d" id="pauseResume">LANJUT</button>
+        <button class="btn3d ghost" id="pauseRestart">ULANGI STAGE</button>
+        <button class="btn3d ghost" id="pauseMap">KELUAR KE MARKAS</button>
+      </div>
+      <div class="spacer"></div>
+    </div>`);
+  document.getElementById('pauseResume').addEventListener('click', resumeRun);
+  document.getElementById('pauseRestart').addEventListener('click', ()=>startStage(S.stage));
+  document.getElementById('pauseMap').addEventListener('click', showMap);
+}
+function resumeRun(){
+  if(S.state !== 'paused') return;
+  hideMeta();
+  S.state = 'playing';
+}
+
+/** Bintang kesulitan: 1-3, dibaca sekilas, tanpa pemain harus menafsirkan "x1.24". */
+function stageStars(stage){
+  const d = difficultyForStage(stage);
+  const n = d < 1.3 ? 1 : (d < 1.9 ? 2 : 3);
+  return Array.from({length:3}, (_,i)=>`<span class="${i<n?'':'off'}">\u2605</span>`).join('');
+}
+
+function stageRailHtml(current){
   const total = stageCount();
   const highest = Math.min(META.unlocked, total-1);
-  let pick = -1;
-  for(let i=0;i<=highest;i++) if(variantForStage(i) === variantIndex) pick = i;
-  return pick;
-}
-function arenaCardsHtml(){
-  return CFG.variants.map((v,a)=>{
-    const pick = latestStageOfVariant(a), locked = pick < 0, t = v.theme || {};
-    return `<button class="arenaCard ${locked?'locked':''}" data-s="${pick}"
-        ${locked?'disabled':''} title="${v.name} \u00B7 boss ${String(v.boss||'-')}"
+  let out = '';
+  for(let i=0;i<total;i++){
+    const v = CFG.variants[variantForStage(i)], t = v.theme || {};
+    const cleared = i < META.unlocked, locked = i > highest;
+    const label = cleared ? 'CLEARED' : (locked ? 'LOCKED' : 'PLAY');
+    out += `<button class="stageRow ${cleared?'cleared':''} ${locked?'locked':''} ${i===current?'cur':''}"
+        data-s="${i}" ${locked?'disabled':''} title="${v.name}"
         style="--cardTop:${t.bgTop||'#0A1030'};--cardBot:${t.bgBottom||'#03060F'};--cardKey:${t.primary||'#00E5FF'}">
-        <span class="arenaThumb"></span>
-        <span class="arenaName">${v.name}</span>
-        <span class="arenaState">${locked ? 'LOCKED' : 'ST ' + String(pick+1).padStart(2,'0')}</span>
+        <span class="art"></span>
+        <b class="stageState">${label}</b>
+        <span class="num">${String(i+1).padStart(2,'0')}</span>
+        <span class="stageMain">${v.name}</span>
+        <span class="stageSub">\u2605 ${(difficultyForStage(i)).toFixed(2)}</span>
       </button>`;
+  }
+  return out;
+}
+
+function ownedCardsHtml(){
+  const all = (CFG.meta && CFG.meta.cards) || [];
+  if(!META.cards.length)
+    return `<div class="empty">Belum ada upgrade.<br>Menangkan satu stage untuk menarik kartu pertama.</div>`;
+  return META.cards.map(id=>{
+    const c = all.find(x=>x.id===id) || { name:id, desc:'' };
+    return `<div class="ownRow"><div class="badge">\u2726</div>
+        <div><b>${c.name}</b><em>${c.desc||''}</em></div></div>`;
   }).join('');
 }
 
+function arenaChipsHtml(){
+  return CFG.variants.map((v,i)=>{
+    const t = v.theme || {};
+    return `<button class="vbtn ${i===S.variant?'sel':''}" data-i="${i}" title="${v.description||''}"
+        style="--cardTop:${t.bgTop||'#0A1030'};--cardBot:${t.bgBottom||'#03060F'};--cardKey:${t.primary||'#00E5FF'}">
+        <span class="art"></span><span>${v.name}</span></button>`;
+  }).join('');
+}
+
+/**
+ * MARKAS (layar home). Tiga hal, tidak lebih: siapa kamu, stage apa yang
+ * berikutnya, dan tombol main. Semua pengaturan dan angka diagnostik pindah ke
+ * tab SETUP — di layar pertama mereka cuma membuat game terbaca seperti panel
+ * admin, yang persis masalah versi sebelumnya.
+ */
 function showMap(){
   S.state = 'menu';
   const total = stageCount();
-  const highest = Math.min(META.unlocked, total-1);
-  let rows = '';
-  for(let i=0;i<total;i++){
-    const v = CFG.variants[variantForStage(i)];
-    const cleared = i < META.unlocked, locked = i > highest;
-    const label = cleared ? 'CLEARED' : (locked ? 'LOCKED' : 'PLAY');
-    rows += `<button class="stageRow ${cleared?'cleared':''} ${locked?'locked':''}" data-s="${i}" ${locked?'disabled':''}>
-        <span class="stageMain">STAGE ${String(i+1).padStart(2,'0')} \u00B7 ${v.name}</span>
-        <span class="stageSub">BOSS ${String(v.boss||'-').toUpperCase()} \u00B7 DIFFICULTY x${difficultyForStage(i).toFixed(2)}</span>
-        <b class="stageState">${label}</b></button>`;
-  }
-  const owned = META.cards.length
-    ? META.cards.map(id=>{ const c=(CFG.meta.cards||[]).find(x=>x.id===id); return c?c.name:id; }).join(' \u00B7 ')
-    : 'no upgrades yet';
-  const m = metaEl();
-  m.innerHTML = `<div class="metaPanel">
-      <h2>CAMPAIGN</h2>
-      <p class="metaSub">${Math.min(META.unlocked,total)} / ${total} CLEARED \u00B7 BEST ${META.best}<br>${owned}</p>
-      <div class="arenaRow">${arenaCardsHtml()}</div>
-      <div class="stageList" id="stageList">${rows}</div>
-      <label class="volRow">VOLUME
-        <input type="range" id="volSlider" min="0" max="100" step="5"
-               value="${Math.round(masterVolume()*100)}">
-        <b id="volVal">${Math.round(masterVolume()*100)}</b>
-      </label>
-      <button class="metaBtn ghost" id="mapReset">RESET PROGRESS</button>
-    </div>`;
-  m.style.display='flex';
+  const current = Math.min(META.unlocked, total-1);
+  const v = CFG.variants[variantForStage(current)], t = v.theme || {};
+  const cleared = Math.min(META.unlocked, total);
+  // Markas memakai warna stage yang akan dimainkan, bukan warna run terakhir:
+  // layar menu dan arena di baliknya harus terbaca sebagai satu produk.
+  if(t.primary) applyTheme(t);
+
+  const m = openMeta(`<div class="screen">
+      <div class="homeTop">
+        <div class="profile">
+          <div class="avatar">CR</div>
+          <div class="who"><b>COMMANDER</b><span>LV ${cleared+1}</span></div>
+        </div>
+        <div class="resPills">
+          <div class="pill gold"><i>\u2605</i><b>${META.best}</b></div>
+          <div class="pill"><i>\u2726</i><b>${META.cards.length}</b></div>
+        </div>
+      </div>
+
+      <div class="logo">CHAIN<span>RIDER</span><em>RIDE THE RICOCHET</em></div>
+
+      <nav class="tabs">
+        <button class="tab sel" data-tab="arena">ARENA</button>
+        <button class="tab" data-tab="squad">SQUAD</button>
+        <button class="tab" data-tab="setup">SETUP</button>
+      </nav>
+
+      <section class="pane sel" data-pane="arena">
+        <div class="chapter" style="--cardTop:${t.bgTop||'#0A1030'};--cardBot:${t.bgBottom||'#03060F'}">
+          <div class="preview">
+            <div class="lane"></div>
+            <div class="crowd">${'<i></i>'.repeat(9)}</div>
+            <div class="me">${'<i></i>'.repeat(5)}</div>
+          </div>
+          <div class="kicker">STAGE ${String(current+1).padStart(2,'0')} / ${total}</div>
+          <h3>${v.name.toUpperCase()}</h3>
+          <div class="meta">
+            <span class="tagx boss">BOSS \u00B7 ${String(v.boss||'-').replace(/_/g,' ').toUpperCase()}</span>
+            <span class="tagx">${cleared} / ${total} CLEAR</span>
+          </div>
+          <div class="stars">${stageStars(current)}</div>
+          <p class="desc">${v.description||''}</p>
+        </div>
+        <div class="railHead"><b>PILIH STAGE</b><span>GESER \u2192</span></div>
+        <div class="stageRail" id="stageList">${stageRailHtml(current)}</div>
+      </section>
+
+      <section class="pane" data-pane="squad">
+        <div class="railHead"><b>UPGRADE AKTIF</b><span>${META.cards.length} KARTU</span></div>
+        <div class="ownList">${ownedCardsHtml()}</div>
+      </section>
+
+      <section class="pane" data-pane="setup">
+        <div class="setupScroll">
+          <div class="block">
+            <h4>AUDIO</h4>
+            <label class="volRow">VOLUME
+              <input type="range" id="volSlider" min="0" max="100" step="5"
+                     value="${Math.round(masterVolume()*100)}">
+              <b id="volVal">${Math.round(masterVolume()*100)}</b>
+            </label>
+          </div>
+          <div class="block">
+            <h4>ARENA UJI</h4>
+            <div class="arenaRow">${arenaChipsHtml()}</div>
+          </div>
+          <div class="block">
+            <h4>KONTROL</h4>
+            <div class="keys">
+              <kbd>tap</kbd> chain shot<br>
+              <kbd>geser</kbd> gerakkan squad / belokkan peluru<br>
+              <kbd>P</kbd> jeda &nbsp; <kbd>R</kbd> ulangi &nbsp; <kbd>1-5</kbd> ganti arena
+            </div>
+          </div>
+          <div class="block">
+            <h4>DIAGNOSTIK</h4>
+            <div class="kv">
+              <span>FPS</span><b id="sFps">\u2014</b>
+              <span>Sim tick</span><b id="sTick">0</b>
+              <span>Musuh aktif</span><b id="sEnemies">0</b>
+              <span>Bounce</span><b id="sBounce">0</b>
+              <span>Damage \u00D7</span><b id="sDmg">1.00</b>
+              <span>Speed \u00D7</span><b id="sSpd">1.00</b>
+              <span>timeScale</span><b id="sTs">1.00</b>
+              <span>Total kill</span><b id="sKills">0</b>
+            </div>
+          </div>
+          <button class="btn3d danger" id="mapReset">RESET PROGRES</button>
+        </div>
+      </section>
+
+      <div class="playBar">
+        <button class="btn3d" id="btnPlay" data-qa="play">MAIN
+          <small>STAGE ${String(current+1).padStart(2,'0')} \u00B7 ${v.name.toUpperCase()}</small>
+        </button>
+      </div>
+    </div>`);
+  if(!m) return;
+
   m.querySelectorAll('.stageRow').forEach(btn=>
     btn.addEventListener('click', ()=>startStage(+btn.dataset.s)));
-  m.querySelectorAll('.arenaCard').forEach(btn=>
-    btn.addEventListener('click', ()=>startStage(+btn.dataset.s)));
+  m.querySelectorAll('.vbtn').forEach(btn=>
+    btn.addEventListener('click', ()=>{
+      // Arena uji: mainkan stage terbaru yang memakai arena itu, supaya
+      // kesulitannya tetap sepadan dengan kemajuan pemain.
+      const i = +btn.dataset.i;
+      let pick = -1;
+      for(let s=0;s<=current;s++) if(variantForStage(s) === i) pick = s;
+      startStage(pick < 0 ? current : pick);
+    }));
+  m.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click', ()=>{
+    m.querySelectorAll('.tab').forEach(t2=>t2.classList.toggle('sel', t2===tab));
+    m.querySelectorAll('.pane').forEach(p=>
+      p.classList.toggle('sel', p.dataset.pane === tab.dataset.tab));
+  }));
+  const play = document.getElementById('btnPlay');
+  if(play) play.addEventListener('click', ()=>startStage(current));
+
   const vol = document.getElementById('volSlider');
-  vol.addEventListener('input', ()=>{
+  if(vol) vol.addEventListener('input', ()=>{
     META.volume = (+vol.value)/100;
     document.getElementById('volVal').textContent = vol.value;
     initAudio();          // slider adalah gestur pengguna: aman membuka AudioContext
     applyVolume();
     metaSave();
   });
-  document.getElementById('mapReset').addEventListener('click', ()=>{
+  const reset = document.getElementById('mapReset');
+  if(reset) reset.addEventListener('click', ()=>{
     META.unlocked=0; META.cards=[]; META.best=0; metaSave(); showMap();   // volume sengaja dipertahankan
   });
-  // Centre the next playable stage, same intent as the Godot map auto-scroll.
-  const list = document.getElementById('stageList'), row = list.children[highest];
-  if(row){
-    // Rapatkan ke awal baris: scroll "tengah" murni menyisakan baris teratas
-    // terpotong separuh, yang terbaca seperti cacat tata letak.
-    const pitch = row.offsetHeight + 6;                       // tinggi + gap
-    const want  = row.offsetTop - list.clientHeight/2 + row.clientHeight/2;
-    const snapped = Math.round(Math.max(0, want)/pitch)*pitch;
-    list.scrollTop = Math.min(snapped, Math.max(0, list.scrollHeight - list.clientHeight));
-  }
+
+  // Rel digulir ke stage berikutnya, bukan ke awal: yang pemain cari saat
+  // membuka game adalah "lanjut dari mana".
+  const rail = document.getElementById('stageList');
+  const row = rail && rail.children[current];
+  if(rail && row && rail.clientWidth)
+    rail.scrollLeft = Math.max(0, row.offsetLeft - rail.clientWidth/2 + row.clientWidth/2);
 }
 
 // Drawn from a stage-derived seed, never from S.rng: pulling cosmetic draws out
@@ -5570,23 +6045,32 @@ function drawOffers(stage){
 function showCards(stage){
   S.state = 'menu';
   const offers = drawOffers(stage);
-  const m = metaEl();
-  m.innerHTML = `<div class="metaPanel">
-      <h2>CHOOSE UPGRADE</h2>
-      <p class="metaSub">kept for the rest of the campaign</p>
+  const m = openMeta(`<div class="screen">
+      <div class="spacer"></div>
+      <h2 class="screenTitle win">PILIH UPGRADE</h2>
+      <p class="screenSub">DIBAWA SAMPAI AKHIR KAMPANYE</p>
       <div class="cardList">${offers.map(c=>
         `<button class="upCard" data-id="${c.id}"><span>${c.name}</span><em>${c.desc||''}</em></button>`
       ).join('')}</div>
-    </div>`;
-  m.style.display='flex';
+      <div class="spacer"></div>
+    </div>`);
+  if(!m) return;
   m.querySelectorAll('.upCard').forEach(btn=>btn.addEventListener('click', ()=>{
     META.cards.push(btn.dataset.id); metaSave(); showMap();
   }));
 }
 
+/**
+ * Bintang hasil mengukur RUN, bukan kesulitan stage: nyawa yang tersisa adalah
+ * satu-satunya hal yang benar-benar dikendalikan pemain di sini.
+ */
+function runStars(){
+  const n = S.lives >= CFG.player.lives ? 3 : (S.lives >= 2 ? 2 : 1);
+  return Array.from({length:3}, (_,i)=>`<span class="${i<n?'':'off'}">\u2605</span>`).join('');
+}
+
 function showResult(victory){
   S.state = 'menu';
-  const m = metaEl();
   const v = CFG.variants[variantForStage(S.stage)];
   const rows = [
     ['SCORE',      S.score,     ''],
@@ -5595,16 +6079,29 @@ function showResult(victory){
     ['COINS',      S.coins,     'gold'],
   ].map(r=>`<div class="resRow ${r[2]}"><span>${r[0]}</span>
        <b data-count="${r[1]}">0</b></div>`).join('');
-  m.innerHTML = `<div class="metaPanel">
-      <h2 class="${victory?'':'lose'}">${victory?'VICTORY':'DEFEAT'}</h2>
-      <p class="metaSub">STAGE ${String(S.stage+1).padStart(2,'0')} \u00B7 ${v.name}</p>
+  // Setelah menang, aksi utamanya adalah maju — bukan mengulang stage yang
+  // baru saja dibereskan. Tombol yang sama menjadi "coba lagi" saat kalah,
+  // sehingga layar hasil tidak pernah punya tombol mati.
+  const hasNext = victory && S.stage + 1 < (CFG.meta.stageCount || 15);
+  const nextStage = hasNext ? S.stage + 1 : S.stage;
+  const nextLabel = hasNext
+    ? `STAGE ${String(nextStage+1).padStart(2,'0')} \u2192`
+    : (victory ? 'ULANGI' : 'COBA LAGI');
+  const m = openMeta(`<div class="screen">
+      <div class="spacer"></div>
+      <h2 class="screenTitle ${victory?'win':'lose'}">${victory?'MENANG':'KALAH'}</h2>
+      <p class="screenSub">STAGE ${String(S.stage+1).padStart(2,'0')} \u00B7 ${v.name.toUpperCase()}</p>
+      ${victory ? `<div class="stars" style="justify-content:center;font-size:56px">${runStars()}</div>` : ''}
       <div class="resRows">${rows}</div>
-      <button class="metaBtn" id="againBtn">RETRY STAGE</button>
-      <button class="metaBtn ghost" id="mapBtn">BACK TO MAP</button>
-    </div>`;
-  m.style.display='flex';
+      <div class="btnCol">
+        <button class="btn3d ${victory?'cyan':''}" id="againBtn">${nextLabel}</button>
+        <button class="btn3d ghost" id="mapBtn">KEMBALI KE MARKAS</button>
+      </div>
+      <div class="spacer"></div>
+    </div>`);
+  if(!m) return;
   runCountUp(m);
-  document.getElementById('againBtn').addEventListener('click', ()=>startStage(S.stage));
+  document.getElementById('againBtn').addEventListener('click', ()=>startStage(nextStage));
   document.getElementById('mapBtn').addEventListener('click', showMap);
 }
 
@@ -5612,19 +6109,63 @@ function showResult(victory){
 // RENDER — proyeksi 2.5D
 // =============================================================================
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-let W=0,H=0,DPR=1;
+// Kerangka acuan tetap. Semua gambar dan seluruh CSS memakai koordinat ini;
+// layar nyata hanya menskalakannya. Rasio 9:16 karena itulah spesifikasinya,
+// dan karena rasio yang berubah-ubah berarti framing kamera berubah-ubah juga.
+const REF_W = 1080, REF_H = 1920;
+// Layar ponsel modern lebih jangkung dari 9:16 (umumnya 19,5:9 sampai 20:9).
+// Memaksa 9:16 di sana berarti dua pita hitam permanen, dan itu terbaca seperti
+// halaman web yang dipaksa, bukan game. Jadi: LEBAR yang dikunci ke 1080, tinggi
+// boleh tumbuh sampai batas ini, dan ruang ekstra jatuh ke dek HUD atas/bawah —
+// kamera tetap membingkai lorong dengan bukaan horizontal yang sama.
+const REF_H_MAX = 2340;                      // ~9:19.5
+let W=REF_W, H=REF_H, FIT_K=1, DPR=1;
+
+/**
+ * Memasang kerangka acuan ke layar nyata.
+ *   layar lebih jangkung dari 9:16 -> cocokkan lebar, tinggi acuan ikut tumbuh
+ *   layar lebih lebar (desktop)     -> cocokkan tinggi, sisanya jadi backdrop
+ *
+ * Ini perbaikan inti dari keluhan "resolusinya tidak jelas landscape atau
+ * portrait": sebelumnya #stage memakai height:100% + aspect-ratio sehingga di
+ * ponsel tinggi menang dan rasionya jadi 0,46 sementara kamera 3D dibangun
+ * untuk 9:16. Sekarang rasio dan skala ditentukan di satu tempat saja.
+ */
+function fitFrame(){
+  const frame = document.getElementById('frame');
+  const vw = (window.innerWidth || REF_W), vh = (window.innerHeight || REF_H);
+  const portraitish = (vh / vw) >= (REF_H / REF_W);
+  let k, hRef;
+  if(portraitish){
+    k = vw / REF_W;
+    hRef = Math.min(REF_H_MAX, Math.round(vh / k));
+  } else {
+    k = vh / REF_H;
+    hRef = REF_H;
+  }
+  FIT_K = k; H = hRef; W = REF_W;
+  if(frame && frame.style){
+    frame.style.height = hRef + 'px';
+    frame.style.setProperty('--k', String(k));
+    // Bingkai menutup layar penuh -> sudut membulat dan bayangan luar hanya
+    // mengotori tepi, jadi dimatikan.
+    const full = Math.abs(k*REF_W - vw) < 2 && Math.abs(k*hRef - vh) < 2;
+    if(frame.classList) frame.classList.toggle('full', full);
+  }
+  return k;
+}
+
 function resize(){
-  // Measure the stage, not the 2D canvas: once WebGL takes over, the 2D canvas
-  // is display:none and reports a 0x0 rect, which would size the renderer to
-  // nothing and leave a black screen.
-  const host = document.getElementById('stage') || cv;
-  const r = host.getBoundingClientRect();
-  if(R3D_ON) R3D.resize(r.width, r.height);
-  DPR = Math.min(2, window.devicePixelRatio||1);
-  cv.width = Math.floor(r.width*DPR); cv.height = Math.floor(r.height*DPR);
-  W = r.width; H = r.height;
+  const k = fitFrame() || 1;
+  // Buffer gambar mengikuti piksel fisik yang benar-benar tampil, bukan 1080
+  // mentah: di desktop k kecil, jadi merender 1080 penuh hanya membuang GPU.
+  DPR = Math.max(0.6, Math.min(2, (window.devicePixelRatio||1) * k));
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  if(R3D_ON) R3D.resize(W*DPR, H*DPR);
 }
 window.addEventListener('resize', resize);
+if(window.visualViewport && window.visualViewport.addEventListener)
+  window.visualViewport.addEventListener('resize', resize);
 
 // Proyeksi: makin jauh (z besar) → makin kecil & makin ke atas layar.
 // Ini meniru kamera perspektif miring 40° tanpa 3D engine.
@@ -5943,6 +6484,9 @@ const el = {
   hint:document.getElementById('hint'), squad:document.getElementById('squad'),
   bossBar:document.getElementById('bossBar'), bossName:document.getElementById('bossName'),
   bossFill:document.getElementById('bossFill'),
+  stageTag:document.getElementById('stageTag'), waveDots:document.getElementById('waveDots'),
+  squadPod:document.getElementById('squadPod'), fireBtn:document.getElementById('btnFire'),
+  pauseBtn:document.getElementById('btnPause'), hud:document.getElementById('hud'),
 };
 // Count-up tween (docs/06): angka tumbuh 0,2 s supaya kenaikan skor terbaca
 // sebagai "diraih", bukan sekadar berganti. Murni kosmetik — nilai sebenarnya
@@ -6003,20 +6547,53 @@ function runCountUp(root){
     if(!done) requestAnimationFrame(step);
   })(t0);
 }
-function setCombo(){ el.combo.textContent = S.combo>1?('x'+S.combo):'';
-  el.combo.style.transform = 'scale(1.18)'; setTimeout(()=>el.combo.style.transform='scale(1)',80); }
-function setWaveLabel(){
-  el.wave.textContent = `S${S.stage+1} \u00B7 WAVE ${Math.max(S.waveIndex+1,1)}/${CFG.spawn.waveCount}`; }
-function setSquadLabel(){
-  el.squad.textContent = `SQUAD x${S.troops}`;
-  el.squad.classList.toggle('low', S.troops <= 5);
+function setCombo(){
+  const on = S.combo > 1;
+  el.combo.textContent = on ? ('x'+S.combo) : '';
+  el.combo.classList.toggle('on', on);
+  el.combo.style.transform = on ? 'scale(1.2)' : 'scale(.8)';
+  setTimeout(()=>{ el.combo.style.transform = on ? 'scale(1)' : 'scale(.8)'; }, 90);
 }
-function setAmmo(){ el.ammo.innerHTML = Array.from({length:CFG.squad.chainShot.maxCharges},
-  (_,i)=>`<span class="pip${i<S.chainCharges?'':' off'}"></span>`).join(''); }
+/**
+ * Label wave punya dua bagian: chip teks dan titik progres. Titiknya ada karena
+ * "WAVE 3/5" memaksa pemain membaca angka; lima titik bisa ditangkap dengan
+ * lirikan setengah detik, yang memang cuma itu jatah perhatian saat bermain.
+ */
+function setWaveLabel(){
+  const total = CFG.spawn.waveCount, cur = Math.max(S.waveIndex+1, 1);
+  el.stageTag.textContent = 'ST ' + String(S.stage+1).padStart(2,'0');
+  el.wave.textContent = `WAVE ${cur}/${total}`;
+  el.waveDots.innerHTML = Array.from({length:total},
+    (_,i)=>`<i class="${i < cur ? 'on' : ''}"></i>`).join('');
+}
+function setSquadLabel(){
+  el.squad.textContent = String(S.troops);
+  el.squadPod.classList.toggle('low', S.troops <= 5);
+}
+function setAmmo(){
+  const max = CFG.squad.chainShot.maxCharges;
+  el.ammo.innerHTML = Array.from({length:max},
+    (_,i)=>`<span class="${i<S.chainCharges?'on':''}"></span>`).join('');
+}
 function setAmmoOld(){ el.ammo.innerHTML = Array.from({length:CFG.bullet.magazine},
   (_,i)=>`<i class="${i<S.ammo?'f':''}"></i>`).join(''); }
 function setHp(){ el.hp.innerHTML = Array.from({length:CFG.player.lives},
-  (_,i)=>`<span class="${i<S.lives?'':'e'}">♥</span>`).join(''); }
+  (_,i)=>`<i class="${i<S.lives?'':'e'}"></i>`).join(''); }
+// Petunjuk kontrol muncul sebagai toast dan pergi sendiri setelah beberapa
+// detik, atau saat pemain menembak pertama kali. Teks permanen di layar main
+// adalah dokumentasi, bukan desain.
+let hintTimer = 0;
+function showHint(){
+  if(!el.hint || !el.hint.style) return;
+  el.hint.style.opacity = '1';
+  if(hintTimer) clearTimeout(hintTimer);
+  hintTimer = setTimeout(hideHint, 6000);
+}
+function hideHint(){
+  if(!el.hint || !el.hint.style) return;
+  el.hint.style.opacity = '0';
+  if(hintTimer){ clearTimeout(hintTimer); hintTimer = 0; }
+}
 function flashPopup(txt){ el.popup.textContent=txt; el.popup.style.transition='none';
   el.popup.style.opacity='1'; el.popup.style.transform='scale(1.25)';
   requestAnimationFrame(()=>{ el.popup.style.transition='opacity .6s, transform .35s';
@@ -6031,21 +6608,32 @@ function banner(txt,color){ el.banner.textContent=txt; el.banner.style.color=col
 // INPUT — satu jempol: tap + drag
 // =============================================================================
 let ptrDown=false, ptrX=0, ptrStartX=0, ptrT=0;
+// Permukaan input adalah #stage, BUKAN kanvas 2D. Begitu renderer WebGL aktif,
+// kanvas 2D berstatus display:none — jadi selama ini seluruh kendali sentuh
+// mati persis pada mode render yang dipakai pemain sungguhan.
+const surface = document.getElementById('stage') || cv;
+function surfaceRect(){ return surface.getBoundingClientRect(); }
+
 // Layar -> koordinat arena. Pemetaan linier disengaja: pemain menyamakan
 // jempol dengan posisi squad, bukan dengan titik proyeksi 3D di lantai.
 function screenToArenaX(clientX){
-  const r = cv.getBoundingClientRect();
-  const t = Math.max(0, Math.min(1, (clientX - r.left)/r.width));
+  const r = surfaceRect();
+  const w = r.width || 1;
+  const t = Math.max(0, Math.min(1, (clientX - r.left)/w));
   return -CFG.arena.width/2 + t*CFG.arena.width;
 }
 function queueSquad(clientX){ S.squadInput = screenToArenaX(clientX); }
+function playable(){ return S.state === 'playing'; }
 
-cv.addEventListener('pointerdown', e=>{ ptrDown=true; ptrX=ptrStartX=e.clientX; ptrT=performance.now();
+surface.addEventListener('pointerdown', e=>{
+  if(!playable()) return;
+  ptrDown=true; ptrX=ptrStartX=e.clientX; ptrT=performance.now();
   if(!S.bullets.some(b=>b.riding&&b.alive)) queueSquad(e.clientX);
-  cv.setPointerCapture(e.pointerId); });
-cv.addEventListener('pointermove', e=>{
-  if(!ptrDown) return;
-  const dx = (e.clientX-ptrX)/cv.getBoundingClientRect().width;
+  if(surface.setPointerCapture) surface.setPointerCapture(e.pointerId);
+});
+surface.addEventListener('pointermove', e=>{
+  if(!ptrDown || !playable()) return;
+  const dx = (e.clientX-ptrX)/(surfaceRect().width||1);
   const riding = S.bullets.find(b=>b.riding&&b.alive);
   if(riding){
     if(Math.abs(dx)>0.003) queueSteer(dx/0.18);   // riding: geser = belokkan peluru
@@ -6054,17 +6642,28 @@ cv.addEventListener('pointermove', e=>{
   }
   ptrX=e.clientX;
 });
-cv.addEventListener('pointerup', e=>{
+surface.addEventListener('pointerup', e=>{
   if(!ptrDown) return; ptrDown=false;
+  if(!playable()) return;
   const dur=(performance.now()-ptrT)/1000;
-  const moved=Math.abs(e.clientX-ptrStartX)/cv.getBoundingClientRect().width;
+  const moved=Math.abs(e.clientX-ptrStartX)/(surfaceRect().width||1);
   // Tap = tekan singkat yang tidak berpindah. Selain itu pemain sedang
   // menggerakkan squad, dan menembak di situ akan terasa seperti salah tembak.
   if(dur<0.25 && moved<0.015) fire();
 });
+surface.addEventListener('pointercancel', ()=>{ ptrDown=false; });
+
+// Tombol aksi: jempol kanan tidak perlu menutupi arena untuk menembak, dan
+// pemain baru punya target yang jelas untuk ditekan.
+if(el.fireBtn) el.fireBtn.addEventListener('click', e=>{ e.stopPropagation(); if(playable()) fire(); });
+if(el.pauseBtn) el.pauseBtn.addEventListener('click', e=>{ e.stopPropagation(); showPause(); });
+
 window.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ if(S.state==='playing') showPause(); else if(S.state==='paused') resumeRun(); return; }
+  if(S.state==='paused'){ if(e.key.toLowerCase()==='p') resumeRun(); return; }
   if(S.state==='menu') return;
   if(e.key===' '){ e.preventDefault(); fire(); }
+  if(e.key==='p'||e.key==='P'){ showPause(); return; }
   if(e.key==='ArrowLeft'){ queueSteer(-1); queueAim(-6); }
   if(e.key==='ArrowRight'){ queueSteer(1); queueAim(6); }
   if(e.key.toLowerCase()==='r') resetRun();
@@ -6114,22 +6713,45 @@ function frame(now){
     el.steerFill.style.width = (sv*100).toFixed(1)+'%';
     el.steerSec.textContent = (rb?rb.steer:0).toFixed(1)+'s';
 
-    // Panel
-    P.sFps.textContent = fpsShow;
-    P.sTick.textContent = S.tick;
-    P.sEnemies.textContent = S.enemies.length;
-    P.sBounce.textContent = rb?rb.bounceCount:(S.bullets[0]?S.bullets[0].bounceCount:0);
-    P.sDmg.textContent = (rb?rb.dmgMul:1).toFixed(2);
-    P.sSpd.textContent = (rb?rb.spdMul:1).toFixed(2);
-    P.sTs.textContent = S.timeScale.toFixed(2);
-    P.sKills.textContent = S.kills;
+    // Tombol chain shot: cincin isi = progres charge, denyut = siap dipakai.
+    // Ini satu-satunya sumber daya ofensif yang pemain kendalikan, jadi ia
+    // dapat tombol fisik sendiri alih-alih sekadar deretan titik kecil.
+    const maxCh = CFG.squad.chainShot.maxCharges;
+    const ready = S.chainCharges > 0;
+    const ring = ready ? 1 : Math.max(0, Math.min(1, S.chainCharge));
+    el.fireBtn.style.setProperty('--p', ring.toFixed(3));
+    el.fireBtn.classList.toggle('ready', ready);
+    if(chargeShown !== S.chainCharges){ chargeShown = S.chainCharges; setAmmo(); }
+    if(maxCh !== pipCount){ pipCount = maxCh; setAmmo(); }
+
+    // Diagnostik hanya hidup kalau tab SETUP sedang terbuka. Angka debug tidak
+    // punya tempat di layar permainan — itu yang membuat build sebelumnya
+    // terbaca seperti alat, bukan game.
+    if(dev('sFps')){
+      dev('sFps').textContent = fpsShow;
+      dev('sTick').textContent = S.tick;
+      dev('sEnemies').textContent = S.enemies.length;
+      dev('sBounce').textContent = rb?rb.bounceCount:(S.bullets[0]?S.bullets[0].bounceCount:0);
+      dev('sDmg').textContent = (rb?rb.dmgMul:1).toFixed(2);
+      dev('sSpd').textContent = (rb?rb.spdMul:1).toFixed(2);
+      dev('sTs').textContent = S.timeScale.toFixed(2);
+      dev('sKills').textContent = S.kills;
+    }
   }
   requestAnimationFrame(frame);
 }
 
-const P = {};
-['sFps','sTick','sEnemies','sBounce','sDmg','sSpd','sTs','sKills']
-  .forEach(id=>P[id]=document.getElementById(id));
+let chargeShown = -1, pipCount = -1;
+// Node diagnostik dibangun ulang tiap kali layar meta dirender, jadi referensi
+// dicari ulang begitu yang lama lepas dari dokumen.
+const devCache = {};
+function dev(id){
+  const hit = devCache[id];
+  if(hit && hit.isConnected) return hit;
+  const node = document.getElementById(id);
+  devCache[id] = node && node.isConnected ? node : null;
+  return devCache[id];
+}
 
 /**
  * Brings up the WebGL renderer. Returns false when Three.js is missing or the
@@ -6157,11 +6779,6 @@ function startRenderer3D(){
 Promise.resolve(window.INLINE_CONFIG)
   .then(cfg=>{
     CFG = cfg;
-    // tombol varian
-    document.getElementById('variants').innerHTML = cfg.variants.map((v,i)=>
-      `<button class="vbtn" data-i="${i}">${v.index}. ${v.name}<em>${v.description}</em></button>`).join('');
-    document.querySelectorAll('.vbtn').forEach(b=>
-      b.addEventListener('click', ()=>loadVariant(+b.dataset.i)));
     R3D_ON = startRenderer3D();
     resize();
     UI_READY = true;

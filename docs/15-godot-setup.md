@@ -240,8 +240,25 @@ Catatan tiap item:
 Render Godot tidak bisa ditangkap di sandbox ini, tapi **layout engine-nya tetap
 berjalan headless**. Smoke test membaca `Control.get_global_rect()` pada scene
 hidup dan menegakkan aturan docs/06: tap target ≥ 120 px, tidak tumpang tindih,
-tidak keluar layar. Rect-nya di-dump ke `screenshots/layout-cards.json` dan
-`tools/draw_layout.py` menggambarnya jadi diagram.
+tidak keluar layar. Rect-nya di-dump ke `screenshots/layout-{cards,stagemap,hud}.json`
+dan `tools/draw_layout.py` menggambarnya jadi diagram.
+
+Yang diukur sekarang (semua di `godot/tests/smoke.gd`):
+
+| Layar | Yang ditegakkan |
+|---|---|
+| HUD | chain shot ≥ 200 × 200 px dan pusatnya di bawah 62% tinggi layar (zona ibu jari); jeda persegi ≥ 100 px dan di luar wilayah notch; **tidak ada dua elemen HUD tetap yang saling menindih**; tombol jeda benar-benar menghentikan simulasi dan memunculkan layar jeda; tombol chain shot benar-benar memicu tembakan |
+| Markas | tombol MAIN ≥ 120 px, tidak jatuh di bawah layar, berada di bawah 60% tinggi layar, dan tidak ditindih rel stage |
+| Rel stage | 15 kartu, masing-masing ≥ 200 × 200 px, tidak saling menindih mendatar, tidak keluar dari rel secara tegak, ≥ 2 kartu terlihat sekaligus, tepat 1 kartu bisa ditekan pada profil baru, stage berjalan tergulir ke dalam pandangan, menekan kartu memulai run |
+| Draft kartu | 3 kartu, tinggi ≥ 120 px, tidak tumpang tindih, tidak keluar layar |
+
+Pemeriksaan tumpang tindih HUD itu bukan teori: ia langsung menangkap pod skor
+yang menindih chip stage dan pod pasukan yang menindih meter steer. Penyebabnya
+font perangkat yang lebih tinggi dari dugaan memuaikan kotak yang ditaruh pada
+koordinat tetap — kegagalan yang tidak terlihat sama sekali di kode. Perbaikannya
+bukan menggeser angka, tapi memindahkan ketiga blok atas dan seluruh dek bawah ke
+dalam container (dek bawah dengan `grow_vertical = BEGIN`, sehingga memuai ke arah
+arena dan tidak pernah ke luar layar).
 
 Itu langsung berguna. Percobaan pertama melaporkan kartu selebar **36 px yang
 saling tumpang tindih** — ternyata rect dibaca sebelum layout pass, jadi

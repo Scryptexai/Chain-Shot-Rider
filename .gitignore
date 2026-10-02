@@ -48,3 +48,8 @@ Godot_v*_macos.universal
 # Node (only used by the headless screenshot renderer)
 node_modules/
 package-lock.json
+
+# Riset gambar dan potret kerja: dihasilkan ulang oleh
+# `node tools/shot.js` / image search, tidak perlu ikut repo.
+image-search/
+screenshots/wip/
