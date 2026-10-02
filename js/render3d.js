@@ -26,9 +26,9 @@
   // are close, so a high, steeply tilted camera frames the lane almost exactly.
   // Verified numerically by tools/render3d_test.js, not by eyeballing.
   var CAM = {
-    fov: 41,          // vertical FOV in degrees
-    pos: [0, 51, 14], // three.js position: high, tilted 33.7 degrees
-    look: [0, 0, -20],
+    fov: 40,          // vertical FOV in degrees
+    pos: [0, 47, 24], // three.js position: high, tilted 39 degrees
+    look: [0, 0, -14],
     near: 0.5,
     far: 160,
   };
@@ -47,6 +47,24 @@
     bullet: 0xfff3c4,
     chain: 0x00e5ff,
   };
+
+  // Model GLB hasil tools/build_assets.py. Dibangun dengan Python + trimesh,
+  // jadi tidak ada aset berhak cipta dan tidak perlu Blender atau Godot.
+  var MODELS = {
+    soldier: 'assets/models/soldier.glb',
+    grunt: 'assets/models/enemy_grunt.glb',
+    runner: 'assets/models/enemy_runner.glb',
+    brute: 'assets/models/enemy_brute.glb',
+    shielder: 'assets/models/enemy_shielder.glb',
+    splitter: 'assets/models/enemy_splitter.glb',
+    bomber: 'assets/models/enemy_bomber.glb',
+    boss: 'assets/models/boss.glb',
+    barrel: 'assets/models/barrel.glb',
+    bumper: 'assets/models/bumper.glb',
+    shieldWall: 'assets/models/shield_wall.glb',
+  };
+  var loaded = {};      // name -> Object3D prototype
+  var loadCount = 0;
 
   var THREE = null;
   var renderer = null, scene = null, camera = null, canvas = null;
@@ -73,6 +91,69 @@
         for (var i = this.used; i < this.items.length; i++) this.items[i].visible = false;
       },
     };
+  }
+
+  /**
+   * Memuat semua GLB. Game tetap jalan sebelum selesai memuat: primitif dipakai
+   * sampai modelnya siap, jadi tidak ada layar kosong menunggu aset.
+   */
+  function loadModels(onDone) {
+    if (!THREE.GLTFLoader) { if (onDone) onDone(0); return; }
+    var loader = new THREE.GLTFLoader();
+    var names = Object.keys(MODELS), pending = names.length;
+    names.forEach(function (name) {
+      loader.load(MODELS[name], function (gltf) {
+        var root = gltf.scene;
+        root.traverse(function (c) {
+          if (!c.isMesh) return;
+          // Jaring pengaman: tanpa atribut NORMAL, Lambert menghitung cahaya nol
+          // dan modelnya tampil hitam pekat.
+          if (!c.geometry.attributes.normal) c.geometry.computeVertexNormals();
+          // MeshStandardMaterial butuh environment map agar enak dilihat;
+          // Lambert lebih murah dan cocok dengan tiga lampu yang sudah ada.
+          c.material = new THREE.MeshLambertMaterial({ vertexColors: true });
+        });
+        loaded[name] = root;
+        loadCount++;
+        if (--pending === 0 && onDone) onDone(loadCount);
+      }, undefined, function () {
+        if (--pending === 0 && onDone) onDone(loadCount);
+      });
+    });
+  }
+
+  /** Salinan model siap pakai, atau null kalau belum/gagal dimuat. */
+  function instance(name) {
+    var proto = loaded[name];
+    if (!proto) return null;
+    var obj = proto.clone(true);
+    // Material disalin per instance supaya kedip terkena tembak tidak menular.
+    obj.traverse(function (c) { if (c.isMesh) c.material = c.material.clone(); });
+    return obj;
+  }
+
+  /**
+   * Memastikan wadah berisi visual yang benar. Mengganti isi hanya saat jenisnya
+   * berubah, sehingga pergantian tipe musuh tidak mengalokasi tiap frame.
+   */
+  function ensureVisual(holder, kind, fallback) {
+    // Jenis sama DAN sudah memakai model -> tidak ada yang perlu diganti.
+    // Kalau isinya masih primitif sementara modelnya baru selesai dimuat,
+    // wadah harus dibangun ulang; tanpa ini primitif awal akan menetap selamanya.
+    if (holder.userData.kind === kind &&
+        (holder.userData.isModel || !loaded[kind])) return holder.children[0];
+    holder.remove.apply(holder, holder.children.slice());
+    var vis = instance(kind) || fallback();
+    holder.userData.kind = kind;
+    holder.userData.isModel = !!loaded[kind];
+    holder.add(vis);
+    return vis;
+  }
+
+  function setEmissive(holder, hex) {
+    holder.traverse(function (c) {
+      if (c.isMesh && c.material && c.material.emissive) c.material.emissive.setHex(hex);
+    });
   }
 
   /** Builds the perspective camera. Shared with the test so framing is proven. */
@@ -197,11 +278,8 @@
       scene.add(groups[k]);
     });
 
-    pools.troops = makePool(groups.troops, function () { return makeTroop(accentColor); });
-    pools.enemies = makePool(groups.enemies, function () {
-      return new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
-        new THREE.MeshLambertMaterial({ color: 0xffffff }));
-    });
+    pools.troops = makePool(groups.troops, function () { return new THREE.Group(); });
+    pools.enemies = makePool(groups.enemies, function () { return new THREE.Group(); });
     pools.bullets = makePool(groups.bullets, function () {
       return new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6),
         new THREE.MeshBasicMaterial({ color: PAL.bullet }));
@@ -210,24 +288,32 @@
       return new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
         new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.93, side: THREE.DoubleSide }));
     });
-    pools.obstacles = makePool(groups.obstacles, function () {
-      return new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 10),
-        new THREE.MeshLambertMaterial({ color: 0xffffff }));
-    });
-    pools.bossParts = makePool(groups.boss, function () {
-      return new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10),
-        new THREE.MeshLambertMaterial({ color: 0xff4d3d, emissive: 0x330000 }));
-    });
+    pools.obstacles = makePool(groups.obstacles, function () { return new THREE.Group(); });
+    pools.bossParts = makePool(groups.boss, function () { return new THREE.Group(); });
+
+    loadModels(function (n) { api.modelsLoaded = n; });
 
     api.ready = true;
     return true;
   }
 
+  /**
+   * Mewarnai prajurit sesuai tema arena.
+   *
+   * Hanya berlaku untuk prajurit primitif. Model GLB sudah punya vertex color
+   * yang dipanggang, dan menimpanya dengan satu warna solid akan menghapus
+   * detailnya. Wadah pool juga berisi Group, bukan Mesh, jadi penelusuran harus
+   * lewat traverse dan memeriksa material sebelum menyentuhnya.
+   */
   function setAccent(hex) {
     accentColor = hex;
-    pools.troops.items.forEach(function (grp) {
-      grp.children.forEach(function (m) {
-        m.material.color.setHex(hex); m.material.emissive.setHex(hex);
+    if (!pools.troops) return;
+    pools.troops.items.forEach(function (holder) {
+      if (holder.userData && holder.userData.isModel) return;
+      holder.traverse(function (c) {
+        if (!c.isMesh || !c.material || !c.material.color) return;
+        c.material.color.setHex(hex);
+        if (c.material.emissive) c.material.emissive.setHex(hex);
       });
     });
   }
@@ -265,6 +351,7 @@
     for (var i = 0; i < shown; i++) {
       var row = Math.floor(i / perRow), col = i % perRow;
       var t = pools.troops.take();
+      ensureVisual(t, 'soldier', function () { return makeTroop(accentColor); });
       t.position.set(sx + (col - (perRow - 1) / 2) * spread, 0, -(sz - row * 0.6));
     }
     pools.troops.end();
@@ -275,11 +362,21 @@
     for (var e = 0; e < list.length; e++) {
       var en = list[e];
       var m = pools.enemies.take();
-      var r = (en.r || 0.4) * 1.75;
-      m.scale.set(r, r * 1.35, r);
-      m.position.set(en.x, r * 1.25, -en.z);
-      m.material.color.set(en.color || '#ff4d3d');
-      m.material.emissive.set(en.hit > 0 ? 0xffffff : 0x000000);
+      var kind = en.type || 'grunt';
+      var vis = ensureVisual(m, kind, function () {
+        return new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
+          new THREE.MeshLambertMaterial({ color: en.color || '#ff4d3d' }));
+      });
+      if (m.userData.isModel) {
+        m.scale.setScalar(1);
+        m.position.set(en.x, 0, -en.z);
+        m.rotation.y = Math.PI;              // model menghadap -Z, musuh menatap pemain
+      } else {
+        var r = (en.r || 0.4) * 1.75;
+        vis.scale.set(r, r * 1.35, r);
+        m.position.set(en.x, r * 1.25, -en.z);
+      }
+      setEmissive(m, en.hit > 0 ? 0x884444 : 0x000000);
     }
     pools.enemies.end();
 
@@ -330,17 +427,19 @@
       var os = ob[o];
       if (!os.alive) continue;
       var om = pools.obstacles.take();
-      if (os.kind === 'shieldWall') {
-        om.scale.set((os.w || 4) / 2, 1.1, 0.25);
-        om.material.color.setHex(0xb14dff);
-      } else if (os.kind === 'barrel') {
-        om.scale.set(os.r || 0.6, 0.9, os.r || 0.6);
-        om.material.color.setHex(0xff8a2b);
+      var okind = os.kind === 'shieldWall' ? 'shieldWall'
+        : (os.kind === 'barrel' ? 'barrel' : 'bumper');
+      var ovis = ensureVisual(om, okind, function () {
+        return new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 10),
+          new THREE.MeshLambertMaterial({ color: 0x1fd3e8 }));
+      });
+      if (om.userData.isModel) {
+        om.scale.setScalar(okind === 'shieldWall' ? (os.w || 4) / 4 : 1);
+        om.position.set(os.x, 0, -os.z);
       } else {
-        om.scale.set(os.r || 0.9, 0.7, os.r || 0.9);
-        om.material.color.setHex(0x1fd3e8);
+        ovis.scale.set(os.r || 0.9, 0.7, os.r || 0.9);
+        om.position.set(os.x, 0.5, -os.z);
       }
-      om.position.set(os.x, 0.5, -os.z);
     }
     pools.obstacles.end();
 
@@ -351,10 +450,20 @@
         var part = S.boss.parts[p2];
         if (!part.alive) continue;
         var pm = pools.bossParts.take();
+        var pvis = ensureVisual(pm, 'boss', function () {
+          return new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10),
+            new THREE.MeshLambertMaterial({ color: 0xff4d3d }));
+        });
         var pr = part.r || 1.8;
-        pm.scale.setScalar(pr);
-        pm.position.set(part.x, pr, -part.z);
-        pm.material.emissive.setHex(part.hit > 0 ? 0xaa2222 : 0x330000);
+        if (pm.userData.isModel) {
+          pm.scale.setScalar(pr / 1.8);
+          pm.position.set(part.x, 0, -part.z);
+          pm.rotation.y = Math.PI;
+        } else {
+          pvis.scale.setScalar(pr);
+          pm.position.set(part.x, pr, -part.z);
+        }
+        setEmissive(pm, part.hit > 0 ? 0xaa2222 : 0x220000);
       }
     }
     pools.bossParts.end();
@@ -365,7 +474,7 @@
   var api = {
     ready: false,
     init: init, sync: sync, resize: resize, setAccent: setAccent,
-    makeCamera: makeCamera, CAM: CAM, ARENA: ARENA,
+    makeCamera: makeCamera, CAM: CAM, ARENA: ARENA, modelsLoaded: 0,
     _setThree: function (t) { THREE = t; },   // for the headless geometry test
     _scene: function () { return scene; },    // ditto
   };

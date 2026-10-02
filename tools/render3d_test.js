@@ -102,8 +102,12 @@ check('perspektif terasa: baris jauh lebih sempit', farW < nearW,
 
 console.log('\n[4] Kedalaman terpakai sepanjang layar');
 const depthSpan = project(0, D).y - project(0, 0).y;
-check('arena membentang >=70% tinggi layar', depthSpan >= 1.4,
+// Sisa tinggi layar sengaja dibiarkan kosong di depan squad: tanpa ruang itu
+// squad menempel di tepi bawah dan tertimpa HUD.
+check('arena membentang >=60% tinggi layar', depthSpan >= 1.2,
   `${(depthSpan / 2 * 100).toFixed(0)}% tinggi`);
+check('ada ruang di bawah squad', squad.y > -0.62 && squad.y < -0.25,
+  `squadY=${squad.y.toFixed(2)}`);
 
 console.log('\n[5] Squad bergerak kiri-kanan tetap di dalam layar');
 for (const x of [-HW + 0.5, 0, HW - 0.5]) {

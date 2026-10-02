@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>CHAIN RIDER</title>
 <script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/GLTFLoader.js"></script>
 <script src="js/render3d.js"></script>
 <style>
   :root {
@@ -75,7 +76,7 @@
   .bossFill { height:100%; width:100%; border-radius:999px;
     background:linear-gradient(90deg,#FF1744,#FF8A2B); box-shadow:0 0 14px rgba(255,60,60,.8);
     transition:width .12s linear; }
-  .hint { position:absolute; left:0; right:0; bottom:11%; text-align:center; font-size:12px;
+  .hint { position:absolute; left:0; right:0; bottom:4.5%; text-align:center; font-size:11px;
     color:#9FB3CF; letter-spacing:.4px; line-height:1.7; text-shadow:0 2px 10px #000;
     transition:opacity .4s; }
   .banner { position:absolute; left:0; right:0; top:46%; text-align:center; font-size:30px;

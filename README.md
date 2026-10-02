@@ -126,6 +126,24 @@ fixed-step 60 Hz dan deterministik: stage yang sama selalu bermain sama persis.
 **Progres** disimpan di `localStorage` browser; tombol `RESET PROGRESS` di peta
 mengosongkannya.
 
+### Pipeline aset 3D
+
+Model tidak diunduh dan tidak digambar artist — semuanya **dihasilkan kode**:
+
+```bash
+python3 -m venv ~/.cache/venv
+~/.cache/venv/bin/pip install trimesh numpy
+~/.cache/venv/bin/python tools/build_assets.py
+```
+
+Keluarannya 11 GLB: prajurit squad, 6 tipe musuh dengan siluet berbeda, boss,
+barrel, bumper, dan shield wall. Warna dipanggang sebagai vertex color dari
+palet resmi project, dan vertex sengaja dipisah per face supaya shading-nya
+flat dan bentuk kotak terlihat bersudut.
+
+GLB yang sama bisa dipakai build Godot maupun build web, jadi keduanya tidak
+akan menyimpang secara visual.
+
 ### Bagaimana game ini dirender di web
 
 Pakai pendekatan yang sama dengan Last Harbor: **Three.js yang di-vendor**, bukan
@@ -138,7 +156,9 @@ engine yang diekspor.
 | Kanvas | `<canvas id="webgl-canvas">` dengan `THREE.WebGLRenderer` |
 | Kamera | `PerspectiveCamera` FOV 41, tinggi 51, miring 33,7 derajat ke arena 20x40 |
 | Cahaya | `HemisphereLight` + matahari `DirectionalLight` + fill — tanpa shadow map demi HP kentang |
-| Mesh | dibentuk prosedural dari primitif Three.js; tekstur grid dan label gate digambar ke `<canvas>` saat runtime, jadi **nol file aset** |
+| Model | **GLB sungguhan** di `assets/models/` (11 berkas, 549 KB), dimuat `THREE.GLTFLoader` |
+| Pembuat model | `tools/build_assets.py` — Python + `trimesh`, prosedural, **tanpa Blender dan tanpa Godot** |
+| Fallback | kalau GLB belum selesai dimuat, primitif Three.js dipakai lebih dulu supaya tidak ada layar kosong |
 | Build step | tidak ada |
 
 `js/render3d.js` hanya **menggambar**. Ia membaca `S` sekali per frame dan
