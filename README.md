@@ -87,7 +87,20 @@ godot --headless --path godot/ res://tests/smoke.tscn                 # renderer
 
 ---
 
-## Build Web — cara melihat game TANPA memasang apa pun
+## Cara tercepat: satu berkas, tanpa server
+
+Unduh **`chain-rider.html`** (1,5 MB) lalu klik dua kali. Selesai.
+
+Tanpa server, tanpa internet, tanpa Godot, tanpa Python, tanpa npm. Seluruh
+game ada di dalam satu berkas itu: config, Three.js, GLTFLoader, renderer, dan
+11 model GLB ditanam sebagai data URI. Bisa dikirim lewat chat atau disalin ke
+HP dan tetap jalan.
+
+Dibangun ulang dengan `python3 tools/build_standalone.py` setiap kali sumbernya
+berubah. Diverifikasi dibuka lewat `file://` di Chromium sungguhan: WebGL
+aktif, 11 model termuat, simulasi berjalan, konsol bersih.
+
+## Build Web — versi folder (untuk pengembangan)
 
 Butuh satu perintah, tanpa Godot, tanpa unduhan, tanpa akun:
 
