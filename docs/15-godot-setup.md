@@ -206,8 +206,8 @@ target rilis mobile. Beberapa item sudah selesai di satu sisi saja.
 | Slider volume (docs/06) | **selesai** | belum |
 | High-pass + sub pulse saat nyawa 1 (docs/07 §7.3) | **selesai** | belum |
 | Low-pass 1200 Hz + −6 dB saat slow-mo (§7.3) | **selesai** | belum |
-| Pemilih arena 5 kartu | belum | belum |
-| Count-up tween di layar result | belum | belum |
+| Pemilih arena 5 kartu | **selesai** | belum |
+| Count-up tween (HUD + baris result) | **selesai** | belum |
 
 Catatan tiap item:
 
@@ -220,6 +220,14 @@ Catatan tiap item:
   permanen dan dibiarkan transparan saat tidak dipakai, supaya tidak ada
   penyambungan ulang graph di tengah permainan. Sub pulse 55 Hz berdetak tiap
   0,5 detik (120 BPM, sesuai §7.3).
+- **Pemilih arena**: kartu yang terbuka memainkan stage *terbaru* yang memakai
+  arena itu, bukan yang paling awal, supaya kesulitannya sepadan dengan
+  kemajuan pemain. Arena ke-N terbuka begitu ada stage terbuka yang memakainya.
+- **Count-up**: skor HUD memakai tween 0,2 s dan menolak animasi mundur (skor
+  turun = stage baru, langsung dipatok). Layar result memakai rAF sendiri
+  karena state saat itu 'menu'; `prefers-reduced-motion` langsung menampilkan
+  angka akhir.
+
 - **Cue yang belum pernah terpicu di uji**: `combo_milestone`, `heartbeat`,
   `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`.
   Semuanya tersambung dan file-nya ada, tapi butuh run lebih panjang atau

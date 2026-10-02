@@ -157,7 +157,10 @@ karena ketiganya saling eksklusif dan berbagi skin yang sama.
 
 Baris result dibangun dari data run (array `{label, value}`), bukan template tetap,
 sehingga menambah statistik tidak menuntut penataan ulang layar.
-Belum ada: pemilih arena 5 kartu, slider audio, dan count-up tween per baris.
+Sudah ada di build web: pemilih arena 5 kartu (thumbnail bertema + status
+locked/unlocked), slider volume di layar peta, count-up tween skor HUD 0,2 s,
+dan count-up per baris di layar result dengan jeda 0,15 s antar baris.
+Ketiganya belum diparitaskan ke build Godot — lihat tabel status di docs/15.
 
 ## 6.6 Sistem Tema
 

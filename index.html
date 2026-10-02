@@ -91,6 +91,7 @@
     padding:18px; box-shadow:0 0 0 1px rgba(255,255,255,.06); font-size:13px; }
   #panel h1 { font-size:16px; margin:0 0 3px; letter-spacing:1px; }
   #panel h1 b { color:var(--accent); }
+  #score, #combo { font-variant-numeric:tabular-nums; }
   #panel .sub { color:#7E90AC; font-size:11px; margin-bottom:16px; line-height:1.6; }
   #panel h2 { font-size:10px; letter-spacing:2px; color:#7E90AC; margin:18px 0 8px; font-weight:800; }
   .vbtn { display:block; width:100%; text-align:left; padding:9px 11px; margin-bottom:6px; border-radius:9px;
@@ -136,6 +137,31 @@
   .metaBtn { margin-top:12px; padding:12px; border-radius:10px; cursor:pointer; font-family:inherit;
              font-weight:800; letter-spacing:.6px; color:#03060F; background:var(--accentLit); border:0; }
   .metaBtn.ghost { background:transparent; color:#8A9BB8; border:1px solid rgba(138,155,184,.4); }
+  /* Pemilih arena: 5 kartu bertema warna (docs/06 baris 140). */
+  .arenaRow { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin:4px 0 10px; }
+  .arenaCard { position:relative; padding:0 0 6px; border-radius:9px; cursor:pointer; overflow:hidden;
+    border:1px solid rgba(var(--accentRGB),.30); background:rgba(10,16,48,.55);
+    display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .arenaCard:hover:not(:disabled) { border-color:var(--accent); transform:translateY(-1px); }
+  .arenaThumb { display:block; width:100%; height:30px;
+    background:linear-gradient(180deg,var(--cardTop),var(--cardBot));
+    box-shadow:inset 0 -3px 0 var(--cardKey), inset 0 0 22px rgba(0,0,0,.5); }
+  .arenaName { font-size:8.5px; font-weight:800; letter-spacing:.3px; color:#F5F9FF;
+    line-height:1.15; text-align:center; padding:0 3px;
+    /* "Gravity Chamber" pecah dua baris; tinggi dikunci agar 5 kartu sejajar. */
+    min-height:2.3em; display:flex; align-items:center; justify-content:center; }
+  .arenaState { font-size:7px; font-weight:800; letter-spacing:.7px; color:var(--cardKey); }
+  .arenaCard.locked { opacity:.42; cursor:not-allowed; filter:saturate(.25); }
+  .arenaCard.locked .arenaState { color:#8A9BB8; }
+  /* Baris result: label kiri, angka kanan dengan count-up. */
+  .resRows { display:flex; flex-direction:column; gap:6px; margin:12px 0 16px; }
+  .resRow { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+    padding:7px 12px; border-radius:9px; background:rgba(var(--accentRGB),.07);
+    box-shadow:inset 0 0 0 1px rgba(var(--accentRGB),.16); }
+  .resRow span { font-size:10px; font-weight:800; letter-spacing:1.4px; color:#8A9BB8; }
+  .resRow b { font-size:19px; font-weight:800; color:var(--accentLit);
+    font-variant-numeric:tabular-nums; }
+  .resRow.gold b { color:#FFD54F; }
   .volRow { display:flex; align-items:center; gap:10px; margin-top:14px; font-size:11px;
             letter-spacing:.8px; color:#8A9BB8; }
   .volRow input { flex:1; accent-color:var(--accentLit); }
@@ -1304,6 +1330,32 @@ function startStage(stage){
   loadVariant(variantForStage(stage));  // calls resetRun(), which applies cards
 }
 
+/**
+ * Lima kartu arena untuk layar peta (docs/06 baris 140): thumbnail bertema
+ * warna masing-masing variant + status locked/unlocked. Kartu yang terbuka
+ * langsung memainkan stage TERBARU yang memakai arena itu, supaya tingkat
+ * kesulitannya sepadan dengan kemajuan pemain.
+ */
+function latestStageOfVariant(variantIndex){
+  const total = stageCount();
+  const highest = Math.min(META.unlocked, total-1);
+  let pick = -1;
+  for(let i=0;i<=highest;i++) if(variantForStage(i) === variantIndex) pick = i;
+  return pick;
+}
+function arenaCardsHtml(){
+  return CFG.variants.map((v,a)=>{
+    const pick = latestStageOfVariant(a), locked = pick < 0, t = v.theme || {};
+    return `<button class="arenaCard ${locked?'locked':''}" data-s="${pick}"
+        ${locked?'disabled':''} title="${v.name} \u00B7 boss ${String(v.boss||'-')}"
+        style="--cardTop:${t.bgTop||'#0A1030'};--cardBot:${t.bgBottom||'#03060F'};--cardKey:${t.primary||'#00E5FF'}">
+        <span class="arenaThumb"></span>
+        <span class="arenaName">${v.name}</span>
+        <span class="arenaState">${locked ? 'LOCKED' : 'ST ' + String(pick+1).padStart(2,'0')}</span>
+      </button>`;
+  }).join('');
+}
+
 function showMap(){
   S.state = 'menu';
   const total = stageCount();
@@ -1325,6 +1377,7 @@ function showMap(){
   m.innerHTML = `<div class="metaPanel">
       <h2>CAMPAIGN</h2>
       <p class="metaSub">${Math.min(META.unlocked,total)} / ${total} CLEARED \u00B7 BEST ${META.best}<br>${owned}</p>
+      <div class="arenaRow">${arenaCardsHtml()}</div>
       <div class="stageList" id="stageList">${rows}</div>
       <label class="volRow">VOLUME
         <input type="range" id="volSlider" min="0" max="100" step="5"
@@ -1335,6 +1388,8 @@ function showMap(){
     </div>`;
   m.style.display='flex';
   m.querySelectorAll('.stageRow').forEach(btn=>
+    btn.addEventListener('click', ()=>startStage(+btn.dataset.s)));
+  m.querySelectorAll('.arenaCard').forEach(btn=>
     btn.addEventListener('click', ()=>startStage(+btn.dataset.s)));
   const vol = document.getElementById('volSlider');
   vol.addEventListener('input', ()=>{
@@ -1349,7 +1404,14 @@ function showMap(){
   });
   // Centre the next playable stage, same intent as the Godot map auto-scroll.
   const list = document.getElementById('stageList'), row = list.children[highest];
-  if(row) list.scrollTop = Math.max(0, row.offsetTop - list.clientHeight/2 + row.clientHeight/2);
+  if(row){
+    // Rapatkan ke awal baris: scroll "tengah" murni menyisakan baris teratas
+    // terpotong separuh, yang terbaca seperti cacat tata letak.
+    const pitch = row.offsetHeight + 6;                       // tinggi + gap
+    const want  = row.offsetTop - list.clientHeight/2 + row.clientHeight/2;
+    const snapped = Math.round(Math.max(0, want)/pitch)*pitch;
+    list.scrollTop = Math.min(snapped, Math.max(0, list.scrollHeight - list.clientHeight));
+  }
 }
 
 // Drawn from a stage-derived seed, never from S.rng: pulling cosmetic draws out
@@ -1386,14 +1448,23 @@ function showCards(stage){
 function showResult(victory){
   S.state = 'menu';
   const m = metaEl();
+  const v = CFG.variants[variantForStage(S.stage)];
+  const rows = [
+    ['SCORE',      S.score,     ''],
+    ['KILLS',      S.kills,     ''],
+    ['BEST COMBO', S.bestCombo, ''],
+    ['COINS',      S.coins,     'gold'],
+  ].map(r=>`<div class="resRow ${r[2]}"><span>${r[0]}</span>
+       <b data-count="${r[1]}">0</b></div>`).join('');
   m.innerHTML = `<div class="metaPanel">
       <h2 class="${victory?'':'lose'}">${victory?'VICTORY':'DEFEAT'}</h2>
-      <p class="metaSub">STAGE ${S.stage+1} \u00B7 SCORE ${S.score} \u00B7 KILLS ${S.kills}
-         \u00B7 BEST COMBO ${S.bestCombo}</p>
+      <p class="metaSub">STAGE ${String(S.stage+1).padStart(2,'0')} \u00B7 ${v.name}</p>
+      <div class="resRows">${rows}</div>
       <button class="metaBtn" id="againBtn">RETRY STAGE</button>
       <button class="metaBtn ghost" id="mapBtn">BACK TO MAP</button>
     </div>`;
   m.style.display='flex';
+  runCountUp(m);
   document.getElementById('againBtn').addEventListener('click', ()=>startStage(S.stage));
   document.getElementById('mapBtn').addEventListener('click', showMap);
 }
@@ -1734,7 +1805,65 @@ const el = {
   bossBar:document.getElementById('bossBar'), bossName:document.getElementById('bossName'),
   bossFill:document.getElementById('bossFill'),
 };
-function setScore(){ el.score.textContent = S.score.toLocaleString('en-US'); }
+// Count-up tween (docs/06): angka tumbuh 0,2 s supaya kenaikan skor terbaca
+// sebagai "diraih", bukan sekadar berganti. Murni kosmetik — nilai sebenarnya
+// tetap S.score, jadi simulasi dan determinisme tidak tersentuh sama sekali.
+const SCORE_TWEEN_SECONDS = 0.2;
+const scoreView = { shown:0, from:0, to:0, t:SCORE_TWEEN_SECONDS };
+function easeOutCubic(k){ const u = 1-k; return 1 - u*u*u; }
+function paintScore(){
+  if(el && el.score) el.score.textContent = Math.round(scoreView.shown).toLocaleString('en-US');
+}
+function setScore(instant){
+  const to = S.score;
+  // Turun berarti stage baru / reset: jangan dianimasikan mundur.
+  if(instant || to < scoreView.shown){
+    scoreView.shown = scoreView.from = scoreView.to = to;
+    scoreView.t = SCORE_TWEEN_SECONDS;
+  } else if(to !== scoreView.to){
+    scoreView.from = scoreView.shown; scoreView.to = to; scoreView.t = 0;
+  }
+  paintScore();
+}
+function tickScoreView(realDt){
+  if(scoreView.t >= SCORE_TWEEN_SECONDS) return;
+  scoreView.t = Math.min(SCORE_TWEEN_SECONDS, scoreView.t + realDt);
+  const k = easeOutCubic(scoreView.t / SCORE_TWEEN_SECONDS);
+  scoreView.shown = scoreView.from + (scoreView.to - scoreView.from)*k;
+  paintScore();
+}
+
+/**
+ * Count-up bertahap untuk layar result: tiap baris mulai 0,15 s setelah baris
+ * di atasnya (docs/06 baris 141). Memakai rAF sendiri, bukan loop permainan,
+ * karena layar ini hidup saat state 'menu'. Hormati prefers-reduced-motion.
+ */
+const RESULT_ROW_STAGGER = 0.15, RESULT_COUNT_SECONDS = 0.45;
+function runCountUp(root){
+  const nums = Array.prototype.slice.call(root.querySelectorAll('[data-count]'));
+  if(!nums.length) return;
+  const paint = (node,v)=>{ node.textContent = Math.round(v).toLocaleString('en-US'); };
+  const reduced = typeof matchMedia === 'function'
+    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduced || typeof requestAnimationFrame !== 'function'){
+    nums.forEach(node=>paint(node, +node.dataset.count));   // tetap terbaca tanpa animasi
+    return;
+  }
+  nums.forEach(node=>paint(node, 0));
+  const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  (function step(now){
+    let done = true;
+    nums.forEach((node,i)=>{
+      const to = +node.dataset.count;
+      const t = (now - t0)/1000 - i*RESULT_ROW_STAGGER;
+      if(t < 0){ done = false; return; }
+      const k = Math.min(1, t/RESULT_COUNT_SECONDS);
+      paint(node, to*easeOutCubic(k));
+      if(k < 1) done = false;
+    });
+    if(!done) requestAnimationFrame(step);
+  })(t0);
+}
 function setCombo(){ el.combo.textContent = S.combo>1?('x'+S.combo):'';
   el.combo.style.transform = 'scale(1.18)'; setTimeout(()=>el.combo.style.transform='scale(1)',80); }
 function setWaveLabel(){
@@ -1822,6 +1951,7 @@ function frame(now){
     S.timeScale += (S.targetTimeScale-S.timeScale)*k;
     S.fov += (S.targetFov-S.fov)*k;
     el.vig.style.opacity = String((1-S.timeScale)*1.2);
+    tickScoreView(realDt);        // kosmetik: tidak pernah masuk langkah sim
 
     // --- SimClock: fixed step ---
     if(S.state==='playing'){
