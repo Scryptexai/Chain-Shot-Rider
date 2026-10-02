@@ -199,8 +199,47 @@ check('mesh dipakai ulang, bukan dibuat terus', poolAfterBig.after === poolAfter
 check('mesh berlebih disembunyikan, bukan dihapus', poolAfterBig.shown === 3,
   `terlihat ${poolAfterBig.shown} dari ${poolAfterBig.after}`);
 
+console.log('\n[9] Interpolasi render antar-tick');
+// Musuh dengan pose tick sebelumnya (rx, rz) harus digambar di antara dua tick.
+S.enemies = [{ x: 4, z: 20, rx: 0, rz: 10, r: 0.38, color: '#ff4d3d', hit: 0 }];
+S.prevSquadX = 0; S.squadX = 2;
+S.gates = [{ z: 20, rz: 30, left: { op: 'mul', value: 2, positive: true },
+             right: { op: 'sub', value: 5, positive: false } }];
+
+R3D.sync(S, CFG, 0.5);
+var e0 = visible('enemies')[0];
+check('musuh berada di tengah dua tick saat alpha 0,5',
+  Math.abs(e0.position.x - 2) < 1e-6 && Math.abs(e0.position.z - (-15)) < 1e-6,
+  `x=${e0.position.x} z=${e0.position.z} (harap 2 / -15)`);
+var g0 = visible('gates')[0];
+check('gate ikut diinterpolasi', Math.abs(g0.position.z - (-25)) < 1e-6,
+  `z=${g0.position.z} (harap -25)`);
+var tr0 = visible('troops');
+var avg0 = tr0.reduce((acc, t) => acc + t.position.x, 0) / tr0.length;
+check('squad ikut diinterpolasi', Math.abs(avg0 - 1) < 0.6, `rata-rata x=${avg0.toFixed(2)}`);
+
+R3D.sync(S, CFG, 1);
+check('alpha 1 memakai pose tick terbaru',
+  Math.abs(visible('enemies')[0].position.z - (-20)) < 1e-6);
+
+R3D.sync(S, CFG, 0);
+check('alpha 0 memakai pose tick sebelumnya',
+  Math.abs(visible('enemies')[0].position.z - (-10)) < 1e-6);
+
+// Entitas yang baru lahir di tengah tick belum punya rx/rz.
+S.enemies = [{ x: -3, z: 33, r: 0.38, color: '#ff4d3d', hit: 0 }];
+R3D.sync(S, CFG, 0.5);
+var nb = visible('enemies')[0];
+check('musuh baru tidak melesat dari titik nol',
+  Math.abs(nb.position.x - (-3)) < 1e-6 && Math.abs(nb.position.z - (-33)) < 1e-6,
+  `x=${nb.position.x} z=${nb.position.z}`);
+
+// Alpha tak masuk akal harus diabaikan, bukan merusak gambar.
+R3D.sync(S, CFG, undefined);
+check('alpha kosong dianggap 1', Math.abs(visible('enemies')[0].position.z - (-33)) < 1e-6);
+
 console.log('\n' + '='.repeat(72));
 console.log(failures === 0
-  ? 'LULUS — framing kamera dan logika renderer terbukti'
+  ? 'LULUS — framing kamera, renderer, dan interpolasi terbukti'
   : `GAGAL — ${failures} pemeriksaan gagal`);
 process.exit(failures === 0 ? 0 : 1);

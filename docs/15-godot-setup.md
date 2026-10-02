@@ -194,20 +194,38 @@ yang menyentuh simulasi.
 
 ## Yang belum ada
 
-- **Audio selesai** (doc 07): 16 cue SFX + 6 stem musik + 2 stinger, total 4,50 MB
-  dari budget 12 MB. Yang belum: slider volume di UI, dan sub-pulse saat nyawa
-  tinggal 1 (§7.3 menyebutnya; high-pass sweep-nya belum ada).
+Status ini memisahkan dua build dengan sengaja: **build web** adalah artefak
+yang bisa dilihat siapa saja tanpa memasang apa pun, **build Godot** adalah
+target rilis mobile. Beberapa item sudah selesai di satu sisi saja.
+
+| Item (spec) | Web | Godot |
+|---|---|---|
+| Peta stage 15 level | selesai | selesai |
+| Draft kartu antar-stage | selesai | selesai |
+| Interpolasi render antar-tick | **selesai** | belum |
+| Slider volume (docs/06) | **selesai** | belum |
+| High-pass + sub pulse saat nyawa 1 (docs/07 §7.3) | **selesai** | belum |
+| Low-pass 1200 Hz + −6 dB saat slow-mo (§7.3) | **selesai** | belum |
+| Pemilih arena 5 kartu | belum | belum |
+| Count-up tween di layar result | belum | belum |
+
+Catatan tiap item:
+
+- **Interpolasi render**: `simulate()` menyimpan pose tick sebelumnya (`rx`,
+  `rz`, `prevSquadX`) dan `frame()` meneruskan `alpha = acc / FIXED_DT` ke
+  renderer. Peluru sengaja **tidak** diinterpolasi: lintasannya memantul, dan
+  membaurkan dua sisi pantulan akan memotong sudut yang justru jadi inti
+  permainan.
+- **Audio dinamis**: rantai `master -> high-pass -> low-pass -> keluar` dipasang
+  permanen dan dibiarkan transparan saat tidak dipakai, supaya tidak ada
+  penyambungan ulang graph di tengah permainan. Sub pulse 55 Hz berdetak tiap
+  0,5 detik (120 BPM, sesuai §7.3).
 - **Cue yang belum pernah terpicu di uji**: `combo_milestone`, `heartbeat`,
-  `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`. Semuanya
-  tersambung dan file-nya ada, tapi butuh run lebih panjang atau kondisi spesifik
-  (boss di wave 5, 50 kill, combo 10) daripada smoke 30 detik.
-- **Kartu upgrade antar-stage: selesai.** Menang → layar result (tombol jadi
-  CONTINUE) → draft 3 kartu → stage berikutnya. Kartu dipilih dengan RNG
-  terpisah ber-seed stage, bukan RNG sim. Yang belum: peta stage 15 level dan
-  pemilih arena 5 kartu.
-- **Interpolasi render**: tampilan membaca state simulasi langsung, belum ada
-  interpolasi alpha antar tick — terasa di 30 fps, tidak di 60.
-- **Pemilih arena 5 kartu**, slider volume, dan count-up tween di layar result.
+  `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`.
+  Semuanya tersambung dan file-nya ada, tapi butuh run lebih panjang atau
+  kondisi spesifik (boss di wave 5, 50 kill, combo 10) daripada smoke 30 detik.
+- **Audio selesai** (doc 07): 36 cue SFX + 6 stem musik + 2 stinger, 4,50 MB
+  dari budget 12 MB.
 
 ### Verifikasi layout tanpa render
 

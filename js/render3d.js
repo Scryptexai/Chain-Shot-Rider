@@ -328,8 +328,20 @@
   // ---------------------------------------------------------------------------
   // SYNC — read simulation state, move meshes. Read-only on S.
   // ---------------------------------------------------------------------------
-  function sync(S, CFG) {
+  /**
+   * Membaurkan pose tick sebelumnya ke pose sekarang. Entitas yang baru lahir
+   * di tengah tick belum punya nilai sebelumnya, jadi dipakai nilai sekarang
+   * supaya tidak melesat dari titik nol.
+   */
+  function lerpFrom(prev, cur, a) {
+    return prev === undefined ? cur : prev + (cur - prev) * a;
+  }
+
+  function sync(S, CFG, alpha) {
     if (!api.ready || !CFG) return;
+    // Nama sengaja panjang: 'a' sudah dipakai loop peluru di scope yang sama,
+    // dan var di JavaScript tidak punya scope blok.
+    var lerpA = (alpha === undefined || alpha < 0 || alpha > 1) ? 1 : alpha;
 
     // Slow-mo pulls the camera in, mirroring the FOV 60->40 spec.
     camera.fov = baseFov * (0.82 + 0.18 * (S.fov === undefined ? 1 : S.fov));
@@ -345,7 +357,7 @@
     // --- squad: a block formation centred on squadX ---
     pools.troops.begin();
     var shown = Math.min(S.troops || 0, 48);
-    var perRow = 6, sx = S.squadX || 0;
+    var perRow = 6, sx = lerpFrom(S.prevSquadX, S.squadX || 0, lerpA);
     var spread = 0.62;
     var sz = (CFG.arena && CFG.arena.playerSpawn ? CFG.arena.playerSpawn.z : 2);
     for (var i = 0; i < shown; i++) {
@@ -367,14 +379,15 @@
         return new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
           new THREE.MeshLambertMaterial({ color: en.color || '#ff4d3d' }));
       });
+      var ex = lerpFrom(en.rx, en.x, lerpA), ez = lerpFrom(en.rz, en.z, lerpA);
       if (m.userData.isModel) {
         m.scale.setScalar(1);
-        m.position.set(en.x, 0, -en.z);
+        m.position.set(ex, 0, -ez);
         m.rotation.y = Math.PI;              // model menghadap -Z, musuh menatap pemain
       } else {
         var r = (en.r || 0.4) * 1.75;
         vis.scale.set(r, r * 1.35, r);
-        m.position.set(en.x, r * 1.25, -en.z);
+        m.position.set(ex, r * 1.25, -ez);
       }
       setEmissive(m, en.hit > 0 ? 0x884444 : 0x000000);
     }
@@ -411,7 +424,7 @@
           var op = side[1], dir = side[2];
           var p = pools.gatePanels.take();
           p.scale.set(panelW, 1.7, 1);
-          p.position.set(dir * (gap + panelW / 2), 0.9, -gt.z);
+          p.position.set(dir * (gap + panelW / 2), 0.9, -lerpFrom(gt.rz, gt.z, lerpA));
           p.material.map = labelTexture(gateText(op), !!(op && op.positive));
           p.material.color.setHex(0xffffff);
           p.material.needsUpdate = true;
@@ -455,13 +468,14 @@
             new THREE.MeshLambertMaterial({ color: 0xff4d3d }));
         });
         var pr = part.r || 1.8;
+        var bx = lerpFrom(part.rx, part.x, lerpA), bz = lerpFrom(part.rz, part.z, lerpA);
         if (pm.userData.isModel) {
           pm.scale.setScalar(pr / 1.8);
-          pm.position.set(part.x, 0, -part.z);
+          pm.position.set(bx, 0, -bz);
           pm.rotation.y = Math.PI;
         } else {
           pvis.scale.setScalar(pr);
-          pm.position.set(part.x, pr, -part.z);
+          pm.position.set(bx, pr, -bz);
         }
         setEmissive(pm, part.hit > 0 ? 0xaa2222 : 0x220000);
       }

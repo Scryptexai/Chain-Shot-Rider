@@ -3979,8 +3979,20 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
   // ---------------------------------------------------------------------------
   // SYNC — read simulation state, move meshes. Read-only on S.
   // ---------------------------------------------------------------------------
-  function sync(S, CFG) {
+  /**
+   * Membaurkan pose tick sebelumnya ke pose sekarang. Entitas yang baru lahir
+   * di tengah tick belum punya nilai sebelumnya, jadi dipakai nilai sekarang
+   * supaya tidak melesat dari titik nol.
+   */
+  function lerpFrom(prev, cur, a) {
+    return prev === undefined ? cur : prev + (cur - prev) * a;
+  }
+
+  function sync(S, CFG, alpha) {
     if (!api.ready || !CFG) return;
+    // Nama sengaja panjang: 'a' sudah dipakai loop peluru di scope yang sama,
+    // dan var di JavaScript tidak punya scope blok.
+    var lerpA = (alpha === undefined || alpha < 0 || alpha > 1) ? 1 : alpha;
 
     // Slow-mo pulls the camera in, mirroring the FOV 60->40 spec.
     camera.fov = baseFov * (0.82 + 0.18 * (S.fov === undefined ? 1 : S.fov));
@@ -3996,7 +4008,7 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
     // --- squad: a block formation centred on squadX ---
     pools.troops.begin();
     var shown = Math.min(S.troops || 0, 48);
-    var perRow = 6, sx = S.squadX || 0;
+    var perRow = 6, sx = lerpFrom(S.prevSquadX, S.squadX || 0, lerpA);
     var spread = 0.62;
     var sz = (CFG.arena && CFG.arena.playerSpawn ? CFG.arena.playerSpawn.z : 2);
     for (var i = 0; i < shown; i++) {
@@ -4018,14 +4030,15 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
         return new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
           new THREE.MeshLambertMaterial({ color: en.color || '#ff4d3d' }));
       });
+      var ex = lerpFrom(en.rx, en.x, lerpA), ez = lerpFrom(en.rz, en.z, lerpA);
       if (m.userData.isModel) {
         m.scale.setScalar(1);
-        m.position.set(en.x, 0, -en.z);
+        m.position.set(ex, 0, -ez);
         m.rotation.y = Math.PI;              // model menghadap -Z, musuh menatap pemain
       } else {
         var r = (en.r || 0.4) * 1.75;
         vis.scale.set(r, r * 1.35, r);
-        m.position.set(en.x, r * 1.25, -en.z);
+        m.position.set(ex, r * 1.25, -ez);
       }
       setEmissive(m, en.hit > 0 ? 0x884444 : 0x000000);
     }
@@ -4062,7 +4075,7 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
           var op = side[1], dir = side[2];
           var p = pools.gatePanels.take();
           p.scale.set(panelW, 1.7, 1);
-          p.position.set(dir * (gap + panelW / 2), 0.9, -gt.z);
+          p.position.set(dir * (gap + panelW / 2), 0.9, -lerpFrom(gt.rz, gt.z, lerpA));
           p.material.map = labelTexture(gateText(op), !!(op && op.positive));
           p.material.color.setHex(0xffffff);
           p.material.needsUpdate = true;
@@ -4106,13 +4119,14 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
             new THREE.MeshLambertMaterial({ color: 0xff4d3d }));
         });
         var pr = part.r || 1.8;
+        var bx = lerpFrom(part.rx, part.x, lerpA), bz = lerpFrom(part.rz, part.z, lerpA);
         if (pm.userData.isModel) {
           pm.scale.setScalar(pr / 1.8);
-          pm.position.set(part.x, 0, -part.z);
+          pm.position.set(bx, 0, -bz);
           pm.rotation.y = Math.PI;
         } else {
           pvis.scale.setScalar(pr);
-          pm.position.set(part.x, pr, -part.z);
+          pm.position.set(bx, pr, -bz);
         }
         setEmissive(pm, part.hit > 0 ? 0xaa2222 : 0x220000);
       }
@@ -4261,6 +4275,10 @@ window.INLINE_MODELS = {"assets/models/barrel.glb": "data:model/gltf-binary;base
   .metaBtn { margin-top:12px; padding:12px; border-radius:10px; cursor:pointer; font-family:inherit;
              font-weight:800; letter-spacing:.6px; color:#03060F; background:var(--accentLit); border:0; }
   .metaBtn.ghost { background:transparent; color:#8A9BB8; border:1px solid rgba(138,155,184,.4); }
+  .volRow { display:flex; align-items:center; gap:10px; margin-top:14px; font-size:11px;
+            letter-spacing:.8px; color:#8A9BB8; }
+  .volRow input { flex:1; accent-color:var(--accentLit); }
+  .volRow b { min-width:28px; text-align:right; color:#F5F9FF; }
 </style>
 </head>
 <body>
@@ -4391,11 +4409,68 @@ const S = {
 };
 
 // ---------- Audio (WebAudio, pitch-ladder bounce) ----------
-let AC=null, master=null;
+let AC=null, master=null, hpFilter=null, lpFilter=null;
+const BASE_GAIN = 0.22;
+// docs/07 7.3: HP=1 memakai high-pass sweep, slow-mo memakai low-pass 1200 Hz
+// dan -6 dB. Dua filter dipasang permanen lalu dibiarkan transparan saat tidak
+// dipakai, supaya tidak ada penyambungan ulang graph di tengah permainan.
 function initAudio(){
   if(AC) return;
   AC = new (window.AudioContext||window.webkitAudioContext)();
-  master = AC.createGain(); master.gain.value = 0.22; master.connect(AC.destination);
+  master = AC.createGain(); master.gain.value = BASE_GAIN * masterVolume();
+  // Browser yang sangat tua bisa saja tidak punya BiquadFilter. Kalau begitu,
+  // suara tetap keluar tanpa filter alih-alih mematikan audio sama sekali.
+  const mk = () => (typeof AC.createBiquadFilter === 'function') ? AC.createBiquadFilter() : null;
+  const hp = mk(), lp = mk();
+  if(hp && lp && hp.frequency && lp.frequency){
+    hp.type='highpass'; hp.frequency.value=10;
+    lp.type='lowpass';  lp.frequency.value=20000;
+    master.connect(hp); hp.connect(lp); lp.connect(AC.destination);
+    hpFilter=hp; lpFilter=lp;
+  } else {
+    master.connect(AC.destination);
+  }
+}
+/** Ramp yang aman: sebagian lingkungan uji tidak punya penjadwal AudioParam. */
+function ramp(param, value, atTime){
+  if(!param) return;
+  if(typeof param.linearRampToValueAtTime === 'function') param.linearRampToValueAtTime(value, atTime);
+  else param.value = value;
+}
+function masterVolume(){ return META.volume === undefined ? 1 : META.volume; }
+function applyVolume(){ if(master) master.gain.value = BASE_GAIN * masterVolume(); }
+
+/** Sub pulse per beat saat nyawa tinggal 1 (120 BPM -> tiap 0,5 detik). */
+function subPulse(){
+  if(!AC) return;
+  const o=AC.createOscillator(), g=AC.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(55, AC.currentTime);
+  g.gain.setValueAtTime(0.0001, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.5, AC.currentTime+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime+0.26);
+  o.connect(g); g.connect(master); o.start(); o.stop(AC.currentTime+0.3);
+}
+
+/**
+ * Menyetel filter mengikuti kondisi permainan. Dipanggil dari loop render, jadi
+ * murni kosmetik: tidak satu pun nilainya masuk kembali ke simulasi.
+ */
+let _beatTimer = 0;
+function updateAudioState(realDt){
+  if(!AC) return;
+  const t = AC.currentTime;
+  const lowLife = S.state==='playing' && S.lives === 1;
+  // High-pass naik saat nyawa kritis, turun lagi begitu aman.
+  if(hpFilter) ramp(hpFilter.frequency, lowLife ? 340 : 10, t + 0.35);
+  // Slow-mo meredam suara: low-pass 1200 Hz dan -6 dB.
+  const slow = S.timeScale < 0.92;
+  if(lpFilter) ramp(lpFilter.frequency, slow ? 1200 : 20000, t + 0.2);
+  ramp(master.gain, BASE_GAIN * masterVolume() * (slow ? 0.5 : 1), t + 0.2);
+
+  if(lowLife){
+    _beatTimer -= realDt;
+    if(_beatTimer <= 0){ subPulse(); _beatTimer = 0.5; }   // 120 BPM
+  } else _beatTimer = 0;
 }
 function beep(freq, dur, type='sine', vol=1, slide=0){
   if(!AC) return;
@@ -4540,7 +4615,7 @@ function mixHex(a, b, t){
 // loads this same file with a stubbed DOM, so meta screens must stay out of its way.
 let UI_READY = false;
 const SAVE_KEY = 'chainrider.meta.v1';
-const META = { unlocked:0, cards:[], best:0 };
+const META = { unlocked:0, cards:[], best:0, volume:1 };
 
 function metaLoad(){
   try{
@@ -4549,6 +4624,7 @@ function metaLoad(){
     META.unlocked = d.unlocked|0;
     META.cards = Array.isArray(d.cards) ? d.cards : [];
     META.best = d.best|0;
+    if(typeof d.volume === 'number') META.volume = Math.max(0, Math.min(1, d.volume));
   }catch(e){ /* a corrupt save starts fresh rather than refusing to boot */ }
 }
 function metaSave(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(META)); }catch(e){} }
@@ -5207,6 +5283,17 @@ function requestSlow(target){
 // SIMULASI SATU TICK
 // =============================================================================
 function simulate(dt){
+  // --- Interpolasi render ---
+  // Pose tick sebelumnya disimpan di sini, bukan di renderer, karena hanya
+  // simulasi yang tahu kapan sebuah tick dimulai. Dipakai draw() untuk
+  // membaurkan dua tick, sehingga gerakan tetap halus di layar 120 Hz.
+  // Peluru sengaja TIDAK diinterpolasi: lintasannya memantul, dan membaurkan
+  // dua sisi pantulan akan memotong sudut yang justru jadi inti permainan.
+  S.prevSquadX = S.squadX;
+  for(const e of S.enemies){ e.rx = e.x; e.rz = e.z; }
+  for(const g of S.gates){ g.rz = g.z; }
+  if(S.boss) for(const p of S.boss.parts){ p.rx = p.x; p.rz = p.z; }
+
   // --- 0. turret ---
   // Dua mode dibandingkan di docs/12-aim-mode-comparison.md.
   // Keduanya memajukan sudut HANYA di dalam tick, jadi determinisme aman.
@@ -5378,13 +5465,26 @@ function showMap(){
       <h2>CAMPAIGN</h2>
       <p class="metaSub">${Math.min(META.unlocked,total)} / ${total} CLEARED \u00B7 BEST ${META.best}<br>${owned}</p>
       <div class="stageList" id="stageList">${rows}</div>
+      <label class="volRow">VOLUME
+        <input type="range" id="volSlider" min="0" max="100" step="5"
+               value="${Math.round(masterVolume()*100)}">
+        <b id="volVal">${Math.round(masterVolume()*100)}</b>
+      </label>
       <button class="metaBtn ghost" id="mapReset">RESET PROGRESS</button>
     </div>`;
   m.style.display='flex';
   m.querySelectorAll('.stageRow').forEach(btn=>
     btn.addEventListener('click', ()=>startStage(+btn.dataset.s)));
+  const vol = document.getElementById('volSlider');
+  vol.addEventListener('input', ()=>{
+    META.volume = (+vol.value)/100;
+    document.getElementById('volVal').textContent = vol.value;
+    initAudio();          // slider adalah gestur pengguna: aman membuka AudioContext
+    applyVolume();
+    metaSave();
+  });
   document.getElementById('mapReset').addEventListener('click', ()=>{
-    META.unlocked=0; META.cards=[]; META.best=0; metaSave(); showMap();
+    META.unlocked=0; META.cards=[]; META.best=0; metaSave(); showMap();   // volume sengaja dipertahankan
   });
   // Centre the next playable stage, same intent as the Godot map auto-scroll.
   const list = document.getElementById('stageList'), row = list.children[highest];
@@ -5501,7 +5601,7 @@ function proj(x, z){
 function draw(){
   // WebGL is the real renderer. The 2D path below stays as a fallback for
   // machines without WebGL and for the headless harness, which has no GPU.
-  if(R3D_ON){ R3D.sync(S, CFG); return; }
+  if(R3D_ON){ R3D.sync(S, CFG, RENDER_ALPHA); return; }
   setSquadLabel();
   const v = CFG.variants[S.variant], th = v.theme;
   ctx.save(); ctx.scale(DPR,DPR);
@@ -5846,6 +5946,7 @@ window.addEventListener('keydown', e=>{
 // MAIN LOOP
 // =============================================================================
 let lastT = performance.now(), fpsAcc=0, fpsN=0, fpsShow=0;
+let RENDER_ALPHA = 1;
 function frame(now){
   const realDt = Math.min(0.25, (now-lastT)/1000); lastT=now;
 
@@ -5867,7 +5968,11 @@ function frame(now){
       let steps=0;
       while(S.acc>=FIXED_DT && steps<MAX_STEPS){ S.acc-=FIXED_DT; simulate(FIXED_DT); steps++; }
       if(S.acc>FIXED_DT*MAX_STEPS) S.acc=0;
+      RENDER_ALPHA = S.acc / FIXED_DT;      // sisa waktu = posisi di antara tick
+    } else {
+      RENDER_ALPHA = 1;                     // diam: tampilkan pose terakhir utuh
     }
+    updateAudioState(realDt);
 
     S.shake = Math.max(0, S.shake - realDt*3.2);
     draw();

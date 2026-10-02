@@ -49,11 +49,17 @@ function makeEnv() {
     this.currentTime = 0;
     this.destination = {};
     this.createGain = () => ({
-      gain: { value: 0, setValueAtTime: noop, exponentialRampToValueAtTime: noop },
+      gain: { value: 0, setValueAtTime: noop, exponentialRampToValueAtTime: noop,
+              linearRampToValueAtTime: noop },
       connect: noop });
     this.createOscillator = () => ({
       type: '', frequency: { setValueAtTime: noop, exponentialRampToValueAtTime: noop },
       connect: noop, start: noop, stop: noop });
+    // Rantai filter dinamis (docs/07 7.3) juga harus ada di stub, kalau tidak
+    // harness menguji jalur audio yang berbeda dari jalur browser sungguhan.
+    this.createBiquadFilter = () => ({
+      type: '', frequency: { value: 0, linearRampToValueAtTime: noop },
+      connect: noop });
   }
 
   // documentElement carries the CSS custom properties the theme writes to.
