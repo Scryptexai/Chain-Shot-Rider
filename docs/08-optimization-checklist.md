@@ -117,6 +117,10 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
 - [ ] Hapus paket tak terpakai dari `manifest.json` (Timeline, Cinemachine kalau tidak dipakai, TextMeshPro examples).
 - [ ] Satu scene gameplay untuk **5 varian** — varian dibangun runtime dari `VariantSO`.
 - [ ] Target build: **< 100 MB** (Android AAB), **< 120 MB** (iOS IPA).
+- [x] Build web Godot 4.6.2 (nothreads): **41,5 MB di disk / 14,3 MB gzip** —
+      `index.wasm` 35,9 MB (9,0 MB gzip) mendominasi, `index.pck` 5,2 MB. Angka
+      ini dilaporkan tiap kali `python3 tools/export_web.py` dijalankan, jadi
+      pertumbuhannya ketahuan sebelum pemain yang menanggungnya.
 
 ## 8.9 Tier Device
 

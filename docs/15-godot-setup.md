@@ -1,6 +1,6 @@
 # 15 — Menjalankan Project Godot
 
-Project ada di `godot/`. Target: **Godot 4.3**, tanpa modul tambahan, tanpa C#.
+Project ada di `godot/`. Target: **Godot 4.6.2 stable**, tanpa modul tambahan, tanpa C#.
 
 ```
 godot/
@@ -18,7 +18,7 @@ godot/
     game.gd                  perekat input / simulasi / tampilan
 ```
 
-Buka folder `godot/` di Godot 4.3 lalu tekan Play. Tidak ada langkah impor, tidak ada menu editor yang harus dijalankan lebih dulu.
+Buka folder `godot/` di Godot 4.6 lalu tekan Play. Tidak ada langkah impor, tidak ada menu editor yang harus dijalankan lebih dulu.
 
 Setelah mengubah `Config/arena_config.json`, jalankan `python3 tools/sync_config.py`.
 
@@ -28,7 +28,7 @@ Setelah mengubah `Config/arena_config.json`, jalankan `python3 tools/sync_config
 
 Godot dipilih karena open source, tanpa lisensi, dan punya binary headless yang bisa menjalankan game dari CLI. Alasan terakhir itu yang paling berharga: engine yang bisa dijalankan tanpa GUI berarti balance dan determinisme bisa diuji otomatis.
 
-**Engine kini terpasang dan project sudah benar-benar dijalankan.** Unduhan otomatis tetap diblokir di sandbox ini (hanya npm dan PyPI yang lolos; GitHub release assets dan godotengine.org tertutup), jadi zip `Godot_v4.3-stable_linux.x86_64.zip` dipasok manual ke root repo dan `tools/install_godot.sh` memungutnya dari sana. Riwayat pemeriksaan statis:
+**Engine kini terpasang dan project sudah benar-benar dijalankan.** Unduhan otomatis tetap diblokir di sandbox ini (hanya npm dan PyPI yang lolos; GitHub release assets dan godotengine.org tertutup), jadi zip `Godot_v4.6.2-stable_linux.x86_64.zip` dipasok manual ke root repo dan `tools/install_godot.sh` memungutnya dari sana. Riwayat pemeriksaan statis:
 
 | Pemeriksaan | Alat | Hasil |
 |---|---|---|
@@ -62,7 +62,7 @@ Dua perbaikan struktural menyertainya. `SimWorld.tick()` kini **membersihkan `ev
 ## Setup di sandbox / CI
 
 ```bash
-bash tools/install_godot.sh 4.3-stable   # engine + gdtoolkit
+bash tools/install_godot.sh 4.6.2-stable   # engine + gdtoolkit
 python3 tools/validate_godot.py          # cek yang linter tidak bisa
 export PATH="$HOME/.cache/venv/bin:$PATH"
 gdparse godot/scripts/sim/sim_world.gd
@@ -210,6 +210,35 @@ demi kosmetik akan menggeser urutan acak dan merusak replay. Setelah kedua
 perubahan, `tools/sim_test.js` tetap 3/5 menang, rata-rata 146,9 s: tidak ada
 yang menyentuh simulasi.
 
+### Tiga bug yang hanya muncul di build web sungguhan
+
+Semua lulus `--check`, `gdlint`, `validate_godot.py`, dan smoke test headless.
+Ketiganya terlihat dalam hitungan detik begitu ada piksel nyata:
+
+1. **HUD menimpa layar markas.** `HUD` adalah `CanvasLayer` yang dibangun di
+   `_ready()` dan tidak pernah disembunyikan; di atas menu pun ia tetap
+   menggambar skor, nyawa, dan tombol chain shot. Renderer dummy headless tidak
+   menggambar apa pun, jadi tidak ada tes yang bisa menangkapnya. Perbaikan:
+   HUD milik **run**, bukan aplikasi — disembunyikan di markas, peta stage, dan
+   layar hasil; dinyalakan di `start_stage()`. Smoke test sekarang menegaskan
+   kedua keadaan itu.
+2. **Kotak tofu, bukan ikon.** `★ ☆ ✦ ▲ ◎` tidak ada di font bawaan Godot
+   (Open Sans SemiBold), jadi semuanya keluar sebagai kotak kosong. Yang
+   tersedia hanya `· — × » •`. Verifikasinya satu baris:
+   `ThemeDB.fallback_font.has_char(0x2605)`. Daripada menyeret font sejuta glyph
+   ke dalam build, bentuknya **digambar**: `UiTheme.pips()` untuk bintang
+   kesulitan, `UiTheme.diamond()` untuk penanda pasukan, `UiTheme.ring()` untuk
+   inti tombol chain shot. Teks yang tersisa memakai kata, bukan simbol —
+   `BEST 0`, `KARTU 0`, `x1.24`.
+3. **Lorong melayang di ruang hitam.** Ponsel 9:19.5 jauh lebih jangkung
+   daripada 9:16 yang dipakai saat menata framing. Godot memakai FOV vertikal,
+   jadi layar jangkung memperlihatkan lebih banyak dunia ke atas dan ke bawah:
+   lantai berakhir di tengah layar, sisanya hitam. Perbaikannya sama dengan yang
+   sudah dipakai prototipe web — bukaan **horizontal** yang dikunci
+   (`_update_fov_scale()`, pasangan `widthMatchedFov()` di `js/render3d.js`),
+   ditambah apron lantai 14 unit ke arah kamera dan 50 unit melewati gerbang
+   spawn supaya ujungnya larut dalam kabut.
+
 ## Yang belum ada
 
 Status ini memisahkan dua build dengan sengaja: **build web** adalah artefak
@@ -300,7 +329,7 @@ dan tidak membuktikan apa pun.
 
 ## Zip engine di root repo: jangan di-`.gitignore`
 
-`Godot_v4.3-stable_linux.x86_64.zip` (50 MB) di root repo **sengaja di-commit**.
+`Godot_v4.6.2-stable_linux.x86_64.zip` (60 MB) di root repo **sengaja di-commit**.
 Semua mirror unduhan diblokir dari sandbox ini, jadi salinan di riwayat git
 adalah satu-satunya cara engine bertahan di sesi baru. Biasanya biner sebesar
 ini tidak layak masuk git; di sini ia satu-satunya jalan.
@@ -319,7 +348,7 @@ ia **tidak bisa diunduh ulang dari sandbox ini**:
 Kalau zip itu hilang dari working tree, pulihkan dari git — bukan dari jaringan:
 
 ```bash
-git checkout -- Godot_v4.3-stable_linux.x86_64.zip
+git checkout -- Godot_v4.6.2-stable_linux.x86_64.zip
 bash tools/install_godot.sh
 ```
 
@@ -329,8 +358,8 @@ sekali sampai seseorang menyediakannya lagi:
 ```bash
 GODOT_MIRROR=https://host-yang-terjangkau/godot bash tools/install_godot.sh
 # atau jatuhkan zip-nya ke salah satu lokasi ini, lalu jalankan ulang:
-#   <repo root>/Godot_v4.3-stable_linux.x86_64.zip
-#   ~/.cache/godot/Godot_v4.3-stable_linux.x86_64.zip
+#   <repo root>/Godot_v4.6.2-stable_linux.x86_64.zip
+#   ~/.cache/godot/Godot_v4.6.2-stable_linux.x86_64.zip
 ```
 
 Tanpa engine, yang masih berjalan hanya gerbang statis: `gdparse`, `gdlint`,
@@ -347,9 +376,9 @@ agent tidak punya GL/X sehingga tidak bisa merendernya; mesin Anda bisa.
 
 ### Prasyarat
 
-Godot **4.3 stable**, edisi standar (bukan .NET — tidak ada C# di `godot/`).
+Godot **4.6.2 stable**, edisi standar (bukan .NET — tidak ada C# di `godot/`).
 Versi ini mengikat: `project.godot` memakai `config_version=5` dan
-`config/features=("4.3", "Forward Plus")`. Godot 4.2 menolak membuka, 4.4+
+`config/features=("4.6", "Forward Plus")`. Godot versi lebih lama menolak membuka, versi lebih baru
 akan menawarkan konversi yang tidak perlu.
 
 ```bash
@@ -377,45 +406,72 @@ HUD, layar hasil, dan draft kartu.
 
 ### B. Build web — preview di browser
 
-Perlu export templates 4.3 sekali (~700 MB): Editor → **Manage Export
-Templates** → Download and Install. Manual: unduh
-`Godot_v4.3-stable_export_templates.tpz` lalu pasang lewat dialog yang sama.
-
-Kalau template belum ada, Godot menyebut sendiri berkas yang dicarinya — pesan
-ini terverifikasi dengan menjalankan perintah ekspornya:
-
-```
-ERROR: Cannot export project with preset "Web" due to configuration errors:
-No export template found at the expected path:
-/home/user/.local/share/godot/export_templates/4.3.stable/web_release.zip
+```bash
+python3 tools/export_web.py             # ekspor + periksa hasilnya
+python3 tools/serve_web_build.py 8081   # buka http://localhost:8081/
 ```
 
-Jadi di Linux template berakhir di `~/.local/share/godot/export_templates/4.3.stable/`
-(Windows: `%APPDATA%\Godot\export_templates\4.3.stable\`, macOS:
-`~/Library/Application Support/Godot/export_templates/4.3.stable/`).
+atau keduanya sekaligus: `python3 tools/run_web_preview.py`.
+
+`tools/export_web.py` ada karena ekspor web gagal dengan cara yang tidak
+menyebut penyebabnya. Sebelum memanggil engine ia memeriksa tiga hal:
+
+1. **Versi engine cocok dengan `config/features` project.** Engine lama
+   mengekspor project baru tanpa mengeluh, lalu build-nya mati di browser.
+2. **Varian template cocok dengan preset.** Preset di repo ini memakai
+   `variant/thread_support=false`, jadi yang dicari Godot adalah
+   `web_nothreads_release.zip`. Kalau yang terpasang `web_release.zip`,
+   pesannya cuma "Template file not found" — tanpa menyebut varian.
+3. **Keempat berkas wajib ada** (`index.html/js/wasm/pck`). Ekspor bisa
+   "berhasil" tanpa `.pck`, dan halamannya baru mati setelah engine boot.
+
+Lalu ia melaporkan ukuran disk **dan** perkiraan ukuran terkirim:
+
+| berkas | disk | gzip |
+|---|---|---|
+| `index.wasm` | 35,9 MB | 9,0 MB |
+| `index.pck` | 5,2 MB | 5,2 MB |
+| `index.js` | 308 KB | 77 KB |
+| **total** | **41,5 MB** | **14,3 MB** |
+
+Yang dirasakan pemain di jaringan ponsel adalah kolom kedua. Anggaran build di
+[docs 08](08-optimization-checklist.md) (100 MB) masih longgar.
+
+#### Kenapa nothreads
+
+Build berulir butuh `SharedArrayBuffer`, dan browser hanya memberikannya pada
+halaman **cross-origin isolated** — halaman yang dikirim dengan
+`Cross-Origin-Opener-Policy: same-origin` dan
+`Cross-Origin-Embedder-Policy: require-corp`. GitHub Pages tidak bisa mengirim
+header kustom. Hasilnya kanvas hitam dan satu baris console "SharedArrayBuffer
+is not defined" yang tidak menyebut header sama sekali.
+
+Preset karenanya diekspor tanpa thread, dan `tools/serve_web_build.py` secara
+**default meniru GitHub Pages**: tanpa COOP/COEP. Jalankan dengan `--isolated`
+hanya kalau memang ingin menguji build berulir. Server itu juga memaksa MIME
+`.wasm` ke `application/wasm`; tabel mimetypes bawaan Python sering tidak punya
+entri itu, dan `WebAssembly.instantiateStreaming` menolak wasm yang datang
+sebagai `text/plain`.
+
+#### Build web diuji otomatis, bukan dilihat sekilas
 
 ```bash
-mkdir -p build/web
-godot --headless --path godot/ --export-release "Web" ../build/web/index.html
-python3 tools/serve_web_build.py 8081      # buka http://localhost:8081/
+bash tools/setup_chromium.sh && npm install --no-save puppeteer-core
+python3 tools/serve_web_build.py 8081 &
+node tools/web_build_test.js
 ```
 
-**Jangan pakai `python3 -m http.server`.** Preset Web diekspor dengan
-`variant/thread_support=true`, jadi build butuh `SharedArrayBuffer`, dan
-browser hanya memberikannya pada halaman yang cross-origin isolated. Tanpa dua
-header berikut, kanvas tinggal hitam dan console cuma bilang
-"SharedArrayBuffer is not defined" — tidak menyebut headernya sama sekali:
+Harness membuka build di Chromium headless pada viewport 390x844, lalu
+memeriksa sembilan hal: halaman tidak cross-origin isolated, engine benar-benar
+boot (dibaca dari baris log `Godot Engine v...`), tidak ada error, wasm dikirim
+sebagai `application/wasm`, `.pck` menjawab 200, kanvas ada dan menggambar lebih
+dari satu warna — lalu **menekan tombol MAIN, menunggu run jalan, menggeser
+squad, dan menembakkan chain shot**, sambil memotret layar.
 
-```
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
-```
-
-`tools/serve_web_build.py` mengirim keduanya, plus memaksa MIME `.wasm` ke
-`application/wasm` (tabel mimetypes bawaan Python sering tidak punya entri itu,
-dan `WebAssembly.instantiateStreaming` menolak wasm yang datang sebagai
-text/plain). Kalau Anda ingin hosting statis biasa tanpa header khusus, setel
-`variant/thread_support=false` di preset — konsekuensinya performa threading.
+Langkah terakhir itu yang penting. Menu yang tergambar belum berarti game bisa
+dimainkan: tombol bisa saja tidak menerima sentuhan, atau run mati saat memuat
+karakter ber-tulang dari `.pck`. Hasilnya tersimpan di `screenshots/`:
+`qa-godot-web-menu.png` (markas) dan `qa-godot-web.png` (gameplay).
 
 ### C. APK Android — rasa asli satu jempol
 

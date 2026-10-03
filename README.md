@@ -48,10 +48,10 @@ Repo ini berisi **paket desain + implementasi arena** lengkap: blueprint, style 
 
 ---
 
-## Menjalankan MVP (Godot 4.3)
+## Menjalankan MVP (Godot 4.6)
 
-MVP ada di `godot/` dan butuh **Godot 4.3 stable** edisi standar (bukan .NET).
-Versi ini mengikat: `project.godot` memakai `config_version=5`.
+MVP ada di `godot/` dan butuh **Godot 4.6.2 stable** edisi standar (bukan .NET).
+Versi ini mengikat: `project.godot` memakai `config/features=("4.6", ...)`.
 
 ```bash
 godot --path godot/ --editor     # sekali, biar aset ter-import
@@ -62,20 +62,23 @@ Jendela terbuka 1080x1920 portrait; mouse berfungsi sebagai jempol
 (`emulate_touch_from_mouse`). Dari sini terlihat MVP sebenarnya: menu, **peta 15
 stage**, arena, HUD, layar hasil, dan draft kartu.
 
-Preview di browser lewat server Python — satu perintah, mengurus ekspor dan
-header sekaligus:
+Preview di browser — ekspor dan server dalam satu perintah:
 
 ```bash
-python3 tools/run_web_preview.py --install-templates   # sekali, ~700 MB
-python3 tools/run_web_preview.py                       # http://localhost:8081/
+python3 tools/export_web.py             # ekspor + periksa hasilnya
+python3 tools/serve_web_build.py 8081   # http://localhost:8081/
 ```
 
 Yang dirender di browser itu **engine Godot sungguhan** (dikompilasi ke
-WebAssembly, menggambar lewat WebGL2), bukan prototipe JavaScript.
+WebAssembly, menggambar lewat WebGL2), bukan prototipe JavaScript. Build ~41 MB
+di disk, ~14 MB terkirim setelah gzip.
 
-Pakai `tools/serve_web_build.py`, **bukan** `python3 -m http.server`: build Web
-diekspor dengan thread support, jadi perlu header COOP/COEP atau kanvasnya
-hitam. APK Android dan detail lengkapnya ada di
+Preset Web diekspor **tanpa thread** supaya bisa dihosting di GitHub Pages:
+build berulir menuntut header COOP/COEP yang tidak bisa dikirim hosting statis,
+dan tanpa header itu kanvasnya hitam. Tetap pakai `tools/serve_web_build.py`,
+**bukan** `python3 -m http.server`, karena MIME `.wasm` harus
+`application/wasm`. Build web diuji otomatis sampai benar-benar dimainkan
+(`node tools/web_build_test.js`). APK Android dan detail lengkapnya ada di
 [`docs/15-godot-setup.md`](docs/15-godot-setup.md).
 
 Verifikasi tanpa GPU:
