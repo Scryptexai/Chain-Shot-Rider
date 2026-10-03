@@ -31,15 +31,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT = ROOT / "godot"
-WANT_VERSION = "4.3"
+# Versi engine yang dipakai project ini. Dicocokkan sebagai awalan, jadi
+# 4.6.2 maupun 4.6.1 lolos sementara 4.3 ditolak dengan peringatan.
+WANT_VERSION = "4.6"
 
 
 def candidate_paths() -> list[Path]:
     """Common places the Godot binary ends up, per OS."""
     home = Path.home()
     names = [
-        "Godot_v4.3-stable_linux.x86_64",
-        "Godot_v4.3-stable_win64.exe",
+        "Godot_v4.6.2-stable_linux.x86_64",
+        "Godot_v4.6.2-stable_win64.exe",
         "Godot",
         "godot",
     ]
@@ -100,16 +102,16 @@ def version_of(binary: str) -> str:
 def explain_missing() -> int:
     print("Godot not found.", file=sys.stderr)
     print("", file=sys.stderr)
-    print("Download Godot 4.3 stable, STANDARD edition (not .NET/C#):", file=sys.stderr)
-    print("  https://godotengine.org/download/archive/4.3-stable/", file=sys.stderr)
+    print("Download Godot 4.6.2 stable, STANDARD edition (not .NET/C#):", file=sys.stderr)
+    print("  https://godotengine.org/download/archive/4.6.2-stable/", file=sys.stderr)
     print("", file=sys.stderr)
     print("It is a single executable - no installer, no dependencies.", file=sys.stderr)
     print("Then either put it on PATH as `godot`, or point $GODOT at it:", file=sys.stderr)
     print("", file=sys.stderr)
     if sys.platform == "win32":
-        print('  set GODOT=C:\\path\\to\\Godot_v4.3-stable_win64.exe', file=sys.stderr)
+        print('  set GODOT=C:\\path\\to\\Godot_v4.6.2-stable_win64.exe', file=sys.stderr)
     else:
-        print("  export GODOT=~/Downloads/Godot_v4.3-stable_linux.x86_64", file=sys.stderr)
+        print("  export GODOT=~/Downloads/Godot_v4.6.2-stable_linux.x86_64", file=sys.stderr)
         print("  chmod +x $GODOT", file=sys.stderr)
     print("  python3 tools/run_game.py --check", file=sys.stderr)
     return 2

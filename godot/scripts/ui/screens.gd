@@ -58,7 +58,7 @@ var _chapter_kicker: Label
 var _chapter_name: Label
 var _chapter_boss: Label
 var _chapter_desc: Label
-var _chapter_stars: Label
+var _chapter_stars: HBoxContainer
 var _chapter_panel: PanelContainer
 var _chapter_lane: ColorRect
 var _play_button: Button
@@ -197,8 +197,10 @@ func _build_home() -> Control:
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(push)
 
-	_pill_best = _pill(top, "★ 0", UiTheme.GOLD)
-	_pill_cards = _pill(top, "✦ 0", UiTheme.INK)
+	# Label kata, bukan simbol: font bawaan Godot tidak punya ★ dan ✦, dan
+	# "BEST" lebih jelas daripada bintang yang harus ditebak artinya.
+	_pill_best = _pill(top, "BEST 0", UiTheme.GOLD)
+	_pill_cards = _pill(top, "KARTU 0", UiTheme.INK)
 
 	box.add_child(_grow(0.5))
 
@@ -231,7 +233,8 @@ func _build_home() -> Control:
 	_chapter_kicker = _text(chapter, "STAGE 01 / 15", 24, _pal["primary"])
 	_chapter_name = _text(chapter, "CLASSIC PIT", 64, UiTheme.INK)
 	_chapter_boss = _text(chapter, "BOSS · COLOSSUS", 26, Color("#FFB3B3"))
-	_chapter_stars = _text(chapter, "★★★", 34, UiTheme.GOLD)
+	_chapter_stars = UiTheme.pips(3, 3, UiTheme.GOLD, UiTheme.INK_DIM.darkened(0.3), 20)
+	chapter.add_child(_chapter_stars)
 	_chapter_desc = _text(chapter, "", 26, Color("#C3D3EA"))
 	_chapter_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_chapter_desc.custom_minimum_size = Vector2(0.0, 80.0)
@@ -288,15 +291,15 @@ func _refresh_home() -> void:
 	var variant: Dictionary = GameConfig.dict("variants.%d" % _variant_for_stage(current))
 
 	_profile_level.text = "LV %d" % (cleared + 1)
-	_pill_best.text = "★ %d" % SaveGame.best_score
-	_pill_cards.text = "✦ %d" % SaveGame.owned_cards.size()
+	_pill_best.text = "BEST %d" % SaveGame.best_score
+	_pill_cards.text = "KARTU %d" % SaveGame.owned_cards.size()
 	_map_subtitle.text = "%d / %d CLEARED" % [cleared, total]
 
 	_chapter_kicker.text = "STAGE %02d / %d" % [current + 1, total]
 	_chapter_name.text = String(variant.get("name", "?")).to_upper()
 	_chapter_boss.text = "BOSS · %s" % String(variant.get("boss", "-")).replace("_", " ").to_upper()
 	_chapter_desc.text = String(variant.get("description", ""))
-	_chapter_stars.text = _stars(_difficulty_for_stage(current))
+	_set_pips(_chapter_stars, _rank(_difficulty_for_stage(current)))
 	var theme_block: Dictionary = variant.get("theme", {})
 	var accent: Color = UiTheme.palette(theme_block)["primary"]
 	_chapter_lane.color = accent
@@ -376,7 +379,7 @@ func _stage_card(stage: int, unlocked: int) -> Button:
 	stack.add_child(name_label)
 
 	var sub := Label.new()
-	sub.text = "★ %.2f" % _difficulty_for_stage(stage)
+	sub.text = "x%.2f" % _difficulty_for_stage(stage)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	UiTheme.style_label(sub, 20, UiTheme.INK_DIM, 0)
@@ -559,14 +562,26 @@ func _difficulty_for_stage(stage: int) -> float:
 	return 1.0 + per * float(stage)
 
 
-## Tiga bintang, dibaca sekilas. "x1.24" memaksa pemain menafsirkan angka.
-func _stars(difficulty: float) -> String:
-	var filled := 1
+## Tiga tingkat kesulitan, dibaca sekilas lewat pip yang menyala.
+func _rank(difficulty: float) -> int:
 	if difficulty >= 1.9:
-		filled = 3
-	elif difficulty >= 1.3:
-		filled = 2
-	return "★".repeat(filled) + "☆".repeat(3 - filled)
+		return 3
+	if difficulty >= 1.3:
+		return 2
+	return 1
+
+
+## Menyalakan sejumlah pip pada deretan yang sudah dibangun.
+func _set_pips(row: HBoxContainer, filled: int) -> void:
+	if row == null:
+		return
+	var children := row.get_children()
+	for i in range(children.size()):
+		var pip := children[i] as Panel
+		if pip == null:
+			continue
+		var tint: Color = UiTheme.GOLD if i < filled else UiTheme.INK_DIM.darkened(0.3)
+		pip.add_theme_stylebox_override("panel", UiTheme.blob(tint, 10))
 
 
 func _screen_root() -> Control:

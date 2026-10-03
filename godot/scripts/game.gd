@@ -21,6 +21,7 @@ var _pending_drag := 0.0
 var _feel: GameFeel = null
 var _audio: AudioDirector = null
 var _music: MusicDirector = null
+var _fov_scale: float = 1.0
 var _camera_home := Vector3.ZERO
 
 @onready var _view: Node3D = $ArenaView
@@ -35,6 +36,8 @@ func _ready() -> void:
 		return
 	_stage = SaveGame.unlocked_stage
 	_place_camera()
+	# Layar web bisa berubah ukuran kapan saja (rotasi, bilah alamat ponsel).
+	get_viewport().size_changed.connect(_update_fov_scale)
 	# Everything visual is themed from the variant this stage runs in, so the
 	# palette has to be resolved before anything is built.
 	var variant := _variant_for_stage(_stage)
@@ -42,6 +45,12 @@ func _ready() -> void:
 		_view.call("build", variant)
 	if _hud.has_method("build"):
 		_hud.call("build", variant)
+	# HUD dibangun sekali di sini, tapi ia milik RUN, bukan milik aplikasi.
+	# Sebelum ini ia ikut tampil di markas dan di peta stage: nyawa, pod
+	# pasukan, dan teks "WAVE 1/5" menumpuk di atas layar menu. Tidak pernah
+	# terlihat selama proyek hanya diuji headless — dummy renderer tidak
+	# menggambar apa pun — dan baru ketahuan pada build web pertama.
+	_hud.visible = false
 	if _screens.has_method("build"):
 		_screens.call("build", variant)
 	_connect_screens()
@@ -64,6 +73,7 @@ func _ready() -> void:
 ## Begins a stage, seeded so the same stage always plays the same way.
 func start_stage(stage: int) -> void:
 	_stage = stage
+	_hud.visible = true
 	var seed_value := STAGE_SEED_BASE + stage * 7919
 	_sim = SimWorld.new(GameConfig.dict(""), seed_value, stage, SaveGame.active_upgrades())
 	if _view.has_method("bind_sim"):
@@ -149,6 +159,7 @@ func _on_play() -> void:
 func _show_stage_map() -> void:
 	Engine.time_scale = 1.0
 	set_physics_process(false)
+	_hud.visible = false
 	_screens.call("show_stage_map")
 
 
@@ -218,6 +229,7 @@ func _on_restart() -> void:
 func _on_menu() -> void:
 	Engine.time_scale = 1.0
 	set_physics_process(false)
+	_hud.visible = false
 	_screens.call("show_menu")
 	if _music != null:
 		_music.stop()
@@ -267,7 +279,7 @@ func _update_feel(delta: float) -> void:
 	# The sim keeps its fixed step; this only changes how many steps a real
 	# second buys, so a slowed run still replays identically.
 	Engine.time_scale = _feel.time_scale
-	_camera.fov = _feel.fov
+	_camera.fov = _feel.fov * _fov_scale
 	_camera.position = _camera_home + _feel.shake_offset()
 
 
@@ -329,15 +341,39 @@ func _place_camera() -> void:
 	var look_ahead := GameConfig.num("camera.lookAheadZ")
 	var origin := Vector3(0.0, maxf(height, 8.0), distance)
 	_camera.look_at_from_position(origin, Vector3(0.0, 0.0, -(defense_z + look_ahead)), Vector3.UP)
-	_camera.fov = GameConfig.num("slowMo.fovNormal")
+	_update_fov_scale()
+	_camera.fov = GameConfig.num("slowMo.fovNormal") * _fov_scale
 	# Remembered so shake can be an offset from it rather than an integration
 	# that slowly walks the camera away from its framing.
 	_camera_home = _camera.position
 
 
+## Bukaan horizontal dikunci, bukan vertikal — persis seperti widthMatchedFov()
+## di js/render3d.js.
+##
+## Godot memakai FOV vertikal. Pada ponsel 9:19.5 itu berarti lorong terlihat
+## jauh lebih panjang daripada di 9:16: lantai berakhir di tengah layar dan
+## sisanya hitam. Yang harus tetap sama antar layar adalah LEBAR arena, jadi
+## FOV vertikal dihitung ulang dari lebar 9:16 lalu dibatasi supaya musuh jauh
+## tidak menyusut jadi beberapa piksel.
+func _update_fov_scale() -> void:
+	var base := GameConfig.num("slowMo.fovNormal")
+	if base <= 0.0:
+		_fov_scale = 1.0
+		return
+	var size := get_viewport().get_visible_rect().size
+	var aspect := size.x / maxf(size.y, 1.0)
+	var half_width := tan(deg_to_rad(base) * 0.5) * (9.0 / 16.0)
+	var matched := rad_to_deg(2.0 * atan(half_width / maxf(aspect, 0.0001)))
+	_fov_scale = clampf(matched, base * 0.85, 58.0) / base
+
+
 func _finish_run() -> void:
 	# Never leave the engine slowed on the results screen.
 	Engine.time_scale = 1.0
+	# Layar hasil adalah layar penuh; HUD run yang masih menyala di belakangnya
+	# hanya menumpuk angka di atas angka.
+	_hud.visible = false
 	var won: bool = _sim.state == SimWorld.State.VICTORY
 	if _music != null:
 		_music.finish(won)

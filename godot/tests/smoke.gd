@@ -553,12 +553,23 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 		if child != null and not child.has_method(String(pair[1])):
 			_fail("%s tidak punya %s()" % [pair[0], pair[1]])
 
+	# HUD adalah milik run. Kalau ia terlihat sebelum run dimulai, markas dan
+	# peta stage tertimpa nyawa, pod pasukan, dan teks gelombang. Kegagalan ini
+	# tidak pernah muncul di sandbox tanpa GPU dan baru terlihat di build web,
+	# jadi sekarang dijaga di sini.
+	var hud_layer: CanvasLayer = root.get_node_or_null(NodePath("HUD"))
+	if hud_layer != null and hud_layer.visible:
+		_fail("varian %d: HUD terlihat sebelum run dimulai" % (stage + 1))
+
 	root.set("_stage", stage)
 	# Goes through the map's launch handler rather than start_stage directly,
 	# so the screen wiring is exercised too. _on_play opens the stage ladder
 	# now and no longer starts a run by itself; pressing a rung is covered by
 	# _run_stage_map.
 	root.call("_on_stage_chosen", stage)
+
+	if hud_layer != null and not hud_layer.visible:
+		_fail("varian %d: HUD tidak muncul saat run berjalan" % (stage + 1))
 
 	var sim: Object = root.get("_sim")
 	if sim == null:

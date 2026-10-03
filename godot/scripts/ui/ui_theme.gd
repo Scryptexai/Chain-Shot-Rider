@@ -200,6 +200,57 @@ static func blob(fill: Color, radius: int = 18, foot: Color = Color(0, 0, 0, 0))
 	return style
 
 
+## Deretan pip sebagai pengganti bintang.
+##
+## Font bawaan Godot (Open Sans) TIDAK punya ★ ☆ ✦ ▲ ◎ — karakter itu keluar
+## sebagai kotak tofu, dan itu baru terlihat pada build web pertama karena
+## sandbox tanpa GPU tidak pernah menggambar satu huruf pun. Daripada
+## menyeret berkas font sejuta glyph ke dalam build hanya demi tiga bintang,
+## bentuknya digambar: pip bulat yang menyala atau redup.
+static func pips(filled: int, total: int, on: Color, off: Color, size: int = 18) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", int(size * 0.45))
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for i in range(total):
+		var pip := Panel.new()
+		pip.custom_minimum_size = Vector2(size, size)
+		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pip.add_theme_stylebox_override("panel", blob(on if i < filled else off, int(size * 0.5)))
+		row.add_child(pip)
+	return row
+
+
+## Belah ketupat: penanda satuan di pod pasukan. Panel persegi yang diputar
+## 45 derajat, karena StyleBoxFlat tidak bisa menggambar segitiga.
+static func diamond(fill: Color, size: int = 22) -> Control:
+	var holder := Control.new()
+	holder.custom_minimum_size = Vector2(size * 1.45, size * 1.45)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pip := Panel.new()
+	pip.size = Vector2(size, size)
+	pip.pivot_offset = Vector2(size, size) * 0.5
+	pip.position = Vector2(size * 0.22, size * 0.22)
+	pip.rotation = PI * 0.25
+	pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pip.add_theme_stylebox_override("panel", blob(fill, int(size * 0.25)))
+	holder.add_child(pip)
+	return holder
+
+
+## Cincin: lingkaran berongga untuk inti tombol chain shot.
+static func ring(tint: Color, diameter: int = 56, thickness: int = 6) -> Panel:
+	var node := Panel.new()
+	node.custom_minimum_size = Vector2(diameter, diameter)
+	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(tint.r, tint.g, tint.b, 0.0)
+	style.set_corner_radius_all(int(diameter * 0.5))
+	style.border_color = tint
+	style.set_border_width_all(thickness)
+	node.add_theme_stylebox_override("panel", style)
+	return node
+
+
 ## Memasang tiga keadaan tombol tebal sekaligus.
 static func apply_chunky(button: Button, face: Color, foot: Color, radius: int = 34) -> void:
 	button.add_theme_stylebox_override("normal", chunky(face, foot, radius))

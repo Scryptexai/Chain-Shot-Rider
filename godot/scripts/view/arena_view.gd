@@ -13,6 +13,13 @@ extends Node3D
 ## The palette comes from the active variant, not from constants here, so the
 ## arena, the crowd and the HUD always agree on what colour the world is.
 
+## Panjang tambahan lantai di depan garis bertahan (lihat APRON di render3d.js).
+const APRON := 14.0
+
+## Lantai juga diteruskan melewati gerbang spawn supaya ujungnya larut dalam
+## kabut, bukan berhenti sebagai garis lurus di sepertiga atas layar.
+const APRON_FAR := 50.0
+
 const MAX_TROOPS_DRAWN := 128
 ## Impact shells kept alive at once, and how long one lasts. Both are budget
 ## decisions: docs 08 caps active particles at 200, and these are the most
@@ -142,8 +149,12 @@ func _build_environment() -> void:
 func _build_floor() -> void:
 	var width := GameConfig.num("arena.width")
 	var length := GameConfig.num("arena.height")
+	# Apron: lantai dipanjangkan ke arah kamera, sama seperti APRON di
+	# js/render3d.js. Tanpa itu, layar jangkung memperlihatkan tepi lantai
+	# dekat pemain sebagai garis hitam — arena jadi terlihat seperti meja
+	# melayang, bukan lorong.
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(width, length)
+	plane.size = Vector2(width, length + APRON + APRON_FAR)
 	# Subdivision keeps the shader's derivative-based anti-aliasing stable
 	# across the length of the lane.
 	plane.subdivide_depth = 8
@@ -161,7 +172,7 @@ func _build_floor() -> void:
 	_floor = MeshInstance3D.new()
 	_floor.mesh = plane
 	_floor.material_override = material
-	_floor.position = Vector3(0.0, 0.0, -length * 0.5)
+	_floor.position = Vector3(0.0, 0.0, -length * 0.5 + (APRON - APRON_FAR) * 0.5)
 	add_child(_floor)
 
 	_build_side_walls(width, length)
@@ -173,9 +184,9 @@ func _build_side_walls(width: float, length: float) -> void:
 	for side in [-1.0, 1.0]:
 		var strip := MeshInstance3D.new()
 		var box := BoxMesh.new()
-		box.size = Vector3(0.12, 0.5, length)
+		box.size = Vector3(0.12, 0.5, length + APRON)
 		strip.mesh = box
-		strip.position = Vector3(side * width * 0.5, 0.25, -length * 0.5)
+		strip.position = Vector3(side * width * 0.5, 0.25, -length * 0.5 + APRON * 0.5)
 		strip.material_override = _emissive(_pal["bumper"], 1.4)
 		add_child(strip)
 

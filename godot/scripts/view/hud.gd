@@ -84,7 +84,7 @@ var _stage_tag: Label
 var _wave_dots: HBoxContainer
 var _squad: Label
 var _squad_pod: PanelContainer
-var _squad_glyph: Label
+var _squad_glyph: Control
 var _boss_name: Label
 var _boss_bar: ProgressBar
 var _steer_bar: ProgressBar
@@ -537,7 +537,10 @@ func _build_bottom_deck() -> void:
 	squad_row.add_theme_constant_override("separation", 14)
 	squad_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_squad_pod.add_child(squad_row)
-	_squad_glyph = _label("▲", 34, _pal["primary"], HORIZONTAL_ALIGNMENT_CENTER, squad_row)
+	# Belah ketupat yang digambar, bukan karakter ▲: font bawaan Godot tidak
+	# memilikinya dan hasilnya kotak tofu di build sungguhan.
+	_squad_glyph = UiTheme.diamond(_pal["primary"], 20)
+	squad_row.add_child(_squad_glyph)
 	var squad_box := VBoxContainer.new()
 	squad_box.add_theme_constant_override("separation", -4)
 	squad_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -601,7 +604,12 @@ func _build_bottom_deck() -> void:
 	fire_box.add_theme_constant_override("separation", 2)
 	fire_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fire_button.add_child(fire_box)
-	_label("◎", 60, UiTheme.INK, HORIZONTAL_ALIGNMENT_CENTER, fire_box)
+	# Cincin digambar dari StyleBoxFlat; ◎ tidak ada di font bawaan.
+	var ring_row := HBoxContainer.new()
+	ring_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	ring_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fire_box.add_child(ring_row)
+	ring_row.add_child(UiTheme.ring(UiTheme.INK, 54, 6))
 	_fire_caption = _label("CHAIN", 24, UiTheme.INK_DIM, HORIZONTAL_ALIGNMENT_CENTER, fire_box)
 
 	_charge_row = HBoxContainer.new()
