@@ -32,10 +32,25 @@ const BOSS_WAVE_INDEX := 4
 const LAYER_WAVE_INDEX := 2
 const CUTOFF_RATE := 26000.0
 
+# docs/07 7.3, baris "HP = 1": high-pass sweep + sub pulse per beat. Keduanya
+# mengubah arti musik tanpa menaikkan volume — lagu yang sama terdengar lebih
+# tipis dan lebih mendesak, dan pemain tahu ia tinggal satu nyawa tanpa harus
+# melihat HUD.
+const CRITICAL_HP_HZ := 420.0
+const OPEN_HP_HZ := 20.0
+const HP_RATE := 900.0
+const SUB_HZ := 55.0
+const SUB_PERIOD := 0.5  # 120 BPM, satu pulse per beat
+const SUB_DB := -8.0
+
 ## Exposed for the smoke test: a music system that silently fails to load is
 ## indistinguishable from one that is merely quiet.
 var layers_loaded: int = 0
 var active_variant: int = -1
+
+## Juga untuk smoke test: denyut sub yang tidak pernah berbunyi tidak bisa
+## dibedakan dari denyut yang pelan.
+var sub_pulses: int = 0
 
 var _base: AudioStreamPlayer = null
 var _layer: AudioStreamPlayer = null
@@ -45,6 +60,12 @@ var _target_db: Dictionary = {}
 var _cutoff: float = OPEN_CUTOFF
 var _target_cutoff: float = OPEN_CUTOFF
 var _lpf: AudioEffectLowPassFilter = null
+var _hpf: AudioEffectHighPassFilter = null
+var _hp_cutoff: float = OPEN_HP_HZ
+var _target_hp_cutoff: float = OPEN_HP_HZ
+var _critical: bool = false
+var _sub: AudioStreamPlayer = null
+var _sub_clock: float = SUB_PERIOD
 var _playing: bool = false
 var _muted: bool = false
 
@@ -130,6 +151,10 @@ func update(sim: SimWorld, feel: GameFeel, unscaled_delta: float) -> void:
 	_cutoff = move_toward(_cutoff, _target_cutoff, CUTOFF_RATE * unscaled_delta)
 	if _lpf != null:
 		_lpf.cutoff_hz = _cutoff
+	_hp_cutoff = move_toward(_hp_cutoff, _target_hp_cutoff, HP_RATE * unscaled_delta)
+	if _hpf != null:
+		_hpf.cutoff_hz = _hp_cutoff
+	_update_sub_pulse(unscaled_delta)
 
 
 func _apply_state(sim: SimWorld, feel: GameFeel) -> void:
@@ -152,12 +177,65 @@ func _apply_state(sim: SimWorld, feel: GameFeel) -> void:
 	for player in [_base, _layer, _fill]:
 		if player != null:
 			player.pitch_scale = pitch
+	# Nyawa terakhir: bodi lagu dipotong dari bawah dan digantikan denyut sub.
+	# Sweep-nya, bukan saklar — perubahan mendadak terdengar seperti bug audio.
+	_critical = sim.lives <= 1 and sim.state == SimWorld.State.PLAYING
+	_target_hp_cutoff = CRITICAL_HP_HZ if _critical else OPEN_HP_HZ
+
 	if slow:
 		_target_cutoff = SLOWMO_CUTOFF
 	elif boss_wave:
 		_target_cutoff = OPEN_CUTOFF
 	else:
 		_target_cutoff = 9000.0
+
+
+## Satu denyut sub per beat selama nyawa terakhir.
+##
+## Jam-nya berjalan dari waktu wall-clock (unscaled), jadi slow motion tidak
+## ikut memperlambat denyutnya: yang melambat adalah dunia, bukan jantung.
+func _update_sub_pulse(unscaled_delta: float) -> void:
+	if not _critical or _muted or _sub == null:
+		# Dibiarkan "jatuh tempo" supaya denyut pertama terdengar seketika
+		# begitu nyawa tinggal satu, bukan setengah beat kemudian.
+		_sub_clock = SUB_PERIOD
+		return
+	_sub_clock += unscaled_delta
+	if _sub_clock < SUB_PERIOD:
+		return
+	_sub_clock -= SUB_PERIOD
+	_sub.play()
+	sub_pulses += 1
+
+
+## Nada sub 55 Hz dibangkitkan di kode, bukan dimuat dari berkas.
+##
+## Isinya satu gelombang sinus dengan peluruhan — 9 KB kalau ditulis ke disk,
+## dan satu berkas lagi yang bisa hilang dari build. Dibangkitkan begini ia
+## selalu ada, selalu persis 55 Hz, dan panjangnya bisa diikat ke tempo.
+func _make_sub() -> AudioStreamPlayer:
+	var rate := 22050
+	var length := 0.22
+	var frames := int(rate * length)
+	var data := PackedByteArray()
+	data.resize(frames * 2)
+	for i in range(frames):
+		var t := float(i) / float(rate)
+		var envelope := exp(-t * 16.0)
+		var sample := sin(TAU * SUB_HZ * t) * envelope
+		var value := int(clampf(sample, -1.0, 1.0) * 32000.0)
+		data.encode_s16(i * 2, value)
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = false
+	stream.data = data
+	var player := AudioStreamPlayer.new()
+	player.bus = "Music"
+	player.stream = stream
+	player.volume_db = SUB_DB
+	add_child(player)
+	return player
 
 
 func _assign(player: AudioStreamPlayer, stem: String) -> void:
@@ -191,4 +269,13 @@ func _bind_filter() -> void:
 		var effect := AudioServer.get_bus_effect(bus, i)
 		if effect is AudioEffectLowPassFilter:
 			_lpf = effect as AudioEffectLowPassFilter
-			return
+		elif effect is AudioEffectHighPassFilter:
+			_hpf = effect as AudioEffectHighPassFilter
+	# High-pass milik layar nyawa terakhir, jadi ia dipasang di sini — bukan di
+	# AudioDirector, yang tidak tahu apa-apa soal keadaan musik.
+	if _hpf == null:
+		_hpf = AudioEffectHighPassFilter.new()
+		_hpf.cutoff_hz = OPEN_HP_HZ
+		AudioServer.add_bus_effect(bus, _hpf)
+	if _sub == null:
+		_sub = _make_sub()

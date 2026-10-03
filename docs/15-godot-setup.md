@@ -265,8 +265,8 @@ target rilis mobile. Beberapa item sudah selesai di satu sisi saja.
 | Draft kartu antar-stage | selesai | selesai |
 | Interpolasi render antar-tick | **selesai** | **selesai** |
 | Slider volume (docs/06) | **selesai** | belum |
-| High-pass + sub pulse saat nyawa 1 (docs/07 §7.3) | **selesai** | belum |
-| Low-pass 1200 Hz + −6 dB saat slow-mo (§7.3) | **selesai** | belum |
+| High-pass + sub pulse saat nyawa 1 (docs/07 §7.3) | **selesai** | **selesai** |
+| Low-pass 1200 Hz + −6 dB saat slow-mo (§7.3) | **selesai** | **selesai** |
 | Pemilih arena 5 kartu | **selesai** | belum |
 | Count-up tween (HUD + baris result) | **selesai** | **selesai** |
 
@@ -292,6 +292,17 @@ Catatan tiap item:
   permanen dan dibiarkan transparan saat tidak dipakai, supaya tidak ada
   penyambungan ulang graph di tengah permainan. Sub pulse 55 Hz berdetak tiap
   0,5 detik (120 BPM, sesuai §7.3).
+
+  Godot memakai bus `Music` dengan `AudioEffectLowPassFilter` +
+  `AudioEffectHighPassFilter` yang keduanya **disapu**, tidak disaklar: 420 Hz
+  untuk nyawa terakhir, 1200 Hz untuk slow-mo, dan kembali terbuka setelahnya.
+  Nada sub 55 Hz dibangkitkan di kode sebagai `AudioStreamWAV` (sinus +
+  peluruhan, 0,22 detik) daripada ditambahkan sebagai berkas: satu berkas lagi
+  yang bisa hilang dari build, demi 9 KB. Jamnya memakai waktu wall-clock, jadi
+  slow motion tidak ikut memperlambat denyutnya — yang melambat dunia, bukan
+  jantung. Smoke test memasang kedua keadaan itu langsung (slow-mo dan
+  `lives = 1`) lalu memeriksa filter bergerak, bus turun −6 dB, dan delapan
+  denyut terdengar dalam empat detik.
 - **Pemilih arena**: kartu yang terbuka memainkan stage *terbaru* yang memakai
   arena itu, bukan yang paling awal, supaya kesulitannya sepadan dengan
   kemajuan pemain. Arena ke-N terbuka begitu ada stage terbuka yang memakainya.
