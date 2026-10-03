@@ -221,6 +221,7 @@ func _run_stage_map(packed: PackedScene) -> void:
 
 	_check_map_layout(rows, screens)
 	_check_home_layout(screens)
+	_check_glyphs(screens as Node, "peta + markas")
 	var row_h: float = (rows[0] as Button).get_global_rect().size.y
 	var row_count: int = rows.size()
 
@@ -395,6 +396,7 @@ func _run_card_draft(packed: PackedScene) -> void:
 	# cards stacked on top of each other - stale values, not a broken screen.
 	await get_tree().process_frame
 	await get_tree().process_frame
+	_check_glyphs(screens as Node, "draft kartu")
 	var list: Object = screens.get("_card_list")
 	var buttons: Array = []
 	for child in (list as Node).get_children():
@@ -570,6 +572,8 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 
 	if hud_layer != null and not hud_layer.visible:
 		_fail("varian %d: HUD tidak muncul saat run berjalan" % (stage + 1))
+	if hud_layer != null:
+		_check_glyphs(hud_layer, "varian %d HUD" % (stage + 1))
 
 	var sim: Object = root.get("_sim")
 	if sim == null:
@@ -746,6 +750,43 @@ func _check_music(root: Node, stage: int) -> void:
 			_fail("varian %d: loop musik dasar tidak berjalan" % stage)
 		elif player.volume_db <= -59.0:
 			_fail("varian %d: musik dasar masih senyap (%.1f dB)" % [stage, player.volume_db])
+
+
+## Setiap karakter yang tampil harus benar-benar ada di font.
+##
+## Font bawaan Godot (Open Sans SemiBold) tidak punya ★ ☆ ✦ ▲ ◎ →, dan
+## yang muncul di layar adalah kotak tofu. Renderer dummy tidak menggambar
+## huruf, jadi hal ini lolos semua tes sampai ada yang melihat build web.
+## Pemeriksaan ini menelusuri pohon UI dan membandingkan tiap karakter dengan
+## cakupan font yang benar-benar dipakai label itu.
+func _check_glyphs(node: Node, where: String) -> void:
+	var text := ""
+	if node is Label:
+		text = (node as Label).text
+	elif node is Button:
+		text = (node as Button).text
+	elif node is RichTextLabel:
+		text = (node as RichTextLabel).get_parsed_text()
+	if text != "":
+		var font: Font = null
+		if node is Control:
+			font = (node as Control).get_theme_font("font")
+		if font == null:
+			font = ThemeDB.fallback_font
+		var missing := ""
+		for i in range(text.length()):
+			var code := text.unicode_at(i)
+			# Karakter kontrol dan spasi tidak punya glyph dan memang tidak perlu.
+			if code <= 32:
+				continue
+			if not font.has_char(code):
+				var ch := String.chr(code)
+				if not missing.contains(ch):
+					missing += ch
+		if missing != "":
+			_fail("%s: font tidak punya glyph untuk \"%s\" (teks: %s)" % [where, missing, text])
+	for child in node.get_children():
+		_check_glyphs(child, where)
 
 
 func _fail(message: String) -> void:
