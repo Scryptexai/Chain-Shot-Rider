@@ -70,6 +70,7 @@ var _chars: CharacterPool
 ## "kena pukul", tapi HP yang turun adalah sinyal yang sama persis dan tidak
 ## menambah kopling ke aturan main.
 var _enemy_hp_seen := PackedFloat32Array()
+var _alpha: float = 1.0
 var _squad_firing := 0.0
 ## Posisi squad frame lalu: dari sini datang jawaban "sedang jalan atau diam",
 ## yang menentukan klip lari atau siaga. Simulasi tidak menyimpan kecepatan
@@ -99,6 +100,10 @@ func render_frame() -> void:
 	if _sim == null:
 		return
 	var delta := get_process_delta_time()
+	# Satu alpha untuk seluruh frame: semua entitas harus diinterpolasi pada
+	# titik waktu yang sama, kalau tidak peluru dan musuh yang bertabrakan di
+	# simulasi akan terlihat meleset di layar.
+	_alpha = Engine.get_physics_interpolation_fraction()
 	_squad_firing = maxf(_squad_firing - delta, 0.0)
 	for entry in _sim.events:
 		if String((entry as Dictionary).get("type", "")) == "auto_fired":
@@ -118,6 +123,15 @@ func render_frame() -> void:
 	_age_impacts()
 	if _chars != null:
 		_chars.end(delta)
+
+
+## Posisi render: di antara pose tick sebelumnya dan pose tick sekarang.
+##
+## Simulasi melangkah 60 Hz, layar menggambar 90 atau 120 Hz. Tanpa ini setiap
+## entitas melompat satu tick sekaligus lalu diam — getaran halus yang paling
+## terasa justru pada musuh dekat, yang pikselnya paling besar.
+func _ip(prev: float, now: float) -> float:
+	return prev + (now - prev) * _alpha
 
 
 func _build_environment() -> void:
@@ -305,13 +319,21 @@ func _render_boss() -> void:
 		actor = _chars.take(BOSS_UNIT)
 	if actor != null:
 		_boss.visible = false
-		actor.place(_sim.boss_pos.x, _sim.boss_pos.y, PI)
+		actor.place(
+			_ip(_sim.pose.boss_pos.x, _sim.boss_pos.x),
+			_ip(_sim.pose.boss_pos.y, _sim.boss_pos.y),
+			PI
+		)
 		if actor.lock <= 0.0:
 			actor.play("idle")
 		return
 	_boss.visible = _sim.boss_active
 	if _boss.visible:
-		_boss.position = Vector3(_sim.boss_pos.x, 1.4, -_sim.boss_pos.y)
+		_boss.position = Vector3(
+			_ip(_sim.pose.boss_pos.x, _sim.boss_pos.x),
+			1.4,
+			-_ip(_sim.pose.boss_pos.y, _sim.boss_pos.y)
+		)
 
 
 func _cylinder(radius: float, height: float) -> Mesh:
@@ -436,15 +458,17 @@ func _render_enemies() -> void:
 		var actor: CharacterPool.Actor = null
 		if skinned.has(i) and _chars != null:
 			actor = _chars.take(unit)
+		var ex := _ip(_sim.pose.enemy_x[i], _sim.enemy_x[i])
+		var ez := _ip(_sim.pose.enemy_z[i], _sim.enemy_z[i])
 		if actor != null:
 			# Menatap pemain: model menghadap -Z, musuh berjalan ke arah +Z.
-			actor.place(_sim.enemy_x[i], _sim.enemy_z[i], PI)
+			actor.place(ex, ez, PI)
 			if hurt:
 				actor.one_shot("hit", 0.3)
 			elif actor.lock <= 0.0:
 				actor.play("run")
 			continue
-		var pos := Vector3(_sim.enemy_x[i], 0.5 * CharacterPool.CHAR_SCALE, -_sim.enemy_z[i])
+		var pos := Vector3(ex, 0.5 * CharacterPool.CHAR_SCALE, -ez)
 		mm.set_instance_transform(drawn, Transform3D(Basis.IDENTITY, pos))
 		mm.set_instance_color(drawn, ENEMY_COLORS[type_index])
 		drawn += 1
@@ -472,7 +496,7 @@ func _render_troops() -> void:
 		var col := i % columns
 		var offset_x := (float(col) - float(columns - 1) * 0.5) * spacing
 		var offset_z := float(row) * spacing
-		var x: float = _sim.squad_x + offset_x
+		var x: float = _ip(_sim.pose.squad_x, _sim.squad_x) + offset_x
 		var z: float = SimWorld.SQUAD_Z - offset_z
 		var actor: CharacterPool.Actor = null
 		if i < int(CharacterPool.BUDGET["troops"]) and _chars != null:
@@ -498,11 +522,20 @@ func _render_auto() -> void:
 	var mm := _auto_mm.multimesh
 	mm.visible_instance_count = _sim.auto_count
 	for i in range(_sim.auto_count):
-		var pos := Vector3(_sim.auto_x[i], 0.5, -_sim.auto_z[i])
+		var pos := Vector3(
+			_ip(_sim.pose.auto_x[i], _sim.auto_x[i]),
+			0.5,
+			-_ip(_sim.pose.auto_z[i], _sim.auto_z[i])
+		)
 		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
 		mm.set_instance_color(i, Color("#FFF1D0"))
 
 
+## Chain shot sengaja TIDAK diinterpolasi.
+##
+## Lintasannya memantul: membaurkan pose sebelum dan sesudah pantulan akan
+## memotong sudutnya, dan sudut itulah inti permainannya. Parity dengan
+## js/render3d.js, yang mengambil keputusan sama.
 func _render_chain() -> void:
 	_chain.visible = _sim.chain_active
 	if _sim.chain_active:

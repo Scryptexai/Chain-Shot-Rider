@@ -73,6 +73,9 @@ var auto_x := PackedFloat32Array()
 var auto_z := PackedFloat32Array()
 var auto_vx := PackedFloat32Array()
 
+# Pose tick sebelumnya, dipakai renderer untuk interpolasi. Lihat render_pose.gd.
+var pose := RenderPose.new()
+
 # --- gates and pickups ------------------------------------------------------
 var gates: Array[Dictionary] = []
 var barrels: Array[Dictionary] = []
@@ -220,6 +223,7 @@ func tick() -> void:
 	# session. Now a slow frame simply accumulates several ticks' events, which
 	# is what a renderer wants anyway.
 	events.clear()
+	pose.capture(self)
 	_consume_input()
 	_tick_squad()
 	field.tick(elapsed)
@@ -393,6 +397,7 @@ func _reserve_arrays() -> void:
 	auto_x.resize(MAX_AUTO_BULLETS)
 	auto_z.resize(MAX_AUTO_BULLETS)
 	auto_vx.resize(MAX_AUTO_BULLETS)
+	pose.allocate(MAX_ENEMIES, MAX_AUTO_BULLETS)
 
 
 func _upgrade(key: String, fallback: float) -> float:
@@ -473,6 +478,7 @@ func _tick_auto_fire() -> void:
 	auto_x[auto_count] = squad_x
 	auto_z[auto_count] = SQUAD_Z + 0.8
 	auto_vx[auto_count] = sin(spread) * _auto_speed
+	pose.born_auto(auto_count, auto_x[auto_count], auto_z[auto_count])
 	auto_count += 1
 	events.append({"type": "auto_fired"})
 
@@ -492,7 +498,7 @@ func _tick_auto_bullets() -> void:
 func _auto_bullet_hits(index: int) -> bool:
 	var pos := Vector2(auto_x[index], auto_z[index])
 	for e in range(enemy_count):
-		var radius := _enemy_radius(enemy_type[e])
+		var radius := EnemyStats.radius(_enemy_types, enemy_type[e])
 		if (
 			pos.distance_squared_to(Vector2(enemy_x[e], enemy_z[e]))
 			<= pow(radius + _auto_radius, 2.0)
@@ -518,6 +524,7 @@ func _swap_remove_auto(index: int) -> void:
 	auto_x[index] = auto_x[last]
 	auto_z[index] = auto_z[last]
 	auto_vx[index] = auto_vx[last]
+	pose.swap_auto(index, last)
 	auto_count -= 1
 
 
@@ -615,7 +622,7 @@ func _sweep_chain_enemies(motion: Vector2) -> Dictionary:
 	for e in range(enemy_count):
 		var center := Vector2(enemy_x[e], enemy_z[e])
 		var hit: Dictionary = Ricochet.sweep_circle(
-			chain_pos, motion, _chain_radius, center, _enemy_radius(enemy_type[e])
+			chain_pos, motion, _chain_radius, center, EnemyStats.radius(_enemy_types, enemy_type[e])
 		)
 		if hit.get("hit", false) and float(hit["t"]) < best_t:
 			best_t = float(hit["t"])
@@ -771,7 +778,7 @@ func _tick_crowd() -> void:
 	var i := 0
 	while i < enemy_count:
 		var type_index := enemy_type[i]
-		var speed := _enemy_speed(type_index) * _difficulty
+		var speed := EnemyStats.speed(_enemy_types, type_index) * _difficulty
 		enemy_z[i] -= speed * FIXED_DELTA
 		# A platform holds the crowd back; that delay is the whole point of
 		# the moving maze, and it is what makes that variant play differently.
@@ -795,7 +802,8 @@ func _damage_enemy(index: int, amount: float, source: String = "auto") -> void:
 	if enemy_hp[index] > 0.0:
 		return
 	combo += 1
-	score += int(float(_enemy_score(enemy_type[index])) * (1.0 + float(combo) * 0.15))
+	var base_score := float(EnemyStats.score(_enemy_types, enemy_type[index]))
+	score += int(base_score * (1.0 + float(combo) * 0.15))
 	chain_charge += _chain_charge_per_kill
 	(
 		events
@@ -804,7 +812,7 @@ func _damage_enemy(index: int, amount: float, source: String = "auto") -> void:
 				"type": "kill",
 				"x": enemy_x[index],
 				"z": enemy_z[index],
-				"score": _enemy_score(enemy_type[index]),
+				"score": EnemyStats.score(_enemy_types, enemy_type[index]),
 				# Jenis unit yang mati. Lapisan tampilan memakainya untuk
 				# merobohkan tubuh yang benar di tempat itu; tanpa ini mayat
 				# harus ditebak dan seorang brute bisa roboh sebagai grunt.
@@ -827,6 +835,7 @@ func _swap_remove_enemy(index: int) -> void:
 	enemy_z[index] = enemy_z[last]
 	enemy_hp[index] = enemy_hp[last]
 	enemy_type[index] = enemy_type[last]
+	pose.swap_enemy(index, last)
 	enemy_count -= 1
 
 
@@ -891,8 +900,9 @@ func _spawn_enemy() -> void:
 	var margin := 1.0
 	enemy_x[enemy_count] = clampf(_formation_anchor_x + slot.x, _x_min + margin, _x_max - margin)
 	enemy_z[enemy_count] = _z_max + slot.y
-	enemy_hp[enemy_count] = _enemy_hp(type_index) * _difficulty
+	enemy_hp[enemy_count] = EnemyStats.hp(_enemy_types, type_index) * _difficulty
 	enemy_type[enemy_count] = type_index
+	pose.born_enemy(enemy_count, enemy_x[enemy_count], enemy_z[enemy_count])
 	enemy_count += 1
 	_wave_remaining -= 1
 
@@ -974,26 +984,3 @@ func _tick_boss() -> void:
 	elif boss_pos.y <= _defense_z + 1.0:
 		state = State.DEFEAT
 		events.append({"type": "defeat"})
-
-
-func _enemy_field(type_index: int, key: String, fallback: float) -> float:
-	if type_index < 0 or type_index >= _enemy_types.size():
-		return fallback
-	var entry: Dictionary = _enemy_types[type_index]
-	return float(entry.get(key, fallback))
-
-
-func _enemy_hp(type_index: int) -> float:
-	return _enemy_field(type_index, "hp", 10.0)
-
-
-func _enemy_speed(type_index: int) -> float:
-	return _enemy_field(type_index, "speed", 0.6)
-
-
-func _enemy_radius(type_index: int) -> float:
-	return _enemy_field(type_index, "radius", 0.35)
-
-
-func _enemy_score(type_index: int) -> int:
-	return int(_enemy_field(type_index, "score", 10.0))

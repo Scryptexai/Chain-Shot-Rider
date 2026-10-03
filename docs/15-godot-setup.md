@@ -263,12 +263,12 @@ target rilis mobile. Beberapa item sudah selesai di satu sisi saja.
 |---|---|---|
 | Peta stage 15 level | selesai | selesai |
 | Draft kartu antar-stage | selesai | selesai |
-| Interpolasi render antar-tick | **selesai** | belum |
+| Interpolasi render antar-tick | **selesai** | **selesai** |
 | Slider volume (docs/06) | **selesai** | belum |
 | High-pass + sub pulse saat nyawa 1 (docs/07 §7.3) | **selesai** | belum |
 | Low-pass 1200 Hz + −6 dB saat slow-mo (§7.3) | **selesai** | belum |
 | Pemilih arena 5 kartu | **selesai** | belum |
-| Count-up tween (HUD + baris result) | **selesai** | belum |
+| Count-up tween (HUD + baris result) | **selesai** | **selesai** |
 
 Catatan tiap item:
 
@@ -277,6 +277,17 @@ Catatan tiap item:
   renderer. Peluru sengaja **tidak** diinterpolasi: lintasannya memantul, dan
   membaurkan dua sisi pantulan akan memotong sudut yang justru jadi inti
   permainan.
+
+  Di Godot pose itu hidup di `scripts/sim/render_pose.gd`, kelas terpisah
+  supaya satu aturan tetap jelas: **tidak ada satu pun angka di sana yang
+  boleh dibaca aturan main.** SimWorld hanya menulis, ArenaView hanya membaca,
+  dan uji determinisme tetap menghasilkan hash yang sama. Alpha-nya datang
+  dari `Engine.get_physics_interpolation_fraction()`. Dua jebakan yang sudah
+  dipasangi penjaga di smoke test: pose yang tidak pernah direkam (selisihnya
+  nol selamanya — gambarnya benar, hanya tersendat di layar 120 Hz yang tidak
+  ada di sandbox), dan slot pose yang tidak ikut ditukar saat swap-remove
+  (entitas terakhir melesat melintasi arena dalam satu frame; penjaga menolak
+  lompatan di atas 1,5 unit per tick).
 - **Audio dinamis**: rantai `master -> high-pass -> low-pass -> keluar` dipasang
   permanen dan dibiarkan transparan saat tidak dipakai, supaya tidak ada
   penyambungan ulang graph di tengah permainan. Sub pulse 55 Hz berdetak tiap
@@ -288,6 +299,15 @@ Catatan tiap item:
   turun = stage baru, langsung dipatok). Layar result memakai rAF sendiri
   karena state saat itu 'menu'; `prefers-reduced-motion` langsung menampilkan
   angka akhir.
+
+  Godot: skor HUD sudah memakai `move_toward`, dan baris hasil kini dianimasikan
+  `_count_up()` di `screens.gd` — berurutan dari atas (jeda 0,14 s per baris,
+  durasi 0,45 s) supaya mata punya satu angka untuk diikuti, bukan lima yang
+  berkedut bersamaan. Nilainya datang sebagai string yang sudah diformat
+  ("x4", "+35", "5/5"), jadi yang dianimasikan hanya bilangan pertama;
+  awalan dan akhiran dibiarkan utuh dan baris tanpa angka dilewati. Smoke test
+  memeriksa dua keadaan sekaligus: angkanya belum final tepat setelah layar
+  dibuka, dan sudah final setelah tweennya selesai.
 
 - **Cue yang belum pernah terpicu di uji**: `combo_milestone`, `heartbeat`,
   `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`.

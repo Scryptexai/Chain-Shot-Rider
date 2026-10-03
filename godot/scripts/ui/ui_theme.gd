@@ -152,7 +152,9 @@ static func _color(theme: Dictionary, key: String, fallback: String) -> Color:
 ## sudah cukup membaca sebagai tombol tiga dimensi, dan tetap satu resource
 ## tanpa tekstur. `sunken` adalah keadaan ditekan: kakinya memendek dan isi
 ## tombol turun, sehingga tap terasa menekan sesuatu.
-static func chunky(face: Color, foot: Color, radius: int = 34, sunken: bool = false) -> StyleBoxFlat:
+static func chunky(
+	face: Color, foot: Color, radius: int = 34, sunken: bool = false
+) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = face
 	style.set_corner_radius_all(radius)
@@ -257,8 +259,10 @@ static func apply_chunky(button: Button, face: Color, foot: Color, radius: int =
 	button.add_theme_stylebox_override("hover", chunky(face.lightened(0.08), foot, radius))
 	button.add_theme_stylebox_override("pressed", chunky(face.darkened(0.05), foot, radius, true))
 	button.add_theme_stylebox_override("focus", chunky(face, foot, radius))
-	button.add_theme_stylebox_override("disabled", chunky(Color(0.16, 0.2, 0.3), Color(0.08, 0.1, 0.16), radius))
-	button.add_theme_color_override("font_color", INK_DEEP if face.get_luminance() > 0.45 else INK)
-	button.add_theme_color_override("font_hover_color", INK_DEEP if face.get_luminance() > 0.45 else INK)
-	button.add_theme_color_override("font_pressed_color", INK_DEEP if face.get_luminance() > 0.45 else INK)
+	var off := chunky(Color(0.16, 0.2, 0.3), Color(0.08, 0.1, 0.16), radius)
+	button.add_theme_stylebox_override("disabled", off)
+	var ink: Color = INK_DEEP if face.get_luminance() > 0.45 else INK
+	button.add_theme_color_override("font_color", ink)
+	button.add_theme_color_override("font_hover_color", ink)
+	button.add_theme_color_override("font_pressed_color", ink)
 	button.add_theme_color_override("font_disabled_color", INK_DIM)

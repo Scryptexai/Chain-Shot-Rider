@@ -101,11 +101,17 @@ func show_result(won: bool, rows: Array) -> void:
 	)
 	for child in _result_rows.get_children():
 		child.queue_free()
+	# Angka dihitung naik, satu baris demi satu baris. Hasil run yang muncul
+	# jadi sekali tempel terbaca seperti tabel laporan; angka yang berlari naik
+	# terbaca sebagai hadiah — itu yang dilakukan Last War dan sejenisnya di
+	# layar akhir ronde.
+	var index := 0
 	for entry in rows:
 		var row: Dictionary = entry
 		_result_rows.add_child(
-			_stat_row(String(row.get("label", "")), String(row.get("value", "")))
+			_stat_row(String(row.get("label", "")), String(row.get("value", "")), index)
 		)
+		index += 1
 	# A win leads into the upgrade draft rather than straight back to the
 	# menu, which is what makes the stage ladder feel like progress instead of
 	# a series of unrelated runs.
@@ -515,7 +521,7 @@ func _card_button(card: Dictionary) -> Button:
 	return button
 
 
-func _stat_row(label_text: String, value_text: String) -> Control:
+func _stat_row(label_text: String, value_text: String, order: int = -1) -> Control:
 	var row := PanelContainer.new()
 	row.add_theme_stylebox_override("panel", UiTheme.pod(_pal["primary"], 24, 0.7))
 	var line := HBoxContainer.new()
@@ -533,7 +539,47 @@ func _stat_row(label_text: String, value_text: String) -> Control:
 	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	UiTheme.style_label(value_label, 46, _pal["primary"], 0)
 	line.add_child(value_label)
+	if order >= 0:
+		_count_up(value_label, value_text, order)
 	return row
+
+
+## Menghitung naik angka di satu baris hasil, tanpa merusak teks di sekitarnya.
+##
+## Nilainya datang sebagai string yang sudah diformat ("1240", "x4", "+35",
+## "3/5"), jadi yang dianimasikan hanya bilangan bulat PERTAMA; awalan dan
+## akhiran dibiarkan apa adanya. Baris tanpa angka — misalnya "—" ketika sebuah
+## statistik tidak berlaku — dilewati, bukan dipaksa jadi nol.
+func _count_up(label: Label, text: String, order: int) -> void:
+	var digits := ""
+	var start := -1
+	for i in range(text.length()):
+		if text[i] >= "0" and text[i] <= "9":
+			if start < 0:
+				start = i
+			digits += text[i]
+		elif start >= 0:
+			break
+	if start < 0 or digits.length() > 9:
+		return
+	var target := int(digits)
+	if target <= 0:
+		return
+	var prefix := text.substr(0, start)
+	var suffix := text.substr(start + digits.length())
+	label.text = prefix + "0" + suffix
+	var tween := create_tween()
+	# Berurutan dari atas: tiap baris menunggu giliran, supaya mata punya
+	# sesuatu untuk diikuti alih-alih lima angka yang berkedut bersamaan.
+	tween.tween_interval(0.12 + float(order) * 0.14)
+	tween.tween_method(
+		func(value: float) -> void:
+			if is_instance_valid(label):
+				label.text = prefix + str(int(round(value))) + suffix,
+		0.0,
+		float(target),
+		0.45
+	).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
 # ---------------------------------------------------------------------------

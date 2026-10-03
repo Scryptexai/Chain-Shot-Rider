@@ -31,10 +31,77 @@ func _ready() -> void:
 	var stages := GameConfig.list("meta.variantCycle").size()
 	for stage in range(maxi(stages, 1)):
 		_run_stage(packed, stage)
+	await _run_result_screen(packed)
 	await _run_card_draft(packed)
 	await _run_stage_map(packed)
 	await _run_hud_layout(packed)
 	_finish()
+
+
+## Layar hasil: angkanya harus berlari naik, bukan muncul jadi.
+##
+## Count-up gampang "lulus" tanpa pernah terlihat — kalau tween-nya tidak
+## pernah dibuat, label langsung memakai teks akhir dan semua pemeriksaan isi
+## tetap hijau. Jadi yang diperiksa dua keadaan: angkanya BELUM final tepat
+## setelah layar dibuka, dan SUDAH final setelah tweennya selesai.
+func _run_result_screen(packed: PackedScene) -> void:
+	SaveGame.reset_progress()
+	var root := packed.instantiate()
+	add_child(root)
+	var screens: Object = root.get("_screens")
+	if screens == null or not screens.has_method("show_result"):
+		_fail("hasil: layar result tidak ada")
+		root.queue_free()
+		return
+
+	var rows: Array = [
+		{"label": "SCORE", "value": "1240"},
+		{"label": "WAVE", "value": "5/5"},
+		{"label": "SQUAD", "value": "x4"},
+	]
+	screens.call("show_result", true, rows)
+	await get_tree().process_frame
+
+	var values := _result_values(screens)
+	if values.size() != rows.size():
+		_fail("hasil: %d baris tergambar, diminta %d" % [values.size(), rows.size()])
+		root.queue_free()
+		return
+	var final_texts: Array[String] = []
+	for row in rows:
+		final_texts.append(String((row as Dictionary).get("value", "")))
+	var animating := 0
+	for i in range(values.size()):
+		if String((values[i] as Label).text) != final_texts[i]:
+			animating += 1
+	if animating == 0:
+		_fail("hasil: angka langsung final — count-up tidak jalan")
+
+	# Delay terakhir 0,12 + 2 x 0,14 + durasi 0,45 = 0,81 detik.
+	await get_tree().create_timer(1.2).timeout
+	for i in range(values.size()):
+		var shown := String((values[i] as Label).text)
+		if shown != final_texts[i]:
+			_fail("hasil: baris %d berhenti di \"%s\", seharusnya \"%s\"" % [i, shown, final_texts[i]])
+	_check_glyphs(screens as Node, "layar hasil")
+	print("  hasil: %d baris menghitung naik lalu mendarat di angka akhir" % values.size())
+	root.queue_free()
+
+
+## Label nilai (kolom kanan) dari tiap baris hasil.
+func _result_values(screens: Object) -> Array:
+	var out: Array = []
+	var list: Object = screens.get("_result_rows")
+	if list == null:
+		return out
+	for row in (list as Node).get_children():
+		var line := (row as Node).get_child(0)
+		if line == null or line.get_child_count() < 2:
+			continue
+		var value := line.get_child(1) as Label
+		if value != null:
+			out.append(value)
+	return out
 
 
 ## Mengukur HUD saat sebuah run benar-benar berjalan.
@@ -73,16 +140,25 @@ func _run_hud_layout(packed: PackedScene) -> void:
 	var pause_rect: Rect2 = pause.get_global_rect()
 
 	if fire_rect.size.x < 200.0 or fire_rect.size.y < 200.0:
-		_fail("hud: tombol chain shot %.0fx%.0f px, terlalu kecil untuk ibu jari" % [fire_rect.size.x, fire_rect.size.y])
+		_fail(
+			"hud: tombol chain shot %.0fx%.0f px, terlalu kecil untuk ibu jari"
+			% [fire_rect.size.x, fire_rect.size.y]
+		)
 	# Zona ibu jari: aksi utama harus duduk di sepertiga bawah layar.
 	if fire_rect.get_center().y < viewport.y * 0.62:
-		_fail("hud: tombol chain shot di luar zona ibu jari (y %.0f dari %.0f)" % [fire_rect.get_center().y, viewport.y])
+		_fail(
+			"hud: tombol chain shot di luar zona ibu jari (y %.0f dari %.0f)"
+			% [fire_rect.get_center().y, viewport.y]
+		)
 	if fire_rect.end.x > viewport.x + 1.0 or fire_rect.end.y > viewport.y + 1.0:
 		_fail("hud: tombol chain shot keluar layar")
 	if absf(pause_rect.size.x - pause_rect.size.y) > 8.0:
 		_fail("hud: tombol jeda tidak persegi (%.0fx%.0f)" % [pause_rect.size.x, pause_rect.size.y])
 	if pause_rect.size.x < 100.0 or pause_rect.size.y < 100.0:
-		_fail("hud: tombol jeda %.0fx%.0f px, di bawah lantai 100 px" % [pause_rect.size.x, pause_rect.size.y])
+		_fail(
+			"hud: tombol jeda %.0fx%.0f px, di bawah lantai 100 px"
+			% [pause_rect.size.x, pause_rect.size.y]
+		)
 	if pause_rect.position.y < 80.0:
 		_fail("hud: tombol jeda masuk wilayah notch (y %.0f)" % pause_rect.position.y)
 	if pause_rect.end.x > viewport.x + 1.0:
@@ -595,6 +671,12 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 	var peak_actors := 0
 	var peak_corpses := 0
 	var clips_seen: Dictionary = {}
+	# Interpolasi render gampang mati tanpa bersuara: kalau pose sebelumnya
+	# tidak pernah direkam, nilainya tetap sama dengan pose sekarang dan
+	# gambarnya "benar" — hanya tersendat di layar 120 Hz, yang tidak ada di
+	# sandbox. Jadi yang diukur di sini adalah selisihnya.
+	var pose_gap_max := 0.0
+	var pose_gap_seen := false
 	for frame in range(FRAMES_PER_STAGE):
 		# Drive it like a thumb. Watching an idle game proves nothing: with
 		# no taps the chain shot never fires, so slow motion, bullet riding
@@ -609,6 +691,10 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 		var feel: Object = root.get("_feel")
 		if feel != null and float(feel.call("current_shake_strength")) > 0.0:
 			shook = true
+		var gap := _pose_gap(sim)
+		if gap > 0.0:
+			pose_gap_seen = true
+			pose_gap_max = maxf(pose_gap_max, gap)
 		if chars != null:
 			peak_actors = maxi(peak_actors, int(chars.call("active_count")))
 			peak_corpses = maxi(peak_corpses, int(chars.call("corpse_count")))
@@ -619,6 +705,13 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 		_fail("varian %d: slow-mo tidak pernah aktif" % stage)
 	if not shook:
 		_fail("varian %d: camera shake tidak pernah aktif" % stage)
+	if not pose_gap_seen:
+		_fail("varian %d: pose tick sebelumnya tidak pernah berbeda — interpolasi mati" % stage)
+	# Satu tick musuh tercepat jauh di bawah satu unit. Selisih sebesar arena
+	# berarti slot pose tertukar saat swap-remove, dan di layar entitas itu
+	# terlihat melesat melintasi lapangan dalam satu frame.
+	if pose_gap_max > 1.5:
+		_fail("varian %d: lompatan pose %.2f unit — slot interpolasi tertukar" % [stage, pose_gap_max])
 	_check_characters(stage, chars, peak_actors, peak_corpses, clips_seen)
 	var cues := _check_audio(root, stage)
 	_check_music(root, stage)
@@ -645,6 +738,26 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 
 
 ## Klip yang sedang berjalan pada aktor yang dipinjam frame ini.
+## Selisih terbesar antara pose tick sebelumnya dan pose sekarang.
+##
+## Nol di semua entitas berarti perekaman pose tidak jalan; nilai sebesar arena
+## berarti slotnya tertukar. Keduanya tidak terlihat di sandbox tanpa GPU.
+func _pose_gap(sim: Object) -> float:
+	var pose: Object = sim.get("pose")
+	if pose == null:
+		return 0.0
+	var gap := 0.0
+	var ex: PackedFloat32Array = sim.get("enemy_x")
+	var ez: PackedFloat32Array = sim.get("enemy_z")
+	var px: PackedFloat32Array = pose.get("enemy_x")
+	var pz: PackedFloat32Array = pose.get("enemy_z")
+	for i in range(int(sim.get("enemy_count"))):
+		gap = maxf(gap, absf(ex[i] - px[i]))
+		gap = maxf(gap, absf(ez[i] - pz[i]))
+	gap = maxf(gap, absf(float(sim.get("squad_x")) - float(pose.get("squad_x"))))
+	return gap
+
+
 func _clips_playing(chars: Object) -> Array:
 	var names: Array = []
 	for child in (chars as Node).get_children():
