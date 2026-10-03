@@ -42,6 +42,7 @@ var _theme: Theme
 var _scrim: ColorRect
 var _home: Control
 var _setup: SetupScreen
+var _squad: SquadScreen
 var _pause: Control
 var _result: Control
 var _cards: Control
@@ -54,7 +55,7 @@ var _result_subtitle: Label
 
 var _profile_level: Label
 var _pill_best: Label
-var _pill_cards: Label
+var _pill_cards: Button
 var _chapter_kicker: Label
 var _chapter_name: Label
 var _chapter_boss: Label
@@ -77,6 +78,7 @@ func build(variant_index: int) -> void:
 	_build_scrim()
 	_home = _build_home()
 	_setup = _build_setup_screen()
+	_squad = _build_squad_screen()
 	_pause = _build_pause()
 	_result = _build_result()
 	_cards = _build_cards()
@@ -153,7 +155,7 @@ func show_stage_map() -> void:
 
 
 func _swap(target: Control) -> void:
-	for screen in [_home, _setup, _pause, _result, _cards]:
+	for screen in [_home, _setup, _squad, _pause, _result, _cards]:
 		if screen != null:
 			screen.visible = screen == target
 	_scrim.visible = target != null
@@ -209,7 +211,21 @@ func _build_home() -> Control:
 	# Label kata, bukan simbol: font bawaan Godot tidak punya ★ dan ✦, dan
 	# "BEST" lebih jelas daripada bintang yang harus ditebak artinya.
 	_pill_best = _pill(top, "BEST 0", UiTheme.GOLD)
-	_pill_cards = _pill(top, "KARTU 0", UiTheme.INK)
+	# Pil KARTU adalah pintunya sendiri: angka yang bisa ditekan lebih jujur
+	# daripada angka mati, dan barisnya tidak perlu tombol kelima.
+	_pill_cards = Button.new()
+	_pill_cards.theme = _theme
+	_pill_cards.focus_mode = Control.FOCUS_NONE
+	_pill_cards.text = "KARTU 0"
+	_pill_cards.custom_minimum_size = Vector2(0.0, 110.0)
+	_pill_cards.add_theme_font_size_override("font_size", 28)
+	UiTheme.apply_chunky(_pill_cards, Color(0.12, 0.17, 0.3), Color(0.03, 0.05, 0.12), 34)
+	_pill_cards.pressed.connect(
+		func() -> void:
+			_squad.refresh()
+			_swap(_squad)
+	)
+	top.add_child(_pill_cards)
 
 	# Pengaturan duduk di pojok atas karena jarang dipakai: zona jempol bawah
 	# milik aksi yang dipakai tiap sesi, bukan yang dipakai sekali seumur
@@ -377,6 +393,21 @@ func _build_setup_screen() -> SetupScreen:
 			_swap(_home)
 	)
 	screen.progress_wiped.connect(_refresh_home)
+	return screen
+
+
+## Layar SQUAD, saudara kembar layar setup: hidup di berkas sendiri karena
+## tidak berbagi satu pun data dengan markas.
+func _build_squad_screen() -> SquadScreen:
+	var screen := SquadScreen.new()
+	screen.visible = false
+	add_child(screen)
+	screen.build(_pal, _theme)
+	screen.closed.connect(
+		func() -> void:
+			_refresh_home()
+			_swap(_home)
+	)
 	return screen
 
 

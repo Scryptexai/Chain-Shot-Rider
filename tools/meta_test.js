@@ -277,7 +277,28 @@ async function main() {
     `stage=${openArenas[0].dataset.stage}, terbaru=${wanted}`);
 
   // ---------------------------------------------------------------------
-  console.log('\n[10] Hapus progres harus ditahan, bukan diklik');
+  console.log('\n[10] SQUAD: lembar kekuatan ikut berubah oleh kartu');
+  doc2.querySelector('.tab[data-tab="squad"]').click();
+  const pods = [...doc2.querySelectorAll('#squadStats .pod')];
+  check('delapan pod kekuatan', pods.length === 8, `${pods.length} pod`);
+  const podText = (key) => {
+    const hit = pods.find((p) => p.querySelector('span').textContent === key);
+    return hit ? hit.querySelector('b').textContent : 'hilang';
+  };
+  const owned = G2.META.cards.slice();
+  check('kartu yang dimiliki muncul sebagai baris',
+    doc2.querySelectorAll('.ownRow').length === owned.length,
+    `${doc2.querySelectorAll('.ownRow').length} baris untuk ${owned.length} kartu`);
+  // fire_rate (x1.15) adalah kartu yang dipungut di langkah [4].
+  check('pod RATE TEMBAK membaca kartu, bukan teks hafalan',
+    podText('RATE TEMBAK') === 'x1.15', podText('RATE TEMBAK'));
+  check('pod tanpa kartu tetap netral', podText('GERAK') === 'x1.00', podText('GERAK'));
+  check('pod yang berubah ditandai menyala',
+    pods.find((p) => p.querySelector('span').textContent === 'RATE TEMBAK')
+      .classList.contains('lit'));
+
+  // ---------------------------------------------------------------------
+  console.log('\n[11] Hapus progres harus ditahan, bukan diklik');
   doc2.querySelector('.tab[data-tab="setup"]').click();
   const press = () => doc2.getElementById('mapReset')
     .dispatchEvent(new dom2.window.Event('pointerdown', { bubbles: true }));
@@ -299,6 +320,11 @@ async function main() {
     doc2.querySelectorAll('.stageRow')[1].disabled);
   check('hapus progres tidak ikut mereset volume', G2.META.volume === 1,
     `volume=${G2.META.volume}`);
+  doc2.querySelector('.tab[data-tab="squad"]').click();
+  check('squad kosong menjelaskan cara mendapat kartu',
+    doc2.querySelectorAll('.ownRow').length === 0 && !!doc2.querySelector('.empty'));
+  check('lembar kekuatan ikut kembali netral',
+    [...doc2.querySelectorAll('#squadStats .pod b')].every((b) => /^(x1\.00|\+0)$/.test(b.textContent)));
 
   dom.window.close();
   dom2.window.close();

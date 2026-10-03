@@ -410,8 +410,12 @@
   .pod { border-radius:22px; padding:14px 18px; background:rgba(4,10,24,.75);
     box-shadow:inset 0 0 0 2px rgba(255,255,255,.06); }
   .pod span { display:block; font:800 18px/1 var(--body); letter-spacing:2px; color:var(--inkDim); }
-  .pod b { display:block; margin-top:8px; font:900 32px/1 var(--display); color:var(--accentLit);
+  .pod b { display:block; margin-top:8px; font:900 32px/1 var(--display); color:var(--inkDim);
     font-variant-numeric:tabular-nums; }
+  /* Yang belum diubah kartu dibiarkan redup: lembar ini harus terbaca sekilas
+     sebagai "ini yang sudah kamu naikkan". */
+  .pod.lit { box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.45); }
+  .pod.lit b { color:var(--accentLit); }
 
   /* Hapus progres ditahan, tidak diklik: tombol merah sekali tekan adalah cara
      tercepat kehilangan lima belas stage karena jempol yang meleset. */
@@ -1746,6 +1750,34 @@ function ownedCardsHtml(){
 }
 
 /**
+ * Lembar kekuatan squad. Pertanyaan yang lebih penting daripada "kartu apa
+ * saja" adalah "berapa kuat squad-ku sekarang", dan daftar nama kartu tidak
+ * menjawabnya. Urutannya ditulis tangan supaya pod tidak pernah berpindah
+ * tempat di antara dua kali buka layar.
+ */
+const SQUAD_STATS = [
+  ['autoDamageMul', 'DAMAGE AUTO', 'x'],
+  ['fireRateMul', 'RATE TEMBAK', 'x'],
+  ['chainDamageMul', 'DAMAGE CHAIN', 'x'],
+  ['bounceBudget', 'PANTULAN', '+'],
+  ['chargeRateMul', 'ISI ULANG', 'x'],
+  ['moveSpeedMul', 'GERAK', 'x'],
+  ['startTroops', 'PASUKAN AWAL', '+'],
+  ['negativeSideChance', 'GATE BURUK', 'x'],
+];
+
+function squadStatsHtml(){
+  const up = activeUpgrades();
+  return SQUAD_STATS.map(([stat, key, sign])=>{
+    const neutral = sign === 'x' ? 1 : 0;
+    const value = stat in up ? up[stat] : neutral;
+    const owned = Math.abs(value - neutral) > 1e-6;
+    const text = sign === 'x' ? 'x' + value.toFixed(2) : '+' + Math.round(value);
+    return `<div class="pod ${owned?'lit':''}"><span>${key}</span><b>${text}</b></div>`;
+  }).join('');
+}
+
+/**
  * Kartu medan. Menekan satu kartu memainkan stage TERBARU yang memakai arena
  * itu, bukan stage pertamanya — kalau salah, pemain stage 14 dilempar balik ke
  * tutorial. Arena yang belum punya satu pun stage terbuka ditampilkan terkunci,
@@ -1842,7 +1874,9 @@ function showMap(){
       </section>
 
       <section class="pane" data-pane="squad">
-        <div class="railHead"><b>UPGRADE AKTIF</b><span>${META.cards.length} KARTU</span></div>
+        <div class="railHead"><b>KEKUATAN</b><span>DARI KARTU</span></div>
+        <div class="pods" id="squadStats">${squadStatsHtml()}</div>
+        <div class="railHead"><b>KARTU AKTIF</b><span>${META.cards.length} KARTU</span></div>
         <div class="ownList">${ownedCardsHtml()}</div>
       </section>
 

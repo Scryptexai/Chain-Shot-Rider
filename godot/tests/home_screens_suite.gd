@@ -25,6 +25,7 @@ var glyph_check: Callable = func(_node: Node, _label: String) -> void: pass
 func run(packed: PackedScene) -> void:
 	await _run_arena_picker(packed)
 	await _run_setup_screen(packed)
+	await _run_squad_screen(packed)
 
 
 func _run_arena_picker(packed: PackedScene) -> void:
@@ -195,6 +196,93 @@ func _run_setup_screen(packed: PackedScene) -> void:
 	)
 	root.queue_free()
 
+
+## Layar SQUAD: lembar kekuatan + kartu yang dimiliki.
+##
+## Dua keadaan berlawanan lagi, karena layar inventaris paling mudah "lulus
+## diam-diam": daftar yang selalu kosong dan daftar yang selalu penuh sama-sama
+## terlihat benar kalau hanya dilihat sekali. Yang juga dijaga: angka di lembar
+## kekuatan harus benar-benar datang dari kartu, bukan dari teks yang dihafal.
+func _run_squad_screen(packed: PackedScene) -> void:
+	SaveGame.reset_progress()
+	var root := packed.instantiate()
+	add_child(root)
+	var screens: Object = root.get("_screens")
+	var squad: Object = screens.get("_squad") if screens != null else null
+	if squad == null:
+		failed.emit("squad: layar squad tidak ada")
+		root.queue_free()
+		return
+
+	screens.call("_swap", squad)
+	squad.call("refresh")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	glyph_check.call(squad as Node, "squad")
+
+	var viewport: Vector2 = (squad as Control).get_viewport().get_visible_rect().size
+	var rect: Rect2 = (squad as Control).get_global_rect()
+	if rect.size.x < viewport.x - 1.0 or rect.size.y < viewport.y - 1.0:
+		failed.emit(
+			(
+				"squad: layar %.0fx%.0f px, layar acuan %.0fx%.0f"
+				% [rect.size.x, rect.size.y, viewport.x, viewport.y]
+			)
+		)
+	var back := squad.get("_back_button") as Button
+	if back == null:
+		failed.emit("squad: tombol KEMBALI tidak ada")
+	elif back.get_global_rect().position.y < viewport.y * 0.6:
+		failed.emit("squad: KEMBALI di luar zona ibu jari (y %.0f)" % back.get_global_rect().position.y)
+
+	# 1. Profil baru: tidak ada kartu, keadaan kosong terlihat, statistik netral.
+	var list := squad.get("_card_list") as Node
+	var empty := squad.get("_empty_note") as Control
+	if list.get_child_count() != 0:
+		failed.emit("squad: %d kartu tampil pada profil kosong" % list.get_child_count())
+	if empty == null or not empty.visible:
+		failed.emit("squad: profil kosong tidak menjelaskan apa-apa")
+	var stats: Dictionary = squad.get("_stat_values")
+	var move_label := stats.get("moveSpeedMul") as Label
+	var move_text: String = "hilang" if move_label == null else move_label.text
+	if move_text != "x1.00":
+		failed.emit("squad: GERAK netral berbunyi '%s'" % move_text)
+
+	# 2. Dua kartu dimiliki: daftar terisi dan lembar kekuatan ikut berubah.
+	SaveGame.grant_card("move_speed")
+	SaveGame.grant_card("extra_troops")
+	squad.call("refresh")
+	await get_tree().process_frame
+	if list.get_child_count() != 2:
+		failed.emit("squad: %d baris kartu untuk 2 kartu dimiliki" % list.get_child_count())
+	if empty.visible:
+		failed.emit("squad: keadaan kosong masih tampil padahal ada kartu")
+	move_text = "hilang" if move_label == null else move_label.text
+	var count := squad.get("_count_label") as Label
+	if count == null or count.text != "2 KARTU":
+		failed.emit("squad: hitungan kartu berbunyi '%s'" % ("hilang" if count == null else count.text))
+	if move_text != "x1.12":
+		failed.emit("squad: GERAK berbunyi '%s', kartu move_speed minta x1.12" % move_text)
+	var troops := stats.get("startTroops") as Label
+	var troops_text: String = "hilang" if troops == null else troops.text
+	if troops_text != "+4":
+		failed.emit("squad: PASUKAN AWAL berbunyi '%s', harusnya +4" % troops_text)
+
+	# 3. Pil KARTU di markas adalah pintunya: harus bisa ditekan, bukan teks.
+	var pill: Object = screens.get("_pill_cards")
+	if not (pill is Button):
+		failed.emit("squad: pil KARTU bukan tombol, layar ini tidak punya pintu")
+	elif String((pill as Button).text) != "KARTU 2":
+		screens.call("_refresh_home")
+		if String((pill as Button).text) != "KARTU 2":
+			failed.emit("squad: pil KARTU berbunyi '%s'" % (pill as Button).text)
+	print(
+		(
+			"  squad: 8 pod kekuatan, kosong -> ajakan main, 2 kartu -> %s / %s"
+			% [move_text, troops_text]
+		)
+	)
+	root.queue_free()
 
 ## Kartu medan dari markas, setelah layout settle.
 func _arena_cards(root: Node, screens: Object) -> Array:

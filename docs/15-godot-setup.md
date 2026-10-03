@@ -269,6 +269,7 @@ target rilis mobile. Beberapa item sudah selesai di satu sisi saja.
 | Low-pass 1200 Hz + −6 dB saat slow-mo (§7.3) | **selesai** | **selesai** |
 | Pemilih arena 5 kartu | **selesai** | **selesai** |
 | Count-up tween (HUD + baris result) | **selesai** | **selesai** |
+| Daftar upgrade aktif (layar SQUAD) | **selesai** | **selesai** |
 
 Catatan tiap item:
 
@@ -327,6 +328,21 @@ Catatan tiap item:
   pernah terbaca "mati DAN keras" sekaligus. Nilainya ikut tersimpan di save
   (`SaveGame.volume` / `META.volume`) tetapi **tidak** ikut terhapus saat
   progres dihapus: itu preferensi perangkat, bukan progres.
+- **Layar SQUAD**: sebelumnya Godot hanya menunjukkan ANGKA kartu di markas
+  ("KARTU 3"), jadi satu-satunya cara tahu upgrade apa yang aktif adalah
+  mengingatnya sendiri. Sekarang pil KARTU itu sendiri yang jadi pintunya —
+  angka yang bisa ditekan lebih jujur daripada angka mati, dan baris atas tidak
+  perlu tombol kelima.
+
+  Isinya menjawab pertanyaan yang lebih penting daripada "kartu apa saja":
+  **berapa kuat squad-nya sekarang**. Delapan pod statistik (DAMAGE AUTO, RATE
+  TEMBAK, DAMAGE CHAIN, PANTULAN, ISI ULANG, GERAK, PASUKAN AWAL, GATE BURUK)
+  dihitung dari `SaveGame.active_upgrades()` / `activeUpgrades()`, bukan dari
+  teks yang dihafal; yang belum diubah kartu dibiarkan redup. Daftar kartunya
+  menyusul di bawah, dan keadaan kosong menjelaskan cara mendapat kartu
+  pertama alih-alih memperlihatkan kotak kosong. Urutan pod ditulis tangan,
+  bukan hasil iterasi Dictionary, supaya posisinya tidak berpindah-pindah di
+  antara dua kali buka layar.
 - **Layar setup**: di Godot layar ini pindah ke berkasnya sendiri,
   `scripts/ui/setup_screen.gd`, dan isinya meniru pane SETUP web —
   volume, kontrol, pod angka status, zona bahaya. Menghapus progres **ditahan
