@@ -568,7 +568,7 @@ const S = {
   score:0, combo:0, bestCombo:0, kills:0, lives:3, coins:0,
   waveIndex:-1, waveTimer:1.5, waveActive:false, leaked:0,
   ammo:5, reload:0,
-  timeScale:1, targetTimeScale:1, holdSlow:0,
+  timeScale:1, targetTimeScale:1, holdSlow:0, enemySeq:0,
   shake:0, shakeAmp:0, fov:1, targetFov:1,
   enemies:[], bullets:[], obstacles:[], fx:[], floats:[],
   bounceLadder:0, lastBounce:0,
@@ -854,7 +854,7 @@ function resetRun(){
   S.waveIndex=-1; S.waveTimer=1.2; S.waveActive=false; S.leaked=0;
   S.ammo=CFG.bullet.magazine; S.reload=0;
   S.timeScale=1; S.targetTimeScale=1; S.holdSlow=0; S.shake=0; S.fov=1; S.targetFov=1;
-  S.enemies=[]; S.bullets=[]; S.fx=[]; S.floats=[]; S.bounceLadder=0;
+  S.enemies=[]; S.bullets=[]; S.fx=[]; S.floats=[]; S.bounceLadder=0; S.enemySeq=0;
   S.aimAngle=0; S.aimDir=1; S.aimInput=0; S.boss=null; S.invul=0;
   const SQ=CFG.squad;
   S.squadX=0; S.squadTargetX=0; S.squadInput=null;
@@ -900,6 +900,10 @@ function spawnWave(){
     }
     const st = typeStats(t);
     S.enemies.push({
+      // Identitas kosmetik: renderer memakainya untuk tahu unit mana yang
+      // lenyap antar frame, lalu memainkan animasi roboh di tempatnya.
+      // Deterministik (penghitung, bukan RNG), jadi replay tidak terpengaruh.
+      id: ++S.enemySeq,
       type:t, x:Math.max(-halfW,Math.min(halfW,p[0]+S.rng.range(-.1,.1))),
       z:baseZ+p[1]+S.rng.range(-.1,.1),
       hp:st.hp, maxHp:st.hp, speed:st.speed*S.rng.range(.9,1.1), r:st.r,
@@ -1280,7 +1284,7 @@ function damageEnemy(e, dmg){
 
   if(e.split){
     for(let i=0;i<3;i++){ const a=i*Math.PI*2/3; const st=typeStats('grunt');
-      S.enemies.push({type:'grunt', x:e.x+Math.cos(a)*.6, z:e.z+Math.sin(a)*.6,
+      S.enemies.push({id:++S.enemySeq, type:'grunt', x:e.x+Math.cos(a)*.6, z:e.z+Math.sin(a)*.6,
         hp:st.hp,maxHp:st.hp,speed:st.speed,r:st.r,color:st.color,score:st.score,
         armored:false,explode:false,split:false,phase:S.rng.range(0,6.283),vx:0,vz:0,near:false,hit:0}); }
         // ^ WAJIB S.rng, bukan Math.random: ini jalur simulasi (lihat docs/09 §B-6).

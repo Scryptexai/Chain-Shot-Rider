@@ -40,9 +40,13 @@ def main() -> None:
 
     # --- 1. Model GLB -> data URI -----------------------------------------
     models = {}
-    for glb in sorted((ROOT / "assets" / "models").glob("*.glb")):
-        b64 = base64.b64encode(glb.read_bytes()).decode("ascii")
-        models[f"assets/models/{glb.name}"] = f"data:model/gltf-binary;base64,{b64}"
+    # Dua folder: model statis (LOD jauh) dan karakter ber-tulang (LOD dekat).
+    # Keduanya wajib ikut; berkas tunggal yang kehilangan rig akan jalan tanpa
+    # error dan tanpa satu pun karakter bergerak.
+    for rel in ("assets/models", "assets/models/rigged"):
+        for glb in sorted((ROOT / rel).glob("*.glb")):
+            b64 = base64.b64encode(glb.read_bytes()).decode("ascii")
+            models[f"{rel}/{glb.name}"] = f"data:model/gltf-binary;base64,{b64}"
     print(f"  {len(models)} model GLB ditanam")
 
     # --- 2. Three.js, GLTFLoader, renderer --------------------------------
@@ -51,15 +55,22 @@ def main() -> None:
     render3d = read("js/render3d.js")
 
     # Peta path -> data URI dipakai render3d saat memanggil GLTFLoader.
+    # Sisipan diletakkan SESUDAH kedua tabel path dideklarasikan. Pernah
+    # diletakkan di tengah (setelah MODELS, sebelum RIGGED) dan hasilnya
+    # halaman mati dengan "Cannot convert undefined or null to object" —
+    # error yang tidak pernah muncul di versi multi-berkas.
+    anchor = "  var rigs = {};"
+    assert anchor in render3d, "titik sisip INLINE_MODELS tidak ditemukan di render3d.js"
     render3d = render3d.replace(
-        "  var loaded = {};      // name -> Object3D prototype",
+        anchor,
         "  // Build satu berkas: path diganti data URI yang ditanam di halaman.\n"
         "  if (typeof INLINE_MODELS !== 'undefined') {\n"
-        "    Object.keys(MODELS).forEach(function (k) {\n"
-        "      if (INLINE_MODELS[MODELS[k]]) MODELS[k] = INLINE_MODELS[MODELS[k]];\n"
+        "    [MODELS, RIGGED].forEach(function (table) {\n"
+        "      Object.keys(table).forEach(function (k) {\n"
+        "        if (INLINE_MODELS[table[k]]) table[k] = INLINE_MODELS[table[k]];\n"
+        "      });\n"
         "    });\n"
-        "  }\n"
-        "  var loaded = {};      // name -> Object3D prototype",
+        "  }\n" + anchor,
         1,
     )
 

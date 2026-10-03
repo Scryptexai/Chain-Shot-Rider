@@ -570,6 +570,16 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 	# a ridden bullet must slow the engine, and something must shake.
 	var slowest := 1.0
 	var shook := false
+	# Karakter ber-tulang: dummy renderer tidak menggambar apa pun, tapi
+	# skeleton, AnimationPlayer dan kolamnya tetap dieksekusi. Yang diukur
+	# adalah hal-hal yang diam-diam mati: model tidak termuat, aktor tidak
+	# pernah dipinjam, anggaran LOD jebol di gelombang besar, atau mayat
+	# tidak pernah roboh.
+	var view: Object = root.get_node_or_null(NodePath("ArenaView"))
+	var chars: Object = view.get("_chars") if view != null else null
+	var peak_actors := 0
+	var peak_corpses := 0
+	var clips_seen: Dictionary = {}
 	for frame in range(FRAMES_PER_STAGE):
 		# Drive it like a thumb. Watching an idle game proves nothing: with
 		# no taps the chain shot never fires, so slow motion, bullet riding
@@ -584,11 +594,17 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 		var feel: Object = root.get("_feel")
 		if feel != null and float(feel.call("current_shake_strength")) > 0.0:
 			shook = true
+		if chars != null:
+			peak_actors = maxi(peak_actors, int(chars.call("active_count")))
+			peak_corpses = maxi(peak_corpses, int(chars.call("corpse_count")))
+			for name in _clips_playing(chars):
+				clips_seen[name] = true
 	Engine.time_scale = 1.0
 	if slowest >= 0.999:
 		_fail("varian %d: slow-mo tidak pernah aktif" % stage)
 	if not shook:
 		_fail("varian %d: camera shake tidak pernah aktif" % stage)
+	_check_characters(stage, chars, peak_actors, peak_corpses, clips_seen)
 	var cues := _check_audio(root, stage)
 	_check_music(root, stage)
 
@@ -611,6 +627,53 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 		)
 	)
 	root.queue_free()
+
+
+## Klip yang sedang berjalan pada aktor yang dipinjam frame ini.
+func _clips_playing(chars: Object) -> Array:
+	var names: Array = []
+	for child in (chars as Node).get_children():
+		var player: AnimationPlayer = child.find_child("AnimationPlayer", true, false)
+		if player != null and player.is_playing():
+			names.append(player.current_animation)
+	return names
+
+
+## Bukti bahwa lapisan karakter v1.0 benar-benar hidup di dalam run, bukan
+## sekadar berkas yang ada di folder.
+func _check_characters(
+	stage: int, chars: Object, peak_actors: int, peak_corpses: int, clips: Dictionary
+) -> void:
+	if chars == null:
+		_fail("varian %d: ArenaView tidak punya kolam karakter" % (stage + 1))
+		return
+	var loaded := int(chars.call("loaded_count"))
+	var budget: int = (
+		int(CharacterPool.BUDGET["troops"]) + int(CharacterPool.BUDGET["enemies"]) + 1
+	)
+	if loaded < 8:
+		_fail("varian %d: hanya %d model ber-tulang termuat, harus 8" % [stage + 1, loaded])
+	if peak_actors <= 0:
+		_fail("varian %d: tidak ada karakter ber-tulang yang pernah tampil" % (stage + 1))
+	if peak_actors > budget:
+		_fail(
+			(
+				"varian %d: anggaran LOD jebol — %d aktor sekaligus, batas %d"
+				% [stage + 1, peak_actors, budget]
+			)
+		)
+	if clips.size() < 2:
+		_fail("varian %d: hanya satu klip animasi yang pernah jalan" % (stage + 1))
+	if peak_corpses <= 0:
+		_fail("varian %d: musuh mati tanpa pernah roboh" % (stage + 1))
+	if peak_corpses > int(CharacterPool.BUDGET["corpses"]):
+		_fail("varian %d: mayat melewati anggaran (%d)" % [stage + 1, peak_corpses])
+	print(
+		(
+			"    karakter: %d model, puncak %d aktor (batas %d), %d mayat, klip %s"
+			% [loaded, peak_actors, budget, peak_corpses, str(clips.keys())]
+		)
+	)
 
 
 ## Audio is the newest layer and the easiest to leave silently disconnected:

@@ -34,6 +34,14 @@ const ENEMY_COLORS := [
 
 const FLOOR_SHADER := "res://shaders/floor_grid.gdshader"
 
+## Nama unit ber-tulang dalam urutan enemyTypes config, plus prajurit dan bos.
+## Urutannya mengikat indeks tipe simulasi ke sebuah berkas GLB; kalau config
+## menambah jenis musuh, daftar ini ikut bertambah atau unit itu jatuh ke
+## jalur MultiMesh dengan sendirinya.
+const ENEMY_UNITS := ["grunt", "runner", "brute", "shielder", "splitter", "bomber"]
+const SQUAD_UNIT := "trooper"
+const BOSS_UNIT := "boss"
+
 var _sim: SimWorld
 var _pal: Dictionary = {}
 var _enemy_mm: MultiMeshInstance3D
@@ -50,6 +58,17 @@ var _impacts: Array[MeshInstance3D] = []
 var _impact_life := PackedFloat32Array()
 var _impact_scale := PackedFloat32Array()
 var _impact_next := 0
+var _chars: CharacterPool
+## Darah terakhir tiap musuh, dibaca per indeks. Simulasi tidak mengirim event
+## "kena pukul", tapi HP yang turun adalah sinyal yang sama persis dan tidak
+## menambah kopling ke aturan main.
+var _enemy_hp_seen := PackedFloat32Array()
+var _squad_firing := 0.0
+## Posisi squad frame lalu: dari sini datang jawaban "sedang jalan atau diam",
+## yang menentukan klip lari atau siaga. Simulasi tidak menyimpan kecepatan
+## squad, dan menanyakannya ke input akan salah saat squad masih meluncur.
+var _squad_x_prev := 0.0
+var _squad_moving := false
 
 
 ## Called by Game before the first frame, with the variant for this stage.
@@ -72,6 +91,15 @@ func bind_sim(sim: SimWorld) -> void:
 func render_frame() -> void:
 	if _sim == null:
 		return
+	var delta := get_process_delta_time()
+	_squad_firing = maxf(_squad_firing - delta, 0.0)
+	for entry in _sim.events:
+		if String((entry as Dictionary).get("type", "")) == "auto_fired":
+			_squad_firing = 0.12
+	_squad_moving = absf(_sim.squad_x - _squad_x_prev) > 0.004
+	_squad_x_prev = _sim.squad_x
+	if _chars != null:
+		_chars.begin()
 	_render_enemies()
 	_render_troops()
 	_render_auto()
@@ -81,6 +109,8 @@ func render_frame() -> void:
 	_render_boss()
 	_spawn_impacts()
 	_age_impacts()
+	if _chars != null:
+		_chars.end(delta)
 
 
 func _build_environment() -> void:
@@ -151,8 +181,20 @@ func _build_side_walls(width: float, length: float) -> void:
 
 
 func _build_actors() -> void:
-	_enemy_mm = _make_multimesh(_capsule(0.35, 1.0), Color.WHITE, SimWorld.MAX_ENEMIES)
-	_troop_mm = _make_multimesh(_capsule(0.22, 0.8), _pal["primary"], MAX_TROOPS_DRAWN)
+	# Karakter ber-tulang untuk unit terdekat, MultiMesh untuk sisanya. Dua
+	# jalur, satu ukuran: kapsul ikut dibesarkan CHAR_SCALE supaya barisan
+	# belakang tidak menciut saat sebuah unit berpindah jalur.
+	_chars = CharacterPool.new()
+	_chars.name = "Characters"
+	add_child(_chars)
+	var roster: Array = ENEMY_UNITS.duplicate()
+	roster.append(SQUAD_UNIT)
+	roster.append(BOSS_UNIT)
+	_chars.warm(roster)
+
+	var scale: float = CharacterPool.CHAR_SCALE
+	_enemy_mm = _make_multimesh(_capsule(0.35 * scale, 1.0 * scale), Color.WHITE, SimWorld.MAX_ENEMIES)
+	_troop_mm = _make_multimesh(_capsule(0.22 * scale, 0.8 * scale), _pal["primary"], MAX_TROOPS_DRAWN)
 	_auto_mm = _make_multimesh(_sphere(0.12), Color("#FFF1D0"), SimWorld.MAX_AUTO_BULLETS)
 	_chain = MeshInstance3D.new()
 	_chain.mesh = _sphere(0.26)
@@ -244,6 +286,17 @@ func _render_obstacles() -> void:
 func _render_boss() -> void:
 	if _boss == null:
 		return
+	# Bos selalu ber-tulang: cuma ada satu, dan ia satu-satunya hal di layar
+	# yang ditatap pemain lama-lama.
+	var actor: CharacterPool.Actor = null
+	if _sim.boss_active and _chars != null:
+		actor = _chars.take(BOSS_UNIT)
+	if actor != null:
+		_boss.visible = false
+		actor.place(_sim.boss_pos.x, _sim.boss_pos.y, PI)
+		if actor.lock <= 0.0:
+			actor.play("idle")
+		return
 	_boss.visible = _sim.boss_active
 	if _boss.visible:
 		_boss.position = Vector3(_sim.boss_pos.x, 1.4, -_sim.boss_pos.y)
@@ -291,6 +344,11 @@ func _spawn_impacts() -> void:
 			"kill":
 				radius = 0.9
 				tint = _pal["enemy"]
+				if _chars != null:
+					var fallen := _unit_name(int(event.get("enemy", 0)) % ENEMY_UNITS.size())
+					_chars.drop_corpse(
+						fallen, float(event.get("x", 0.0)), float(event.get("z", 0.0))
+					)
 			"explosion":
 				radius = float(event.get("radius", 3.0))
 				tint = Color("#FF8A2B")
@@ -341,28 +399,87 @@ func _age_impacts() -> void:
 
 func _render_enemies() -> void:
 	var mm := _enemy_mm.multimesh
-	mm.visible_instance_count = _sim.enemy_count
-	for i in range(_sim.enemy_count):
-		var pos := Vector3(_sim.enemy_x[i], 0.5, -_sim.enemy_z[i])
-		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
+	var count := _sim.enemy_count
+	# LOD: yang paling dekat garis pertahanan mendapat tubuh ber-tulang.
+	# Mereka yang terbesar di layar dan yang sedang diputuskan nasibnya oleh
+	# pemain; musuh di ujung lorong tingginya dua puluh piksel.
+	var order: Array = []
+	for i in range(count):
+		order.append(i)
+	order.sort_custom(func(a: int, b: int) -> bool: return _sim.enemy_z[a] < _sim.enemy_z[b])
+	var skinned: Dictionary = {}
+	var budget: int = mini(int(CharacterPool.BUDGET["enemies"]), order.size())
+	for i in range(budget):
+		skinned[order[i]] = true
+
+	if _enemy_hp_seen.size() < count:
+		_enemy_hp_seen.resize(count)
+
+	var drawn := 0
+	for i in range(count):
 		var type_index: int = _sim.enemy_type[i] % ENEMY_COLORS.size()
-		mm.set_instance_color(i, ENEMY_COLORS[type_index])
+		var hurt: bool = _sim.enemy_hp[i] < _enemy_hp_seen[i] - 0.001
+		_enemy_hp_seen[i] = _sim.enemy_hp[i]
+		var unit := _unit_name(type_index)
+		var actor: CharacterPool.Actor = null
+		if skinned.has(i) and _chars != null:
+			actor = _chars.take(unit)
+		if actor != null:
+			# Menatap pemain: model menghadap -Z, musuh berjalan ke arah +Z.
+			actor.place(_sim.enemy_x[i], _sim.enemy_z[i], PI)
+			if hurt:
+				actor.one_shot("hit", 0.3)
+			elif actor.lock <= 0.0:
+				actor.play("run")
+			continue
+		var pos := Vector3(_sim.enemy_x[i], 0.5 * CharacterPool.CHAR_SCALE, -_sim.enemy_z[i])
+		mm.set_instance_transform(drawn, Transform3D(Basis.IDENTITY, pos))
+		mm.set_instance_color(drawn, ENEMY_COLORS[type_index])
+		drawn += 1
+	mm.visible_instance_count = drawn
+
+
+## Indeks tipe simulasi -> nama berkas karakter.
+func _unit_name(type_index: int) -> String:
+	if type_index < 0 or type_index >= ENEMY_UNITS.size():
+		return ENEMY_UNITS[0]
+	return String(ENEMY_UNITS[type_index])
 
 
 func _render_troops() -> void:
 	var mm := _troop_mm.multimesh
 	var shown: int = mini(_sim.troops, MAX_TROOPS_DRAWN)
-	mm.visible_instance_count = shown
 	var columns := 5
-	var spacing := 0.42
+	# Jarak formasi ikut membesar bersama CHAR_SCALE, kalau tidak bahu
+	# prajurit saling menembus dan barisan jadi bubur.
+	var spacing: float = 0.42 * CharacterPool.CHAR_SCALE
+	var drawn := 0
 	for i in range(shown):
+		@warning_ignore("integer_division")
 		var row := i / columns
 		var col := i % columns
 		var offset_x := (float(col) - float(columns - 1) * 0.5) * spacing
 		var offset_z := float(row) * spacing
-		var pos := Vector3(_sim.squad_x + offset_x, 0.4, -(SimWorld.SQUAD_Z - offset_z))
-		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
-		mm.set_instance_color(i, _pal["primary"] if i == 0 else Color(1, 1, 1, 0.85))
+		var x: float = _sim.squad_x + offset_x
+		var z: float = SimWorld.SQUAD_Z - offset_z
+		var actor: CharacterPool.Actor = null
+		if i < int(CharacterPool.BUDGET["troops"]) and _chars != null:
+			actor = _chars.take(SQUAD_UNIT)
+		if actor != null:
+			actor.place(x, z, 0.0)
+			# Tiga terdepan yang mengangkat senjata; kalau sepuluh orang
+			# menembak berbarengan recoil-nya berubah jadi gempa.
+			if _squad_firing > 0.0 and i < 3:
+				actor.one_shot("shoot", 0.22)
+				_light_impact(actor.muzzle_point(), 0.28, Color("#FFF3C4"))
+			elif actor.lock <= 0.0:
+				actor.play("run" if _squad_moving else "idle")
+			continue
+		var pos := Vector3(x, 0.4 * CharacterPool.CHAR_SCALE, -z)
+		mm.set_instance_transform(drawn, Transform3D(Basis.IDENTITY, pos))
+		mm.set_instance_color(drawn, _pal["primary"] if i == 0 else Color(1, 1, 1, 0.85))
+		drawn += 1
+	mm.visible_instance_count = drawn
 
 
 func _render_auto() -> void:

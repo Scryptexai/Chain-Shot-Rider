@@ -71,6 +71,41 @@
   var loaded = {};      // name -> Object3D prototype
   var loadCount = 0;
 
+  // Karakter ber-tulang v1.0 (tools/build_rigged.py). Berbeda dari MODELS di
+  // atas: ini SkinnedMesh dengan skeleton 16 tulang dan lima klip animasi.
+  var RIGGED = {
+    trooper: 'assets/models/rigged/trooper.glb',
+    grunt: 'assets/models/rigged/grunt.glb',
+    runner: 'assets/models/rigged/runner.glb',
+    brute: 'assets/models/rigged/brute.glb',
+    shielder: 'assets/models/rigged/shielder.glb',
+    splitter: 'assets/models/rigged/splitter.glb',
+    bomber: 'assets/models/rigged/bomber.glb',
+    boss: 'assets/models/rigged/boss.glb',
+  };
+
+  // Anggaran skinning. Satu gelombang bisa berisi 90 musuh; memberi semuanya
+  // skeleton berarti 90 x 16 matriks tulang dan 90 draw call per frame, dan
+  // ponsel kelas menengah langsung jatuh ke 20 fps. Yang dekat kamera mendapat
+  // animasi penuh, sisanya tetap memakai mesh statis yang sudah ada — pada
+  // jarak itu selisihnya beberapa piksel, sementara biayanya berlipat.
+  var SKIN = { troops: 10, enemies: 16, corpses: 8 };
+  // Tinggi manusia 0,96 unit di lorong selebar 20 unit itu benar secara
+  // skala, tapi di layar ponsel 9:16 jadi 24 piksel — siluet, senjata, dan
+  // animasi tulang tidak akan pernah terbaca. Semua unit (ber-tulang maupun
+  // statis) dibesarkan dengan faktor yang sama supaya tidak ada lompatan
+  // ukuran saat sebuah unit berpindah antara jalur skinned dan jalur statis.
+  // Simulasi tidak ikut diubah: radius tabrakan tetap apa adanya.
+  var CHAR_SCALE = 2.0;
+  var rigs = {};        // name -> gltf {scene, animations}
+  var rigCount = 0;
+  var actorPools = {};  // name -> pool of actors
+  var corpses = [];     // mayat yang sedang memainkan klip 'die'
+  var aliveIds = {};    // id musuh -> {kind, x, z} frame sebelumnya
+  var trail = [];       // jejak peluru chain
+  var lastShotCount = 0;
+  var lastFrameMs = 0;
+
   var THREE = null;
   var renderer = null, scene = null, camera = null, canvas = null;
   var groups = {};
@@ -125,6 +160,162 @@
         if (--pending === 0 && onDone) onDone(loadCount);
       });
     });
+  }
+
+  /**
+   * Memuat karakter ber-tulang. Terpisah dari loadModels() karena perlakuannya
+   * berbeda: materialnya butuh flag `skinning` (three r128 menghitung pose di
+   * vertex shader hanya kalau flag itu menyala — tanpa itu karakter tampil
+   * membeku di bind pose, tanpa error apa pun), dan frustum culling harus
+   * dimatikan karena bounding box yang dipanggang masih bind pose dan unit
+   * yang merunduk atau roboh akan berkedip hilang di tepi layar.
+   */
+  function loadRigs(onDone) {
+    if (!THREE.GLTFLoader) { if (onDone) onDone(0); return; }
+    var loader = new THREE.GLTFLoader();
+    var names = Object.keys(RIGGED), pending = names.length;
+    names.forEach(function (name) {
+      loader.load(RIGGED[name], function (gltf) {
+        gltf.scene.traverse(function (c) {
+          if (!c.isMesh && !c.isSkinnedMesh) return;
+          c.material = new THREE.MeshLambertMaterial({
+            vertexColors: true, skinning: !!c.isSkinnedMesh,
+          });
+          c.frustumCulled = false;
+        });
+        rigs[name] = gltf;
+        rigCount++;
+        if (--pending === 0 && onDone) onDone(rigCount);
+      }, undefined, function () { if (--pending === 0 && onDone) onDone(rigCount); });
+    });
+  }
+
+  /** Menelusuri dua hierarki identik berbarengan. */
+  function parallelTraverse(a, b, visit) {
+    visit(a, b);
+    for (var i = 0; i < a.children.length; i++) {
+      parallelTraverse(a.children[i], b.children[i], visit);
+    }
+  }
+
+  /**
+   * Menyalin karakter ber-tulang.
+   *
+   * `Object3D.clone()` biasa tidak cukup: salinannya tetap menunjuk skeleton
+   * milik model asli, jadi sepuluh prajurit akan berbagi satu pose dan
+   * bergerak serempak seperti satu makhluk. Skeleton harus disalin lalu
+   * di-rebind ke tulang hasil salinan — ini isi SkeletonUtils.clone, yang
+   * tidak ikut di bundel three.min.js yang di-vendor.
+   */
+  function cloneSkinned(source) {
+    var sourceLookup = new Map(), cloneLookup = new Map();
+    var clone = source.clone();
+    parallelTraverse(source, clone, function (src, dst) {
+      sourceLookup.set(dst, src);
+      cloneLookup.set(src, dst);
+    });
+    clone.traverse(function (node) {
+      if (!node.isSkinnedMesh) return;
+      var srcMesh = sourceLookup.get(node);
+      var srcBones = srcMesh.skeleton.bones;
+      node.skeleton = srcMesh.skeleton.clone();
+      node.bindMatrix.copy(srcMesh.bindMatrix);
+      node.skeleton.bones = srcBones.map(function (bone) { return cloneLookup.get(bone); });
+      node.bind(node.skeleton, node.bindMatrix);
+      // Material per aktor: kedip merah saat kena tembak tidak boleh menular
+      // ke seluruh gelombang.
+      node.material = node.material.clone();
+    });
+    return clone;
+  }
+
+  /** Satu karakter hidup: hierarki + mixer + klip + soket moncong. */
+  function makeActor(kind) {
+    var rig = rigs[kind];
+    if (!rig) return null;
+    var root = cloneSkinned(rig.scene);
+    root.scale.setScalar(CHAR_SCALE);
+    var mixer = new THREE.AnimationMixer(root);
+    var actions = {};
+    rig.animations.forEach(function (clip) {
+      var action = mixer.clipAction(clip);
+      if (clip.name === 'shoot' || clip.name === 'hit' || clip.name === 'die') {
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+      }
+      actions[clip.name] = action;
+    });
+    return {
+      kind: kind, root: root, mixer: mixer, actions: actions,
+      muzzle: root.getObjectByName('muzzle'),
+      // Fase acak per aktor. Tanpa ini semua mixer mulai di detik nol dan
+      // maju dengan dt yang sama: tiga puluh musuh melangkah seperti satu
+      // tubuh, dan pasukan terlihat seperti barisan baris-berbaris. Acak
+      // kosmetik ini memakai Math.random, BUKAN RNG simulasi, jadi hasil
+      // permainan tetap bisa diulang persis.
+      phase: Math.random(),
+      // Kecepatan langkah dibedakan tipis supaya barisan tidak pernah
+      // mengunci ulang ke fase yang sama setelah beberapa detik.
+      rate: 0.92 + Math.random() * 0.16,
+      current: '', lock: 0,
+    };
+  }
+
+  /**
+   * Memainkan klip dengan crossfade.
+   *
+   * `lock` adalah sisa waktu klip sekali-jalan (tembak, kena, mati). Selama
+   * masih terkunci, permintaan 'run' atau 'idle' diabaikan — tanpa ini state
+   * machine akan memotong recoil di frame berikutnya dan tembakan terlihat
+   * seperti tidak pernah terjadi.
+   */
+  function play(actor, name, fade) {
+    if (!actor || !actor.actions[name] || actor.current === name) return;
+    var next = actor.actions[name];
+    var prev = actor.actions[actor.current];
+    next.reset();
+    next.setEffectiveWeight(1);
+    // Klip berulang masuk di titik acak lintasannya; aksi sesaat (tembak,
+    // kena pukul, roboh) harus mulai dari frame nol atau pukulannya meleset
+    // dari momen yang memicunya.
+    if (next.loop === THREE.LoopRepeat) {
+      next.time = actor.phase * (next.getClip().duration || 1);
+      next.setEffectiveTimeScale(actor.rate);
+    }
+    next.play();
+    if (prev && prev !== next) prev.crossFadeTo(next, fade === undefined ? 0.12 : fade, false);
+    actor.current = name;
+  }
+
+  function oneShot(actor, name, seconds) {
+    if (!actor || actor.lock > 0) return;
+    play(actor, name, 0.05);
+    actor.lock = seconds;
+  }
+
+  /** Pool aktor per jenis unit. */
+  function actorPool(kind) {
+    var pool = actorPools[kind];
+    if (!pool) {
+      pool = actorPools[kind] = { items: [], used: 0 };
+      actorPools[kind] = pool;
+    }
+    return pool;
+  }
+
+  function takeActor(kind, parent) {
+    if (!rigs[kind]) return null;
+    var pool = actorPool(kind);
+    var actor = pool.items[pool.used];
+    if (!actor) {
+      actor = makeActor(kind);
+      if (!actor) return null;
+      pool.items.push(actor);
+      parent.add(actor.root);
+    }
+    pool.used++;
+    actor.root.visible = true;
+    return actor;
   }
 
   /** Salinan model siap pakai, atau null kalau belum/gagal dimuat. */
@@ -297,7 +488,41 @@
     pools.obstacles = makePool(groups.obstacles, function () { return new THREE.Group(); });
     pools.bossParts = makePool(groups.boss, function () { return new THREE.Group(); });
 
+    // --- efek: tiga bentuk dasar, semuanya additive dan tanpa depth-write ---
+    // Cincin untuk gelombang kejut di lantai, bilah untuk kilatan moncong dan
+    // percikan, bola untuk ledakan. Tiga geometri yang dipakai ulang jauh
+    // lebih murah daripada sistem partikel, dan pada kecepatan permainan ini
+    // mata tidak bisa membedakannya.
+    pools.rings = makePool(groups.fx, function () {
+      return new THREE.Mesh(
+        new THREE.RingGeometry(0.72, 1, 24),
+        new THREE.MeshBasicMaterial({
+          color: 0xffffff, transparent: true, depthWrite: false,
+          blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        })
+      );
+    });
+    pools.flashes = makePool(groups.fx, function () {
+      return new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({
+          color: 0xffffff, transparent: true, depthWrite: false,
+          blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        })
+      );
+    });
+    pools.blobs = makePool(groups.fx, function () {
+      return new THREE.Mesh(
+        new THREE.SphereGeometry(1, 10, 8),
+        new THREE.MeshBasicMaterial({
+          color: 0xffffff, transparent: true, depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        })
+      );
+    });
+
     loadModels(function (n) { api.modelsLoaded = n; });
+    loadRigs(function (n) { api.rigsLoaded = n; });
 
     api.ready = true;
     return true;
@@ -357,6 +582,171 @@
   }
 
   // ---------------------------------------------------------------------------
+  // MAYAT
+  // ---------------------------------------------------------------------------
+  // Musuh yang mati tidak boleh sekadar lenyap: klip 'die' adalah satu-satunya
+  // umpan balik yang membuktikan tembakan mengenai sasaran. Mayat hidup di
+  // luar pool per-frame karena ia harus bertahan setelah entitasnya tidak ada
+  // lagi di simulasi — jumlahnya dibatasi keras supaya gelombang besar tidak
+  // menumpuk skeleton tanpa batas.
+  var corpseStore = {};
+
+  function countCorpses() {
+    var n = 0;
+    for (var kind in corpseStore) {
+      for (var i = 0; i < corpseStore[kind].length; i++) {
+        if (corpseStore[kind][i].life > 0) n++;
+      }
+    }
+    return n;
+  }
+
+  function spawnCorpse(kind, x, z) {
+    if (!rigs[kind] || countCorpses() >= SKIN.corpses) return;
+    var list = corpseStore[kind] || (corpseStore[kind] = []);
+    var slot = null;
+    for (var i = 0; i < list.length; i++) if (list[i].life <= 0) { slot = list[i]; break; }
+    if (!slot) {
+      if (list.length >= 3) return;
+      var actor = makeActor(kind);
+      if (!actor) return;
+      groups.enemies.add(actor.root);
+      slot = { actor: actor, life: 0 };
+      list.push(slot);
+    }
+    slot.life = 1.5;
+    var root = slot.actor.root;
+    root.visible = true;
+    root.position.set(x, 0, -z);
+    root.rotation.y = Math.PI;
+    slot.actor.current = '';
+    slot.actor.lock = 0;
+    for (var name in slot.actor.actions) slot.actor.actions[name].stop();
+    slot.actor.actions.die.reset().play();
+    slot.actor.current = 'die';
+  }
+
+  function updateCorpses(dt) {
+    for (var kind in corpseStore) {
+      var list = corpseStore[kind];
+      for (var i = 0; i < list.length; i++) {
+        var slot = list[i];
+        if (slot.life <= 0) continue;
+        slot.life -= dt;
+        slot.actor.mixer.update(dt);
+        // Memudar di setengah detik terakhir, bukan hilang mendadak.
+        var alpha = Math.min(1, Math.max(0, slot.life / 0.5));
+        slot.actor.root.traverse(function (node) {
+          if (!node.isSkinnedMesh) return;
+          node.material.transparent = alpha < 1;
+          node.material.opacity = alpha;
+        });
+        if (slot.life <= 0) slot.actor.root.visible = false;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // EFEK
+  // ---------------------------------------------------------------------------
+  /** Cincin gelombang kejut, rebah di lantai. */
+  function ring(x, z, radius, color, alpha, y) {
+    var m = pools.rings.take();
+    m.rotation.set(-Math.PI / 2, 0, 0);
+    m.position.set(x, y === undefined ? 0.06 : y, -z);
+    m.scale.setScalar(Math.max(0.01, radius));
+    m.material.color.setHex(color);
+    m.material.opacity = Math.max(0, alpha);
+  }
+
+  /** Bilah menghadap kamera — kilatan, percikan, kilau moncong. */
+  function flash(x, y, z, size, color, alpha, spin) {
+    var m = pools.flashes.take();
+    m.position.set(x, y, -z);
+    m.quaternion.copy(camera.quaternion);
+    if (spin) m.rotateZ(spin);
+    m.scale.setScalar(Math.max(0.01, size));
+    m.material.color.setHex(color);
+    m.material.opacity = Math.max(0, alpha);
+  }
+
+  function blob(x, y, z, radius, color, alpha) {
+    var m = pools.blobs.take();
+    m.position.set(x, y, -z);
+    m.scale.setScalar(Math.max(0.01, radius));
+    m.material.color.setHex(color);
+    m.material.opacity = Math.max(0, alpha);
+  }
+
+  function hexOf(value, fallback) {
+    if (typeof value === 'string' && value.charAt(0) === '#') {
+      return parseInt(value.slice(1), 16);
+    }
+    return fallback;
+  }
+
+  /**
+   * Menggambar seluruh `S.fx`.
+   *
+   * Daftar efek itu sudah ada sejak build 2D dan selama ini diabaikan renderer
+   * 3D — ledakan barrel, percikan pantulan, dan kematian musuh terjadi tanpa
+   * satu piksel pun yang menandainya. Simulasi tetap pemilik waktunya; di sini
+   * hanya dibaca `t/max` sebagai progres 1 → 0.
+   */
+  function drawEffects(S) {
+    var fx = S.fx || [];
+    for (var i = 0; i < fx.length; i++) {
+      var f = fx[i];
+      var life = f.max > 0 ? Math.max(0, f.t / f.max) : 0;   // 1 = baru
+      var age = 1 - life;
+      var tint = hexOf(f.color, 0xffd54f);
+      if (f.kind === 'boom') {
+        ring(f.x, f.z, 0.8 + age * 3.4, 0xff8a2b, life * 0.9);
+        blob(f.x, 0.6 + age * 0.5, f.z, 0.5 + age * 1.6, 0xffc93c, life * life * 0.8);
+        flash(f.x, 0.9, f.z, 2.2 + age * 2.0, 0xfff3c4, life * life);
+      } else if (f.kind === 'kill') {
+        // Pecahan: empat bilah yang terlempar keluar. Kematian harus punya
+        // bentuk, bukan sekadar unit yang hilang.
+        ring(f.x, f.z, 0.3 + age * 1.3, tint, life * 0.75);
+        for (var k = 0; k < 4; k++) {
+          var ang = k * 1.5708 + f.x;
+          flash(
+            f.x + Math.cos(ang) * age * 0.9, 0.5 + age * 0.7,
+            f.z + Math.sin(ang) * age * 0.9,
+            0.42 * life, tint, life, ang
+          );
+        }
+      } else if (f.kind === 'bounce') {
+        ring(f.x, f.z, 0.25 + age * 1.1, PAL.chain, life * 0.9, 0.5);
+        flash(f.x, 0.5, f.z, 1.1 * life, 0x9bf6ff, life);
+      } else {
+        ring(f.x, f.z, 0.4 + age * 1.0, PAL.grid, life * 0.5);
+      }
+    }
+  }
+
+  /**
+   * Jejak peluru chain.
+   *
+   * Peluru itu satu bola kecil yang bergerak 25 unit/detik: pada 60 fps ia
+   * melompat hampir setengah meter per frame, dan mata kehilangan jejaknya
+   * tepat saat pemain harus memutuskan belokan. Jejak sepuluh titik membuat
+   * arahnya terbaca tanpa menambah satu pun objek dinamis ke simulasi.
+   */
+  function drawTrail(S) {
+    var live = null;
+    var cb = S.bullets || [];
+    for (var i = 0; i < cb.length; i++) if (cb[i].alive) { live = cb[i]; break; }
+    if (!live) { trail.length = 0; return; }
+    trail.push({ x: live.x, z: live.z });
+    if (trail.length > 12) trail.shift();
+    for (var t = 0; t < trail.length; t++) {
+      var k = t / trail.length;
+      blob(trail[t].x, 0.5, trail[t].z, 0.1 + 0.26 * k, PAL.chain, 0.08 + 0.42 * k);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // SYNC — read simulation state, move meshes. Read-only on S.
   // ---------------------------------------------------------------------------
   /**
@@ -374,6 +764,17 @@
     // dan var di JavaScript tidak punya scope blok.
     var lerpA = (alpha === undefined || alpha < 0 || alpha > 1) ? 1 : alpha;
 
+    // Delta animasi diambil dari jam dinding lalu dikalikan timeScale simulasi:
+    // saat slow-mo menyala, karakter ikut melambat. Kalau tidak, peluru
+    // merayap sementara kaki tetap berlari dan ilusinya pecah seketika.
+    var now = (global.performance && global.performance.now) ? global.performance.now() : Date.now();
+    var raw = lastFrameMs ? (now - lastFrameMs) / 1000 : 0.016;
+    lastFrameMs = now;
+    var dt = Math.min(0.1, Math.max(0, raw)) * (S.timeScale === undefined ? 1 : S.timeScale);
+
+    for (var poolKind in actorPools) actorPools[poolKind].used = 0;
+    pools.rings.begin(); pools.flashes.begin(); pools.blobs.begin();
+
     // Slow-mo pulls the camera in, mirroring the FOV 60->40 spec.
     camera.fov = baseFov * (0.82 + 0.18 * (S.fov === undefined ? 1 : S.fov));
     // Screen shake is cosmetic only: it must never feed back into the sim.
@@ -389,30 +790,100 @@
     pools.troops.begin();
     var shown = Math.min(S.troops || 0, 48);
     var perRow = 6, sx = lerpFrom(S.prevSquadX, S.squadX || 0, lerpA);
-    var spread = 0.62;
+    // Jarak formasi ikut membesar bersama CHAR_SCALE, kalau tidak bahu
+    // prajurit saling menembus dan barisan jadi bubur.
+    var spread = 0.42 * CHAR_SCALE;
     var sz = (CFG.arena && CFG.arena.playerSpawn ? CFG.arena.playerSpawn.z : 2);
+    // Tembakan baru terdeteksi dari posisi, bukan dari jumlah peluru: peluru
+    // bisa lahir dan mati di frame yang sama, dan menghitung panjang array
+    // akan melewatkan tembakan justru saat layar paling ramai.
+    var muzzleZ = sz + ((CFG.arena.muzzleOffset && CFG.arena.muzzleOffset.z) || 0);
+    var fresh = false;
+    var ab0 = S.autoBullets || [];
+    for (var fb = 0; fb < ab0.length; fb++) {
+      if (Math.abs(ab0[fb].z - muzzleZ) < 0.9) { fresh = true; break; }
+    }
+    var moving = Math.abs((S.squadX || 0) - (S.prevSquadX === undefined ? S.squadX || 0 : S.prevSquadX)) > 0.004;
+    var muzzleWorld = new THREE.Vector3();
     for (var i = 0; i < shown; i++) {
       var row = Math.floor(i / perRow), col = i % perRow;
+      var tx = sx + (col - (perRow - 1) / 2) * spread;
+      var tz = sz - row * 0.4 * CHAR_SCALE;
+      // Baris depan mendapat skeleton; barisan belakang tetap mesh statis.
+      // Itu barisan yang paling dekat kamera dan satu-satunya yang siluetnya
+      // benar-benar terbaca.
+      var actor = (i < SKIN.troops) ? takeActor('trooper', groups.troops) : null;
+      if (actor) {
+        actor.root.position.set(tx, 0, -tz);
+        actor.root.rotation.y = 0;              // menghadap -Z, arah musuh
+        if (actor.lock <= 0) play(actor, moving ? 'run' : 'idle');
+        if (fresh && i < 3) {
+          oneShot(actor, 'shoot', 0.22);
+          if (actor.muzzle) {
+            actor.muzzle.getWorldPosition(muzzleWorld);
+            // Kilatan digambar di koordinat scene langsung: soketnya sudah
+            // ikut berayun bersama lengan, jadi memakai posisi karakter
+            // akan menempelkan api di udara kosong.
+            var fm = pools.flashes.take();
+            fm.position.copy(muzzleWorld);
+            fm.quaternion.copy(camera.quaternion);
+            fm.scale.setScalar(0.85);
+            fm.material.color.setHex(0xfff3c4);
+            fm.material.opacity = 0.95;
+            blob(muzzleWorld.x, muzzleWorld.y, -muzzleWorld.z, 0.16, PAL.bullet, 0.9);
+          }
+        }
+        continue;
+      }
       var t = pools.troops.take();
       ensureVisual(t, 'soldier', function () { return makeTroop(accentColor); });
-      t.position.set(sx + (col - (perRow - 1) / 2) * spread, 0, -(sz - row * 0.6));
+      t.scale.setScalar(CHAR_SCALE);
+      t.position.set(tx, 0, -tz);
     }
     pools.troops.end();
 
     // --- enemies ---
+    // LOD: yang paling dekat garis pertahanan (z terkecil) mendapat skeleton.
+    // Mereka yang terbesar di layar dan yang sedang diputuskan nasibnya oleh
+    // pemain; musuh di ujung lorong tingginya 20 piksel dan animasinya tidak
+    // akan pernah terbaca.
     pools.enemies.begin();
     var list = S.enemies || [];
+    var order = [];
+    for (var oi = 0; oi < list.length; oi++) order.push(oi);
+    order.sort(function (p, q) { return (list[p].z || 0) - (list[q].z || 0); });
+    var skinned = {};
+    for (var si = 0; si < Math.min(SKIN.enemies, order.length); si++) skinned[order[si]] = true;
+
+    var nextAlive = {};
     for (var e = 0; e < list.length; e++) {
       var en = list[e];
-      var m = pools.enemies.take();
       var kind = en.type || 'grunt';
+      var ex = lerpFrom(en.rx, en.x, lerpA), ez = lerpFrom(en.rz, en.z, lerpA);
+      if (en.id !== undefined) nextAlive[en.id] = { kind: kind, x: en.x, z: en.z };
+
+      var actor = skinned[e] ? takeActor(kind, groups.enemies) : null;
+      if (actor) {
+        actor.root.position.set(ex, 0, -ez);
+        actor.root.rotation.y = Math.PI;        // menatap pemain
+        if (en.hit > 0) oneShot(actor, 'hit', 0.3);
+        else if (actor.lock <= 0) play(actor, (en.speed || 1) > 0 ? 'run' : 'idle');
+        // Kedip merah saat kena: material sudah per-aktor, jadi aman.
+        actor.root.traverse(function (node) {
+          if (node.isSkinnedMesh && node.material.emissive) {
+            node.material.emissive.setHex(en.hit > 0 ? 0x993333 : 0x000000);
+          }
+        });
+        continue;
+      }
+
+      var m = pools.enemies.take();
       var vis = ensureVisual(m, kind, function () {
         return new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
           new THREE.MeshLambertMaterial({ color: en.color || '#ff4d3d' }));
       });
-      var ex = lerpFrom(en.rx, en.x, lerpA), ez = lerpFrom(en.rz, en.z, lerpA);
       if (m.userData.isModel) {
-        m.scale.setScalar(1);
+        m.scale.setScalar(CHAR_SCALE);
         m.position.set(ex, 0, -ez);
         m.rotation.y = Math.PI;              // model menghadap -Z, musuh menatap pemain
       } else {
@@ -423,6 +894,14 @@
       setEmissive(m, en.hit > 0 ? 0x884444 : 0x000000);
     }
     pools.enemies.end();
+
+    // Musuh yang hilang antar frame = musuh yang mati. Simulasi tidak
+    // mengirim event kematian ke renderer, tapi identitas yang lenyap adalah
+    // sinyal yang sama persis — dan tidak menambah kopling ke aturan main.
+    for (var oldId in aliveIds) {
+      if (!nextAlive[oldId]) spawnCorpse(aliveIds[oldId].kind, aliveIds[oldId].x, aliveIds[oldId].z);
+    }
+    aliveIds = nextAlive;
 
     // --- bullets: auto fire + the single chain bullet ---
     pools.bullets.begin();
@@ -493,15 +972,39 @@
       for (var p2 = 0; p2 < S.boss.parts.length; p2++) {
         var part = S.boss.parts[p2];
         if (!part.alive) continue;
+        var pr = part.r || 1.8;
+        var bx = lerpFrom(part.rx, part.x, lerpA), bz = lerpFrom(part.rz, part.z, lerpA);
+        // Boss selalu ber-skeleton: cuma ada satu sampai tiga bagian, dan ia
+        // satu-satunya hal di layar yang pemain tatap lama-lama.
+        var bossActor = takeActor('boss', groups.boss);
+        if (bossActor) {
+          bossActor.root.position.set(bx, 0, -bz);
+          bossActor.root.rotation.y = Math.PI;
+          bossActor.root.scale.setScalar(CHAR_SCALE * pr / 1.8);
+          if (part.hit > 0) oneShot(bossActor, 'hit', 0.3);
+          else if (bossActor.lock <= 0) play(bossActor, 'idle');
+          bossActor.root.traverse(function (node) {
+            if (node.isSkinnedMesh && node.material.emissive) {
+              node.material.emissive.setHex(part.hit > 0 ? 0xaa2222 : 0x220000);
+            }
+          });
+          // Inti dada berdenyut: penanda titik lemah yang terbaca dari jauh.
+          var core = bossActor.root.getObjectByName('core');
+          if (core) {
+            var cw = new THREE.Vector3();
+            core.getWorldPosition(cw);
+            var pulse = 0.5 + 0.2 * Math.sin((S.elapsed || 0) * 6);
+            blob(cw.x, cw.y, -cw.z, pulse, 0xffd54f, 0.5);
+          }
+          continue;
+        }
         var pm = pools.bossParts.take();
         var pvis = ensureVisual(pm, 'boss', function () {
           return new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10),
             new THREE.MeshLambertMaterial({ color: 0xff4d3d }));
         });
-        var pr = part.r || 1.8;
-        var bx = lerpFrom(part.rx, part.x, lerpA), bz = lerpFrom(part.rz, part.z, lerpA);
         if (pm.userData.isModel) {
-          pm.scale.setScalar(pr / 1.8);
+          pm.scale.setScalar(CHAR_SCALE * pr / 1.8);
           pm.position.set(bx, 0, -bz);
           pm.rotation.y = Math.PI;
         } else {
@@ -513,13 +1016,55 @@
     }
     pools.bossParts.end();
 
+    // --- efek dan animasi ---
+    drawTrail(S);
+    drawEffects(S);
+    pools.rings.end(); pools.flashes.end(); pools.blobs.end();
+
+    // Mixer hanya dijalankan untuk aktor yang dipakai frame ini; sisa pool
+    // disembunyikan dan dibekukan supaya skeleton yang tidak terlihat tidak
+    // ikut dibayar.
+    for (var ak in actorPools) {
+      var pool = actorPools[ak];
+      for (var ai = 0; ai < pool.items.length; ai++) {
+        var a2 = pool.items[ai];
+        if (ai < pool.used) {
+          if (a2.lock > 0) a2.lock = Math.max(0, a2.lock - dt);
+          a2.mixer.update(dt);
+        } else {
+          a2.root.visible = false;
+        }
+      }
+    }
+    updateCorpses(dt);
+
     renderer.render(scene, camera);
   }
 
   var api = {
     ready: false,
     init: init, sync: sync, resize: resize, setAccent: setAccent,
-    makeCamera: makeCamera, CAM: CAM, ARENA: ARENA, modelsLoaded: 0,
+    makeCamera: makeCamera, CAM: CAM, ARENA: ARENA, modelsLoaded: 0, rigsLoaded: 0,
+    SKIN: SKIN,
+    // Dipakai tools/char_test.js untuk memeriksa aktor hidup tanpa menebak
+    // dari piksel: berapa yang ber-skeleton, berapa mayat, klip apa yang jalan.
+    _actors: function () {
+      var out = [];
+      for (var kind in actorPools) {
+        var pool = actorPools[kind];
+        for (var i = 0; i < pool.used; i++) {
+          out.push({ kind: kind, clip: pool.items[i].current, y: pool.items[i].root.position.y });
+        }
+      }
+      return out;
+    },
+    _corpses: countCorpses,
+    // Berapa keping efek yang benar-benar terpakai pada frame terakhir.
+    _fx: function () {
+      return { rings: pools.rings ? pools.rings.used : 0,
+               flashes: pools.flashes ? pools.flashes.used : 0,
+               blobs: pools.blobs ? pools.blobs.used : 0 };
+    },
     _setThree: function (t) { THREE = t; },   // for the headless geometry test
     _scene: function () { return scene; },    // ditto
   };

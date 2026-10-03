@@ -1,6 +1,6 @@
 {
   "$schema": "./arena_config.schema.json",
-  "version": "0.3.0-lastwar-atm",
+  "version": "1.0.0-characters",
   "notes": "Single source of truth untuk arena CHAIN RIDER. Dipakai oleh tools/blueprint_gen.py, prototype web, dan importer ScriptableObject di Unity. Koordinat dunia: X = -10..+10 (lebar 20), Z = 0..40 (panjang 40), Y = up. Origin (0,0,0) = tengah dinding bawah.",
   "arena": {
     "width": 20.0,

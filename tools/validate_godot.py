@@ -29,6 +29,10 @@ CONFIG = ROOT / "Config" / "arena_config.json"
 ACCESSOR = re.compile(r'GameConfig\.(num|integer|flag|text|dict|list|color)\("([^"]*)"\)')
 CLASS_NAME = re.compile(r"^class_name\s+(\w+)", re.M)
 MEMBER = re.compile(r"^(?:const|var|static func|func|enum)\s+(\w+)", re.M)
+# Kelas dalam (`class Actor:` menjorok di dalam file) adalah anggota yang sah
+# dan dipakai sebagai tipe: CharacterPool.Actor. Tanpa pola ini validator
+# menyebut tipe yang benar-benar ada sebagai tidak terdefinisi.
+INNER_CLASS = re.compile(r"^\s*class\s+(\w+)\s*:", re.M)
 ENUM_BODY = re.compile(r"^enum\s+(\w+)\s*\{([^}]*)\}", re.M)
 EXT_PATH = re.compile(r'path="res://([^"]+)"')
 # load()/preload() targets are resolved at runtime, so a moved shader or scene
@@ -87,6 +91,7 @@ def check_symbols(problems: list[str]) -> int:
         if not found:
             continue
         members = set(MEMBER.findall(text))
+        members.update(INNER_CLASS.findall(text))
         for enum_name, body in ENUM_BODY.findall(text):
             members.add(enum_name)
             members.update(v.strip() for v in body.split(",") if v.strip())
@@ -108,6 +113,17 @@ def check_runtime_resources(problems: list[str]) -> int:
         text = gd.read_text()
         for rel in set(RES_LOAD.findall(text)) | set(RES_CONST.findall(text)):
             checked += 1
+            # Template seperti "res://assets/models/rigged/%s.glb" diisi saat
+            # runtime. Yang bisa diperiksa di sini adalah foldernya ada dan
+            # berisi setidaknya satu berkas dengan akhiran yang sama.
+            if "%" in rel:
+                folder = (GODOT / rel).parent
+                suffix = pathlib.Path(rel).suffix
+                if not folder.is_dir() or not any(folder.glob(f"*{suffix}")):
+                    problems.append(
+                        f"{gd.relative_to(ROOT)}: 'res://{rel}' tidak punya berkas yang cocok"
+                    )
+                continue
             if not (GODOT / rel).exists():
                 problems.append(f"{gd.relative_to(ROOT)}: 'res://{rel}' not found")
     return checked

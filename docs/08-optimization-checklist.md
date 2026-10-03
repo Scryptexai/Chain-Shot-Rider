@@ -21,6 +21,25 @@
 
 > Kalau satu blok melewati budget, blok lain **tidak** boleh "meminjam". Yang dipotong adalah fitur, bukan frame rate.
 
+### Anggaran karakter ber-tulang (v1.0)
+
+Skinning adalah biaya baru yang tidak ada di v0.5, dan biayanya per-unit, bukan
+per-draw-call: setiap unit ber-skeleton berarti satu set pose yang dihitung
+ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-characters.md)):
+
+| Hal | Batas | Alasan |
+|---|---|---|
+| Prajurit ber-tulang | 10 barisan depan | sisanya tertutup punggung teman sendiri |
+| Musuh ber-tulang | 16 terdekat (urut `z`) | musuh di ujung lorong tingginya dua piksel |
+| Mayat | 8 sekaligus, umur 1,5 s | efek, bukan kuburan |
+| Bos | 1 (selalu) | satu-satunya yang ditatap lama |
+| **Total skeleton aktif** | **≈ 27** | sisanya MultiMesh / kolam mesh statis |
+
+- [ ] Aktor yang tidak dipinjam frame ini **disembunyikan DAN mixer-nya
+      dihentikan** — skeleton tak terlihat tidak boleh ikut dibayar.
+- [ ] Mesh ber-rig memakai `frustumCulled = false` (bounding box-nya masih bind
+      pose), jadi culling-nya diurus oleh anggaran LOD di atas, bukan oleh GPU.
+
 ---
 
 ## 8.2 Pooling

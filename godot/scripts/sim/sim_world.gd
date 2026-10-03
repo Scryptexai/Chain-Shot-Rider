@@ -805,6 +805,10 @@ func _damage_enemy(index: int, amount: float, source: String = "auto") -> void:
 				"x": enemy_x[index],
 				"z": enemy_z[index],
 				"score": _enemy_score(enemy_type[index]),
+				# Jenis unit yang mati. Lapisan tampilan memakainya untuk
+				# merobohkan tubuh yang benar di tempat itu; tanpa ini mayat
+				# harus ditebak dan seorang brute bisa roboh sebagai grunt.
+				"enemy": enemy_type[index],
 				# Which weapon landed it. Tests use this to attribute damage
 				# throughput; the view uses it to pick the hit effect.
 				"source": source,

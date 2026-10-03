@@ -155,7 +155,24 @@ mengosongkannya.
 
 ### Pipeline aset 3D
 
-Model tidak diunduh dan tidak digambar artist — semuanya **dihasilkan kode**:
+Model tidak diunduh dan tidak digambar artist — semuanya **dihasilkan kode**.
+Ada dua lapis, dan keduanya dipakai bersamaan:
+
+**Lapis dekat (v1.0): delapan karakter ber-tulang.** Prajurit, enam jenis
+musuh, dan bos dengan skeleton 16 tulang, lima klip animasi (`idle`, `run`,
+`shoot`, `hit`, `die`), senjata di tangan, dan soket moncong untuk kilatan
+tembakan. Ditulis tanpa dependensi apa pun:
+
+```bash
+cd tools && python3 build_rigged.py       # -> assets/models/rigged/*.glb
+```
+
+Detail lengkap — skeleton, klip, anggaran LOD, dan jebakan yang ditemui di
+three.js r128 maupun importer Godot — ada di
+[`docs/16-characters.md`](docs/16-characters.md).
+
+**Lapis jauh (sejak v0.5): model statis.** Unit yang jaraknya puluhan meter
+tingginya cuma beberapa piksel, jadi mereka tetap memakai mesh statis:
 
 ```bash
 python3 -m venv ~/.cache/venv
@@ -183,7 +200,8 @@ engine yang diekspor.
 | Kanvas | `<canvas id="webgl-canvas">` dengan `THREE.WebGLRenderer` |
 | Kamera | `PerspectiveCamera` FOV 41, tinggi 51, miring 33,7 derajat ke arena 20x40 |
 | Cahaya | `HemisphereLight` + matahari `DirectionalLight` + fill — tanpa shadow map demi HP kentang |
-| Model | **GLB sungguhan** di `assets/models/` (11 berkas, 549 KB), dimuat `THREE.GLTFLoader` |
+| Model | **GLB sungguhan**: 11 statis di `assets/models/` + 8 karakter ber-tulang di `assets/models/rigged/`, dimuat `THREE.GLTFLoader` |
+| Karakter | 10 prajurit + 16 musuh terdekat + bos digambar sebagai SkinnedMesh ber-animasi; sisanya mesh statis (lihat docs 16) |
 | Pembuat model | `tools/build_assets.py` — Python + `trimesh`, prosedural, **tanpa Blender dan tanpa Godot** |
 | Fallback | kalau GLB belum selesai dimuat, primitif Three.js dipakai lebih dulu supaya tidak ada layar kosong |
 | Build step | tidak ada |
@@ -273,6 +291,22 @@ node tools/render3d_test.js
 
 Yang **tidak** bisa dibuktikan tanpa GPU: warna, cahaya, dan rasa. Itu hanya
 bisa dinilai mata di browser sungguhan.
+
+Karakter ber-tulang punya dua tes sendiri, dan keduanya berjalan di **Chromium
+sungguhan** (lewat `bash tools/setup_chromium.sh`), karena animasi skinning
+adalah hal yang gagal diam-diam: material tanpa flag `skinning` membekukan
+karakter di bind pose tanpa satu pun error, dan SkinnedMesh yang di-clone
+keliru membuat seluruh pasukan bergerak serempak seperti satu tubuh.
+
+```bash
+node tools/rig_test.js      # 8 GLB: tulang, klip, soket, vertex yang bergerak
+node tools/char_test.js     # karakter hidup di dalam game yang sedang dimainkan
+```
+
+`char_test.js` memainkan stage sungguhan lalu memeriksa aktor ber-skeleton
+muncul, anggaran LOD dihormati, klip berbeda sesuai keadaan, tiap aktor punya
+fase animasi sendiri, kilatan moncong tergambar, dan mayat roboh lalu
+dibersihkan. Lihat [`docs/16-characters.md`](docs/16-characters.md).
 
 Uji itu menelusuri peta 15 stage → main → menang → draft kartu → kartu tersimpan
 → stage berikutnya terbuka, lalu membuktikan kartunya **benar-benar mengubah
