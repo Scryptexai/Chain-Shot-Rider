@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, cull_disabled, depth_draw_opaque;
+render_mode unshaded, cull_disabled, depth_draw_opaque, fog_disabled;
 
 // Neon floor grid for the arena, per docs/02-visual-style-guide.md.
 //
@@ -11,6 +11,13 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 //
 // Unshaded on purpose. The floor is a backdrop; letting the directional light
 // touch it flattens the contrast the neon elements rely on.
+//
+// Kabut engine juga dimatikan khusus untuk lantai. Kabut MENERANGKAN apa pun
+// yang jauh, jadi ujung lantai justru menjadi pita terang yang berhenti
+// mendadak di depan langit gelap — persis garis potong yang ingin
+// disembunyikan. Lantai memudar lewat horizon_fade di bawah, ke warna latar
+// yang sama persis; kabut tetap hidup untuk musuh dan rintangan, di mana
+// efeknya memang membantu membaca jarak.
 
 uniform vec3 bg_top : source_color = vec3(0.04, 0.06, 0.19);
 uniform vec3 bg_bottom : source_color = vec3(0.01, 0.02, 0.06);
@@ -21,6 +28,10 @@ uniform float grid_alpha = 0.18;
 uniform float arena_length = 40.0;
 uniform float defense_line_z = 5.0;
 uniform vec3 defense_color : source_color = vec3(0.0, 0.9, 1.0);
+// Panjang lebur di balik gerbang spawn. Lantai diteruskan jauh melewati arena
+// supaya ujungnya tidak terbaca sebagai garis potong di sepertiga atas layar;
+// bagian itu harus luruh ke warna latar, bukan berhenti mendadak.
+uniform float horizon_fade = 90.0;
 
 varying vec3 world_pos;
 
@@ -55,6 +66,9 @@ void fragment() {
 	// track of, so it is drawn brighter than any grid line and never fades.
 	float defense = grid_line(world_pos.z + defense_line_z, 1000.0, 0.06);
 	color = mix(color, defense_color, defense * 0.85);
+
+	float beyond = clamp((-world_pos.z - arena_length) / max(horizon_fade, 0.001), 0.0, 1.0);
+	color = mix(color, bg_bottom, smoothstep(0.0, 1.0, beyond));
 
 	ALBEDO = color;
 }

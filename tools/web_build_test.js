@@ -150,20 +150,46 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.mouse.click(box.x + box.w * rx, box.y + box.h * ry);
     await sleep(1800);
   };
-  await tap(0.5, 0.915);               // MAIN -> peta stage
-  await page.screenshot({ path: 'screenshots/qa-godot-web-map.png' });
-  await tap(0.22, 0.46);               // kartu stage pertama -> run
-  await sleep(2500);
+  await tap(0.5, 0.915);               // MAIN -> run stage 01
+  await sleep(2200);
+  await page.screenshot({ path: 'screenshots/qa-godot-web-run.png' });
 
-  // Menggeser squad beberapa detik, sambil menekan tombol chain shot.
-  for (let i = 0; i < 8; i++) {
-    await page.mouse.move(box.x + box.w * (0.5 + Math.sin(i) * 0.3), box.y + box.h * 0.6);
-    await sleep(350);
+  // Cuplikan sempit setinggi barisan squad: dipakai untuk membuktikan squad
+  // benar-benar bergeser, bukan sekadar tergambar diam.
+  const squadStrip = () => page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    const tmp = document.createElement('canvas');
+    tmp.width = 64; tmp.height = 8;
+    const ctx = tmp.getContext('2d');
+    ctx.drawImage(c, 0, c.height * 0.46, c.width, c.height * 0.16, 0, 0, 64, 8);
+    return Array.from(ctx.getImageData(0, 0, 64, 8).data);
+  });
+  const before = await squadStrip();
+
+  // Geser sebagai SENTUHAN, bukan gerak kursor: project memakai
+  // emulate_touch_from_mouse, jadi tanpa tombol ditekan tidak ada drag sama
+  // sekali — squad diam dan tesnya berbohong.
+  await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.62);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(box.x + box.w * (0.5 - 0.03 * i), box.y + box.h * 0.62);
+    await sleep(90);
   }
-  await page.mouse.click(box.x + box.w * 0.82, box.y + box.h * 0.86);   // CHAIN
-  await sleep(2500);
+  await page.mouse.up();
+  await sleep(600);
+
+  const after = await squadStrip();
+  let moved = 0;
+  for (let i = 0; i < before.length; i += 4) {
+    if (Math.abs(before[i] - after[i]) + Math.abs(before[i + 2] - after[i + 2]) > 24) moved++;
+  }
+  check(moved > 12, `geser memindahkan squad — ${moved} piksel berubah di barisnya`);
+
+  // Chain shot: tombol di kanan bawah, lalu peluru harus terlihat terbang.
+  await page.mouse.click(box.x + box.w * 0.85, box.y + box.h * 0.9);
+  await sleep(900);
   await page.screenshot({ path: 'screenshots/qa-godot-web.png' });
-  console.log('  ->     screenshots/qa-godot-web.png (gameplay), qa-godot-web-map.png');
+  console.log('  ->     screenshots/qa-godot-web.png (gameplay), qa-godot-web-run.png');
 
   const playing = await page.evaluate(() => {
     const c = document.querySelector('canvas');
@@ -176,7 +202,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     for (let i = 0; i < d.length; i += 4) seen.add(`${d[i] >> 4},${d[i + 1] >> 4},${d[i + 2] >> 4}`);
     return seen.size;
   });
-  check(playing > 6, `layar run tergambar setelah sentuhan — ${playing} warna`);
+  check(playing > 6, `layar run tergambar setelah sentuhan \u2014 ${playing} warna`);
 
   await browser.close();
   console.log('='.repeat(72));

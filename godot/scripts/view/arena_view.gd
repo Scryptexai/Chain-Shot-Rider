@@ -14,11 +14,11 @@ extends Node3D
 ## arena, the crowd and the HUD always agree on what colour the world is.
 
 ## Panjang tambahan lantai di depan garis bertahan (lihat APRON di render3d.js).
-const APRON := 14.0
+const APRON := 34.0
 
 ## Lantai juga diteruskan melewati gerbang spawn supaya ujungnya larut dalam
 ## kabut, bukan berhenti sebagai garis lurus di sepertiga atas layar.
-const APRON_FAR := 50.0
+const APRON_FAR := 120.0
 
 const MAX_TROOPS_DRAWN := 128
 ## Impact shells kept alive at once, and how long one lasts. Both are budget
@@ -168,6 +168,7 @@ func _build_floor() -> void:
 	material.set_shader_parameter("arena_length", length)
 	material.set_shader_parameter("defense_line_z", GameConfig.num("arena.defenseLineZ"))
 	material.set_shader_parameter("defense_color", _pal["primary"])
+	material.set_shader_parameter("horizon_fade", APRON_FAR * 0.75)
 
 	_floor = MeshInstance3D.new()
 	_floor.mesh = plane

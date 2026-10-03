@@ -37,7 +37,7 @@ func _ready() -> void:
 	_stage = SaveGame.unlocked_stage
 	_place_camera()
 	# Layar web bisa berubah ukuran kapan saja (rotasi, bilah alamat ponsel).
-	get_viewport().size_changed.connect(_update_fov_scale)
+	get_viewport().size_changed.connect(_place_camera)
 	# Everything visual is themed from the variant this stage runs in, so the
 	# palette has to be resolved before anything is built.
 	var variant := _variant_for_stage(_stage)
@@ -343,9 +343,51 @@ func _place_camera() -> void:
 	_camera.look_at_from_position(origin, Vector3(0.0, 0.0, -(defense_z + look_ahead)), Vector3.UP)
 	_update_fov_scale()
 	_camera.fov = GameConfig.num("slowMo.fovNormal") * _fov_scale
+	# Lalu kamera mundur sepanjang sumbu pandangnya sampai arena benar-benar
+	# muat. Angka camera.distance/heightOffset di config membingkai arena yang
+	# lebih sempit daripada 20 unit: squad yang digeser ke tepi kiri keluar
+	# dari layar, dan peluru yang memantul di sana tidak terlihat sama sekali.
+	var back := _camera.global_transform.basis.z.normalized()   # +z lokal = mundur
+	_camera.position = origin + back * _fit_pullback()
 	# Remembered so shake can be an offset from it rather than an integration
 	# that slowly walks the camera away from its framing.
 	_camera_home = _camera.position
+
+
+## Berapa jauh kamera harus mundur supaya seluruh lebar arena terlihat.
+##
+## Mundur sepanjang sumbu pandang, bukan menaikkan FOV: FOV yang lebih lebar
+## melengkungkan perspektif dan membuat lorong terasa pendek, sedangkan mundur
+## hanya mengecilkan semuanya secara merata.
+##
+## Syaratnya dipisah dengan sengaja. Tepi kiri-kanan arena WAJIB terlihat di
+## seluruh panjang lorong — di sanalah peluru memantul, dan pantulan yang tidak
+## terlihat sama saja dengan mekanik yang tidak ada. Tapi secara vertikal yang
+## wajib hanyalah ujung jauh (gerbang spawn: pemain harus melihat musuh datang);
+## tepi dekat memang sengaja terpotong layar, itu apron lantai.
+func _fit_pullback() -> float:
+	var half_w := GameConfig.num("arena.width") * 0.5 + 1.0
+	var far_z := GameConfig.num("arena.height")
+	var size := get_viewport().get_visible_rect().size
+	var aspect := size.x / maxf(size.y, 1.0)
+	var tan_y := tan(deg_to_rad(_camera.fov) * 0.5) * 0.92
+	var tan_x := tan_y * aspect
+	if tan_x <= 0.0 or tan_y <= 0.0:
+		return 0.0
+	var basis := _camera.global_transform.basis
+	var forward := -basis.z.normalized()
+	var right := basis.x.normalized()
+	var up := basis.y.normalized()
+	var need := 0.0
+	for sx in [-1.0, 1.0]:
+		for cz in [0.5, far_z]:
+			var corner := Vector3(sx * half_w, 1.0, -cz)
+			var v := corner - _camera.global_position
+			var depth := v.dot(forward)
+			need = maxf(need, absf(v.dot(right)) / tan_x - depth)
+			if cz > 1.0:
+				need = maxf(need, absf(v.dot(up)) / tan_y - depth)
+	return maxf(need, 0.0)
 
 
 ## Bukaan horizontal dikunci, bukan vertikal — persis seperti widthMatchedFov()

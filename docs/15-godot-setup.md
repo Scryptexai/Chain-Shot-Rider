@@ -230,14 +230,28 @@ Ketiganya terlihat dalam hitungan detik begitu ada piksel nyata:
    kesulitan, `UiTheme.diamond()` untuk penanda pasukan, `UiTheme.ring()` untuk
    inti tombol chain shot. Teks yang tersisa memakai kata, bukan simbol —
    `BEST 0`, `KARTU 0`, `x1.24`.
-3. **Lorong melayang di ruang hitam.** Ponsel 9:19.5 jauh lebih jangkung
+3. **Lorong melayang di ruang hitam, dan squad bisa keluar layar.** Ponsel 9:19.5 jauh lebih jangkung
    daripada 9:16 yang dipakai saat menata framing. Godot memakai FOV vertikal,
    jadi layar jangkung memperlihatkan lebih banyak dunia ke atas dan ke bawah:
    lantai berakhir di tengah layar, sisanya hitam. Perbaikannya sama dengan yang
    sudah dipakai prototipe web — bukaan **horizontal** yang dikunci
-   (`_update_fov_scale()`, pasangan `widthMatchedFov()` di `js/render3d.js`),
-   ditambah apron lantai 14 unit ke arah kamera dan 50 unit melewati gerbang
-   spawn supaya ujungnya larut dalam kabut.
+   (`_update_fov_scale()`, pasangan `widthMatchedFov()` di `js/render3d.js`).
+
+   Lalu masalah kedua muncul di piksel yang sama: squad yang digeser ke tepi
+   kiri **menghilang dari layar**. Angka `camera.distance`/`heightOffset` di
+   config hanya membingkai sekitar ±7 unit pada kedalaman squad, padahal arena
+   lebarnya 20 — dan di tepi itulah peluru memantul. `_fit_pullback()`
+   memundurkan kamera sepanjang sumbu pandangnya sampai keempat sudut arena
+   masuk bingkai, dihitung ulang tiap kali ukuran layar berubah. Mundur, bukan
+   menaikkan FOV: FOV lebar melengkungkan perspektif dan memendekkan lorong.
+
+   Sisanya soal ujung lantai. Lantai diperpanjang 34 unit ke arah kamera (apron
+   bawah) dan 120 unit melewati gerbang spawn, lalu dilarutkan ke warna latar
+   oleh `horizon_fade` di `floor_grid.gdshader`. Kabut engine justru harus
+   **dimatikan untuk lantai** (`fog_disabled`): kabut menerangkan yang jauh,
+   jadi ujung lantai malah jadi pita terang yang berhenti mendadak di depan
+   langit gelap. Kabut tetap hidup untuk musuh, tempat ia memang membantu
+   membaca jarak.
 
 ## Yang belum ada
 
