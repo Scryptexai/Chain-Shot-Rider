@@ -108,7 +108,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function bind(win) {
   return win.eval(`({
     get S(){ return S; }, get CFG(){ return CFG; }, get META(){ return META; },
-    simulate, startStage, endRun, showMap
+    simulate, startStage, endRun, showMap, variantForStage
   })`);
 }
 
@@ -243,11 +243,62 @@ async function main() {
   const rows3 = dom2.window.document.querySelectorAll('.stageRow');
   check('peta hasil reload menampilkan stage 2 terbuka', !rows3[1].disabled);
 
-  // Tombol reset harus benar-benar mengosongkan simpanan.
-  dom2.window.document.getElementById('mapReset').click();
-  check('RESET PROGRESS mengosongkan kartu', G2.META.cards.length === 0);
-  check('RESET PROGRESS mengunci lagi stage 2',
-    dom2.window.document.querySelectorAll('.stageRow')[1].disabled);
+  // ---------------------------------------------------------------------
+  console.log('\n[8] Meteran volume: balok, bukan slider');
+  const doc2 = dom2.window.document;
+  doc2.querySelector('.tab[data-tab="setup"]').click();
+  check('tidak ada slider di layar setup',
+    doc2.querySelectorAll('input[type="range"]').length === 0);
+  const cells = doc2.querySelectorAll('.volCell');
+  check('volume dikendalikan deret balok', cells.length === 6, `${cells.length} balok`);
+  cells[0].click();
+  check('balok OFF membuat volume benar-benar nol', G2.META.volume === 0,
+    `volume=${G2.META.volume}`);
+  check('balok OFF ditandai mute', cells[0].classList.contains('mute'));
+  cells[5].click();
+  check('balok teratas mengembalikan volume penuh', G2.META.volume === 1,
+    `volume=${G2.META.volume}`);
+  check('balok teratas menyala', cells[5].classList.contains('on'));
+
+  // ---------------------------------------------------------------------
+  console.log('\n[9] Kartu medan: terkunci sampai ada stage yang memakainya');
+  doc2.querySelector('.tab[data-tab="arena"]').click();
+  const arenaCards = doc2.querySelectorAll('.vbtn');
+  check('satu kartu per arena', arenaCards.length === G2.CFG.variants.length,
+    `${arenaCards.length} kartu`);
+  const openArenas = [...arenaCards].filter((c) => !c.disabled);
+  check('progres awal hanya membuka sebagian medan',
+    openArenas.length >= 1 && openArenas.length < arenaCards.length,
+    `${openArenas.length} dari ${arenaCards.length} terbuka`);
+  const wanted = Math.max(...[...Array(G2.META.unlocked + 1).keys()]
+    .filter((st) => G2.variantForStage(st) === +openArenas[0].dataset.i));
+  check('kartu medan menunjuk stage terbaru yang memakainya',
+    +openArenas[0].dataset.stage === wanted,
+    `stage=${openArenas[0].dataset.stage}, terbaru=${wanted}`);
+
+  // ---------------------------------------------------------------------
+  console.log('\n[10] Hapus progres harus ditahan, bukan diklik');
+  doc2.querySelector('.tab[data-tab="setup"]').click();
+  const press = () => doc2.getElementById('mapReset')
+    .dispatchEvent(new dom2.window.Event('pointerdown', { bubbles: true }));
+  const release = () => doc2.getElementById('mapReset')
+    .dispatchEvent(new dom2.window.Event('pointerup', { bubbles: true }));
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  press();
+  await wait(250);
+  release();
+  await wait(1300);
+  check('lepas cepat tidak menghapus apa pun', G2.META.cards.length === 1,
+    `cards=[${G2.META.cards.join(', ')}]`);
+
+  press();
+  await wait(1500);
+  check('tahan penuh mengosongkan kartu', G2.META.cards.length === 0);
+  check('tahan penuh mengunci lagi stage 2',
+    doc2.querySelectorAll('.stageRow')[1].disabled);
+  check('hapus progres tidak ikut mereset volume', G2.META.volume === 1,
+    `volume=${G2.META.volume}`);
 
   dom.window.close();
   dom2.window.close();

@@ -20,6 +20,10 @@ var coins: int = 0
 var best_score: int = 0
 var owned_cards: Array[String] = []
 
+## Volume master, 0..1. Disimpan bersama progres karena pemain yang mengecilkan
+## suara sekali tidak mau mengulanginya tiap membuka game.
+var volume: float = 0.8
+
 
 func _ready() -> void:
 	load_progress()
@@ -42,6 +46,7 @@ func load_progress() -> void:
 	unlocked_stage = int(data.get("unlocked_stage", 0))
 	coins = int(data.get("coins", 0))
 	best_score = int(data.get("best_score", 0))
+	volume = clampf(float(data.get("volume", 0.8)), 0.0, 1.0)
 	owned_cards.clear()
 	for entry in data.get("owned_cards", []):
 		owned_cards.append(String(entry))
@@ -55,6 +60,7 @@ func save_progress() -> void:
 		"unlocked_stage": unlocked_stage,
 		"coins": coins,
 		"best_score": best_score,
+		"volume": volume,
 		"owned_cards": owned_cards,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -107,6 +113,9 @@ func active_upgrades() -> Dictionary:
 
 ## Wipes progress. Used by the debug menu and by tests.
 func reset_progress() -> void:
+	# Volume sengaja TIDAK ikut direset: itu preferensi perangkat, bukan
+	# progres. Pemain yang menghapus progres di kereta tidak mau tiba-tiba
+	# gamenya menyalak keras.
 	unlocked_stage = 0
 	coins = 0
 	best_score = 0

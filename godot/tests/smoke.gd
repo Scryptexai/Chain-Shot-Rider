@@ -36,6 +36,7 @@ func _ready() -> void:
 	await _run_card_draft(packed)
 	await _run_stage_map(packed)
 	await _run_hud_layout(packed)
+	await _run_home_suite(packed)
 	_finish()
 
 
@@ -408,6 +409,18 @@ func _run_stage_map(packed: PackedScene) -> void:
 			)
 		)
 	root.queue_free()
+
+
+## Pemilih medan + setup diuji di home_screens_suite.gd (smoke.gd sudah mentok
+## batas seribu baris). Glyph check dipinjamkan lewat Callable supaya aturan
+## "tanpa emoji" cuma punya satu definisi.
+func _run_home_suite(packed: PackedScene) -> void:
+	var suite := HomeScreensSuite.new()
+	add_child(suite)
+	suite.glyph_check = _check_glyphs
+	suite.failed.connect(_fail)
+	await suite.run(packed)
+	suite.queue_free()
 
 
 ## Markas harus muat di layar acuan dan menaruh aksi utamanya di bawah.

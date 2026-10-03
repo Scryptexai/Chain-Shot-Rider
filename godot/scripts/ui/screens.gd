@@ -41,6 +41,7 @@ var _pal: Dictionary = {}
 var _theme: Theme
 var _scrim: ColorRect
 var _home: Control
+var _setup: SetupScreen
 var _pause: Control
 var _result: Control
 var _cards: Control
@@ -58,6 +59,7 @@ var _chapter_kicker: Label
 var _chapter_name: Label
 var _chapter_boss: Label
 var _chapter_desc: Label
+var _arena_row: HBoxContainer
 var _chapter_stars: HBoxContainer
 var _chapter_panel: PanelContainer
 var _chapter_lane: ColorRect
@@ -74,6 +76,7 @@ func build(variant_index: int) -> void:
 	_theme = UiTheme.build(_pal)
 	_build_scrim()
 	_home = _build_home()
+	_setup = _build_setup_screen()
 	_pause = _build_pause()
 	_result = _build_result()
 	_cards = _build_cards()
@@ -150,7 +153,7 @@ func show_stage_map() -> void:
 
 
 func _swap(target: Control) -> void:
-	for screen in [_home, _pause, _result, _cards]:
+	for screen in [_home, _setup, _pause, _result, _cards]:
 		if screen != null:
 			screen.visible = screen == target
 	_scrim.visible = target != null
@@ -207,6 +210,22 @@ func _build_home() -> Control:
 	# "BEST" lebih jelas daripada bintang yang harus ditebak artinya.
 	_pill_best = _pill(top, "BEST 0", UiTheme.GOLD)
 	_pill_cards = _pill(top, "KARTU 0", UiTheme.INK)
+
+	# Pengaturan duduk di pojok atas karena jarang dipakai: zona jempol bawah
+	# milik aksi yang dipakai tiap sesi, bukan yang dipakai sekali seumur
+	# pemasangan.
+	var setup_button := Button.new()
+	setup_button.text = "SETUP"
+	setup_button.theme = _theme
+	setup_button.focus_mode = Control.FOCUS_NONE
+	setup_button.custom_minimum_size = Vector2(150.0, 110.0)
+	setup_button.add_theme_font_size_override("font_size", 26)
+	UiTheme.apply_chunky(setup_button, Color(0.12, 0.17, 0.3), Color(0.03, 0.05, 0.12), 34)
+	setup_button.pressed.connect(
+		func() -> void:
+			_swap(_setup)
+	)
+	top.add_child(setup_button)
 
 	box.add_child(_grow(0.5))
 
@@ -266,6 +285,25 @@ func _build_home() -> Control:
 	_map_list.add_theme_constant_override("separation", int(STAGE_CARD_GAP))
 	_map_scroll.add_child(_map_list)
 
+	# --- lima medan, bukan lima baris daftar ---
+	#
+	# Arena adalah tempat, jadi yang dipilih harus terlihat seperti tempat:
+	# satu kartu per arena dengan warna temanya sendiri. Menekannya memainkan
+	# stage TERBARU yang memakai arena itu, bukan yang paling awal, supaya
+	# kesulitannya sepadan dengan kemajuan pemain — aturan yang sama dengan
+	# prototipe web.
+	var arena_head := HBoxContainer.new()
+	box.add_child(arena_head)
+	_text(arena_head, "MEDAN", 30, UiTheme.INK)
+	var arena_push := Control.new()
+	arena_push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	arena_head.add_child(arena_push)
+	_text(arena_head, "LANGSUNG MAIN", 22, UiTheme.INK_DIM)
+
+	_arena_row = HBoxContainer.new()
+	_arena_row.add_theme_constant_override("separation", 12)
+	box.add_child(_arena_row)
+
 	box.add_child(_grow(0.5))
 
 	# --- aksi utama di zona jempol ---
@@ -317,6 +355,95 @@ func _refresh_home() -> void:
 		_map_list.remove_child(child)
 	for stage in range(total):
 		_map_list.add_child(_stage_card(stage, current))
+
+	for child in _arena_row.get_children():
+		child.queue_free()
+		_arena_row.remove_child(child)
+	for arena in range(_arena_count()):
+		_arena_row.add_child(_arena_card(arena, current))
+
+
+## Layar pengaturan hidup di berkas sendiri (setup_screen.gd): isinya tidak
+## berbagi satu pun data dengan markas, dan menumpuknya di sini hanya membuat
+## berkas ini melewati batas seribu baris tanpa alasan.
+func _build_setup_screen() -> SetupScreen:
+	var screen := SetupScreen.new()
+	screen.visible = false
+	add_child(screen)
+	screen.build(_pal, _theme)
+	screen.closed.connect(
+		func() -> void:
+			_refresh_home()
+			_swap(_home)
+	)
+	screen.progress_wiped.connect(_refresh_home)
+	return screen
+
+
+## Jumlah arena yang benar-benar ada di config, bukan angka lima yang dihafal.
+func _arena_count() -> int:
+	return maxi(GameConfig.list("variants").size(), 1)
+
+
+## Stage terbuka TERAKHIR yang memakai arena ini, atau -1 kalau belum ada.
+func _latest_stage_for_arena(arena: int, unlocked: int) -> int:
+	var found := -1
+	for stage in range(unlocked + 1):
+		if _variant_for_stage(stage) == arena:
+			found = stage
+	return found
+
+
+## Satu kartu medan. Yang terkunci tetap tampil — melihat apa yang menunggu di
+## depan adalah separuh alasan layar ini ada.
+func _arena_card(arena: int, unlocked: int) -> Button:
+	var variant: Dictionary = GameConfig.dict("variants.%d" % arena)
+	var accent: Color = UiTheme.palette(variant.get("theme", {}))["primary"]
+	var stage := _latest_stage_for_arena(arena, unlocked)
+	var locked := stage < 0
+
+	var button := Button.new()
+	button.theme = _theme
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(0.0, 150.0)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.disabled = locked
+	var face: Color = Color(0.10, 0.14, 0.24) if locked else accent.darkened(0.62)
+	UiTheme.apply_chunky(button, face, face.darkened(0.5), 26)
+
+	var stack := VBoxContainer.new()
+	stack.set_anchors_preset(Control.PRESET_FULL_RECT)
+	stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	stack.add_theme_constant_override("separation", 4)
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(stack)
+
+	# Satu batang warna tema: pembeda tercepat antar medan, dan satu-satunya
+	# "seni" yang tidak butuh berkas gambar.
+	var lane := ColorRect.new()
+	lane.color = Color(0.3, 0.35, 0.45) if locked else accent
+	lane.custom_minimum_size = Vector2(0.0, 10.0)
+	lane.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(lane)
+
+	var number := Label.new()
+	number.text = "%d" % (arena + 1)
+	number.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	number.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiTheme.style_label(number, 44, UiTheme.INK_DIM if locked else UiTheme.INK, 0)
+	stack.add_child(number)
+
+	var name_label := Label.new()
+	name_label.text = String(variant.get("name", "?")).to_upper()
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiTheme.style_label(name_label, 18, UiTheme.INK_DIM, 0)
+	stack.add_child(name_label)
+
+	if not locked:
+		button.pressed.connect(func() -> void: stage_chosen.emit(stage))
+	return button
 
 
 ## Satu kartu di rel. Stage terkunci tetap ditampilkan: melihat apa yang ada di

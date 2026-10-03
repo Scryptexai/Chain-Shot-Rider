@@ -370,21 +370,56 @@
   .block { padding:26px 28px; border-radius:30px; background:rgba(8,16,36,.8);
     box-shadow:inset 0 0 0 2px rgba(255,255,255,.07); }
   .block h4 { margin:0 0 18px; font:900 26px/1 var(--display); letter-spacing:4px; color:var(--inkDim); }
-  .volRow { display:flex; align-items:center; gap:20px; font:900 26px/1 var(--display); letter-spacing:3px; }
-  .volRow input { flex:1; height:26px; accent-color:var(--accent); }
-  .volRow b { min-width:70px; text-align:right; color:var(--accentLit); }
+  /* Volume sebagai meteran balok, bukan slider. Slider minta presisi jempol
+     pada garis setebal empat piksel dan angkanya tidak berarti apa-apa bagi
+     pemain; enam balok menanjak bisa ditekan tanpa melihat dan terbaca seperti
+     bar nyawa di HUD. Tingginya ikut naik supaya bentuknya sendiri sudah
+     memberi tahu arah "lebih keras". */
+  .volMeter { display:flex; align-items:flex-end; gap:10px; }
+  .volCell { flex:1; border:0; cursor:pointer; padding:0; border-radius:18px; display:grid; place-items:center;
+    font:900 22px/1 var(--display); color:var(--inkDim);
+    background:linear-gradient(180deg, rgba(14,24,50,.95), rgba(6,12,28,.95));
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.08); transition:transform .07s ease; }
+  .volCell:active { transform:translateY(4px); }
+  .volCell.on { color:#04121B; box-shadow:inset 0 -6px 0 rgba(0,0,0,.22);
+    background:linear-gradient(180deg,var(--accentLit),var(--accent)); }
+  .volCell.mute { color:#FFE3E8; box-shadow:inset 0 -6px 0 rgba(0,0,0,.3);
+    background:linear-gradient(180deg,#9C2030,#5A0E19); }
+  .volHead { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px; }
+  .volHead b { font:900 28px/1 var(--display); letter-spacing:3px; color:var(--accentLit); }
+
+  /* Kartu medan: satu per arena, dengan warna temanya sendiri. Yang belum
+     terbuka tetap tampil — melihat apa yang menunggu di depan adalah separuh
+     alasan deretan ini ada. */
   .arenaRow { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
   .vbtn { border:0; cursor:pointer; padding:0 0 12px; border-radius:22px; overflow:hidden;
-    font-family:var(--body); color:var(--ink);
+    font-family:var(--body); color:var(--ink); min-height:150px;
     background:linear-gradient(180deg, rgba(14,24,50,.9), rgba(6,12,28,.9));
     box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.25); }
   .vbtn .art { display:block; height:54px; background:linear-gradient(180deg,var(--cardTop),var(--cardBot));
     box-shadow:inset 0 -3px 0 var(--cardKey); }
-  .vbtn span { display:block; margin-top:10px; padding:0 6px; font:900 17px/1.15 var(--display); }
+  .vbtn .no { display:block; margin-top:8px; font:900 34px/1 var(--display); color:var(--ink); }
+  .vbtn span.nm { display:block; margin-top:6px; padding:0 6px; font:900 17px/1.15 var(--display); color:var(--inkDim); }
   .vbtn.sel { box-shadow:inset 0 0 0 3px var(--accent), 0 0 24px rgba(var(--accentRGB),.35); }
-  .kv { display:grid; grid-template-columns:1fr auto; gap:10px 18px; font:800 24px/1.6 var(--body);
-    color:var(--inkDim); }
-  .kv b { color:var(--accentLit); font-weight:900; font-variant-numeric:tabular-nums; }
+  .vbtn.locked { cursor:default; filter:grayscale(.85) brightness(.55);
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.08); }
+
+  /* Diagnostik sebagai pod angka, bukan tabel kunci-nilai: tabel adalah
+     bahasa panel admin. */
+  .pods { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+  .pod { border-radius:22px; padding:14px 18px; background:rgba(4,10,24,.75);
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.06); }
+  .pod span { display:block; font:800 18px/1 var(--body); letter-spacing:2px; color:var(--inkDim); }
+  .pod b { display:block; margin-top:8px; font:900 32px/1 var(--display); color:var(--accentLit);
+    font-variant-numeric:tabular-nums; }
+
+  /* Hapus progres ditahan, tidak diklik: tombol merah sekali tekan adalah cara
+     tercepat kehilangan lima belas stage karena jempol yang meleset. */
+  .holdWrap { position:relative; overflow:hidden; border-radius:34px; }
+  .holdFill { position:absolute; left:0; top:0; bottom:0; width:0; pointer-events:none;
+    background:rgba(255,255,255,.28); }
+  .holdNote { margin:14px 0 0; text-align:center; font:800 22px/1.3 var(--body); color:var(--inkDim);
+    letter-spacing:2px; }
   .keys { font:700 24px/1.9 var(--body); color:var(--inkDim); }
   .keys kbd { display:inline-block; min-width:44px; text-align:center; background:#17233C; border-radius:10px;
     padding:4px 12px; margin-right:8px; font:900 20px/1.3 var(--display); color:#CFE0F7; }
@@ -591,7 +626,10 @@ const BASE_GAIN = 0.22;
 function initAudio(){
   if(AC) return;
   AC = new (window.AudioContext||window.webkitAudioContext)();
-  master = AC.createGain(); master.gain.value = BASE_GAIN * masterVolume();
+  master = AC.createGain();
+  // Stub audio di lingkungan uji tidak punya AudioParam; itu bukan alasan
+  // untuk menghentikan boot.
+  if(master && master.gain) master.gain.value = BASE_GAIN * masterVolume();
   // Browser yang sangat tua bisa saja tidak punya BiquadFilter. Kalau begitu,
   // suara tetap keluar tanpa filter alih-alih mematikan audio sama sekali.
   const mk = () => (typeof AC.createBiquadFilter === 'function') ? AC.createBiquadFilter() : null;
@@ -612,7 +650,9 @@ function ramp(param, value, atTime){
   else param.value = value;
 }
 function masterVolume(){ return META.volume === undefined ? 1 : META.volume; }
-function applyVolume(){ if(master) master.gain.value = BASE_GAIN * masterVolume(); }
+// Dijaga terhadap graf audio yang distub (jsdom, uji headless): mengubah
+// volume tidak boleh melempar hanya karena tidak ada perangkat suara.
+function applyVolume(){ if(master && master.gain) master.gain.value = BASE_GAIN * masterVolume(); }
 
 /** Sub pulse per beat saat nyawa tinggal 1 (120 BPM -> tiap 0,5 detik). */
 function subPulse(){
@@ -1705,13 +1745,42 @@ function ownedCardsHtml(){
   }).join('');
 }
 
-function arenaChipsHtml(){
+/**
+ * Kartu medan. Menekan satu kartu memainkan stage TERBARU yang memakai arena
+ * itu, bukan stage pertamanya — kalau salah, pemain stage 14 dilempar balik ke
+ * tutorial. Arena yang belum punya satu pun stage terbuka ditampilkan terkunci,
+ * bukan disembunyikan.
+ */
+function latestStageForArena(i, current){
+  let pick = -1;
+  for(let s=0;s<=current;s++) if(variantForStage(s) === i) pick = s;
+  return pick;
+}
+
+function arenaChipsHtml(current){
   return CFG.variants.map((v,i)=>{
     const t = v.theme || {};
-    return `<button class="vbtn ${i===S.variant?'sel':''}" data-i="${i}" title="${v.description||''}"
+    const stage = latestStageForArena(i, current);
+    const locked = stage < 0;
+    return `<button class="vbtn ${locked?'locked':''} ${i===S.variant&&!locked?'sel':''}"
+        data-i="${i}" data-stage="${stage}" ${locked?'disabled':''} title="${v.description||''}"
         style="--cardTop:${t.bgTop||'#0A1030'};--cardBot:${t.bgBottom||'#03060F'};--cardKey:${t.primary||'#00E5FF'}">
-        <span class="art"></span><span>${v.name}</span></button>`;
+        <span class="art"></span><b class="no">${i+1}</b><span class="nm">${v.name}</span></button>`;
   }).join('');
+}
+
+/** Enam balok volume: OFF, lalu lima tingkat. */
+function volMeterHtml(){
+  const level = Math.round(masterVolume()*5);
+  let out = '';
+  for(let i=0;i<6;i++){
+    // Balok OFF hanya menyala saat benar-benar senyap; kalau ikut menyala
+    // bersama yang lain, meteran malah membaca "mati DAN keras".
+    const cls = (i===0) ? (level===0 ? 'mute' : '') : (i <= level ? 'on' : '');
+    out += `<button class="volCell ${cls}" data-v="${i}" style="height:${72+i*14}px">`
+         + `${i===0?'OFF':i}</button>`;
+  }
+  return out;
 }
 
 /**
@@ -1768,6 +1837,8 @@ function showMap(){
         </div>
         <div class="railHead"><b>PILIH STAGE</b><span>GESER \u2192</span></div>
         <div class="stageRail" id="stageList">${stageRailHtml(current)}</div>
+        <div class="railHead"><b>MEDAN</b><span>LANGSUNG MAIN</span></div>
+        <div class="arenaRow">${arenaChipsHtml(current)}</div>
       </section>
 
       <section class="pane" data-pane="squad">
@@ -1778,16 +1849,8 @@ function showMap(){
       <section class="pane" data-pane="setup">
         <div class="setupScroll">
           <div class="block">
-            <h4>AUDIO</h4>
-            <label class="volRow">VOLUME
-              <input type="range" id="volSlider" min="0" max="100" step="5"
-                     value="${Math.round(masterVolume()*100)}">
-              <b id="volVal">${Math.round(masterVolume()*100)}</b>
-            </label>
-          </div>
-          <div class="block">
-            <h4>ARENA UJI</h4>
-            <div class="arenaRow">${arenaChipsHtml()}</div>
+            <div class="volHead"><h4 style="margin:0">VOLUME</h4><b id="volVal"></b></div>
+            <div class="volMeter" id="volMeter">${volMeterHtml()}</div>
           </div>
           <div class="block">
             <h4>KONTROL</h4>
@@ -1799,18 +1862,25 @@ function showMap(){
           </div>
           <div class="block">
             <h4>DIAGNOSTIK</h4>
-            <div class="kv">
-              <span>FPS</span><b id="sFps">\u2014</b>
-              <span>Sim tick</span><b id="sTick">0</b>
-              <span>Musuh aktif</span><b id="sEnemies">0</b>
-              <span>Bounce</span><b id="sBounce">0</b>
-              <span>Damage \u00D7</span><b id="sDmg">1.00</b>
-              <span>Speed \u00D7</span><b id="sSpd">1.00</b>
-              <span>timeScale</span><b id="sTs">1.00</b>
-              <span>Total kill</span><b id="sKills">0</b>
+            <div class="pods">
+              <div class="pod"><span>FPS</span><b id="sFps">\u2014</b></div>
+              <div class="pod"><span>SIM TICK</span><b id="sTick">0</b></div>
+              <div class="pod"><span>MUSUH</span><b id="sEnemies">0</b></div>
+              <div class="pod"><span>BOUNCE</span><b id="sBounce">0</b></div>
+              <div class="pod"><span>DAMAGE \u00D7</span><b id="sDmg">1.00</b></div>
+              <div class="pod"><span>SPEED \u00D7</span><b id="sSpd">1.00</b></div>
+              <div class="pod"><span>TIMESCALE</span><b id="sTs">1.00</b></div>
+              <div class="pod"><span>TOTAL KILL</span><b id="sKills">0</b></div>
             </div>
           </div>
-          <button class="btn3d danger" id="mapReset">RESET PROGRES</button>
+          <div class="block">
+            <h4>ZONA BAHAYA</h4>
+            <div class="holdWrap">
+              <button class="btn3d danger" id="mapReset">HAPUS PROGRES</button>
+              <span class="holdFill" id="holdFill"></span>
+            </div>
+            <p class="holdNote" id="holdNote">TAHAN 1,2 DETIK</p>
+          </div>
         </div>
       </section>
 
@@ -1826,12 +1896,8 @@ function showMap(){
     btn.addEventListener('click', ()=>startStage(+btn.dataset.s)));
   m.querySelectorAll('.vbtn').forEach(btn=>
     btn.addEventListener('click', ()=>{
-      // Arena uji: mainkan stage terbaru yang memakai arena itu, supaya
-      // kesulitannya tetap sepadan dengan kemajuan pemain.
-      const i = +btn.dataset.i;
-      let pick = -1;
-      for(let s=0;s<=current;s++) if(variantForStage(s) === i) pick = s;
-      startStage(pick < 0 ? current : pick);
+      const pick = +btn.dataset.stage;
+      if(pick >= 0) startStage(pick);
     }));
   m.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click', ()=>{
     m.querySelectorAll('.tab').forEach(t2=>t2.classList.toggle('sel', t2===tab));
@@ -1841,18 +1907,61 @@ function showMap(){
   const play = document.getElementById('btnPlay');
   if(play) play.addEventListener('click', ()=>startStage(current));
 
-  const vol = document.getElementById('volSlider');
-  if(vol) vol.addEventListener('input', ()=>{
-    META.volume = (+vol.value)/100;
-    document.getElementById('volVal').textContent = vol.value;
-    initAudio();          // slider adalah gestur pengguna: aman membuka AudioContext
-    applyVolume();
-    metaSave();
-  });
+  const meter = document.getElementById('volMeter');
+  const volVal = document.getElementById('volVal');
+  const paintVol = ()=>{
+    const level = Math.round(masterVolume()*5);
+    meter.querySelectorAll('.volCell').forEach((cell,i)=>{
+      cell.classList.toggle('on', i > 0 && i <= level);
+      cell.classList.toggle('mute', i === 0 && level === 0);
+    });
+    volVal.textContent = level === 0 ? 'SENYAP' : level + ' / 5';
+  };
+  if(meter){
+    paintVol();
+    meter.querySelectorAll('.volCell').forEach(cell=>
+      cell.addEventListener('click', ()=>{
+        META.volume = (+cell.dataset.v)/5;
+        initAudio();      // tap adalah gestur pengguna: aman membuka AudioContext
+        applyVolume();
+        metaSave();
+        paintVol();
+      }));
+  }
+
+  // Hapus progres: ditahan 1,2 detik, dengan batang yang terisi sebagai umpan
+  // balik. Lepas sebelum penuh dan tidak terjadi apa-apa.
   const reset = document.getElementById('mapReset');
-  if(reset) reset.addEventListener('click', ()=>{
-    META.unlocked=0; META.cards=[]; META.best=0; metaSave(); showMap();   // volume sengaja dipertahankan
-  });
+  const fill = document.getElementById('holdFill');
+  const note = document.getElementById('holdNote');
+  if(reset && fill){
+    let timer = 0;
+    const cancel = ()=>{
+      if(!timer) return;
+      clearTimeout(timer); timer = 0;
+      fill.style.transition = 'none'; fill.style.width = '0';
+      note.textContent = 'TAHAN 1,2 DETIK';
+    };
+    const start = ev=>{
+      ev.preventDefault();
+      cancel();
+      note.textContent = 'TAHAN TERUS\u2026';
+      fill.style.transition = 'width 1.2s linear';
+      fill.style.width = '100%';
+      timer = setTimeout(()=>{
+        timer = 0;
+        // Volume sengaja tidak ikut dihapus: itu preferensi perangkat, bukan
+        // progres.
+        META.unlocked = 0; META.cards = []; META.best = 0;
+        metaSave();
+        showMap();
+      }, 1200);
+    };
+    reset.addEventListener('pointerdown', start);
+    reset.addEventListener('pointerup', cancel);
+    reset.addEventListener('pointercancel', cancel);
+    reset.addEventListener('pointerleave', cancel);
+  }
 
   // Rel digulir ke stage berikutnya, bukan ke awal: yang pemain cari saat
   // membuka game adalah "lanjut dari mana".

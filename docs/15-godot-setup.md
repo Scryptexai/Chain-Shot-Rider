@@ -264,10 +264,10 @@ target rilis mobile. Beberapa item sudah selesai di satu sisi saja.
 | Peta stage 15 level | selesai | selesai |
 | Draft kartu antar-stage | selesai | selesai |
 | Interpolasi render antar-tick | **selesai** | **selesai** |
-| Slider volume (docs/06) | **selesai** | belum |
+| Kontrol volume (docs/06) | **selesai** | **selesai** |
 | High-pass + sub pulse saat nyawa 1 (docs/07 §7.3) | **selesai** | **selesai** |
 | Low-pass 1200 Hz + −6 dB saat slow-mo (§7.3) | **selesai** | **selesai** |
-| Pemilih arena 5 kartu | **selesai** | belum |
+| Pemilih arena 5 kartu | **selesai** | **selesai** |
 | Count-up tween (HUD + baris result) | **selesai** | **selesai** |
 
 Catatan tiap item:
@@ -306,6 +306,43 @@ Catatan tiap item:
 - **Pemilih arena**: kartu yang terbuka memainkan stage *terbaru* yang memakai
   arena itu, bukan yang paling awal, supaya kesulitannya sepadan dengan
   kemajuan pemain. Arena ke-N terbuka begitu ada stage terbuka yang memakainya.
+
+  Kedua build sekarang memakai bentuk yang sama: deretan lima kartu di bawah
+  rel stage (`MEDAN / LANGSUNG MAIN`), tiap kartu memakai warna tema arenanya,
+  dan yang belum terbuka tetap **ditampilkan** dalam keadaan redup — melihat
+  apa yang menunggu di depan adalah separuh alasan deretan ini ada. Di Godot
+  kartu dibangun `_arena_card()` di `screens.gd`; jumlah kartunya diambil dari
+  `GameConfig.list("variants")`, bukan angka lima yang dihafal. Penjaga smoke
+  memeriksa tiga hal dalam dua keadaan berlawanan: profil baru hanya membuka
+  satu medan, progres penuh membuka semuanya, dan menekan kartu memulai stage
+  terbaru (bukan stage pertama) yang memakai medan itu.
+- **Kontrol volume**: slider dibuang di kedua build. Yang menggantikannya
+  adalah meteran enam balok (`OFF` + lima tingkat) yang tingginya menanjak,
+  bisa ditekan tanpa melihat, dan terbaca seperti bar nyawa di HUD. Slider
+  adalah kontrol aplikasi: ia minta presisi jempol pada garis setebal empat
+  piksel dan angkanya tidak berarti apa-apa bagi pemain.
+
+  `OFF` benar-benar mematikan bus Master (`set_bus_mute`), bukan sekadar
+  mengecilkan, dan balok `OFF` hanya menyala saat senyap supaya meteran tidak
+  pernah terbaca "mati DAN keras" sekaligus. Nilainya ikut tersimpan di save
+  (`SaveGame.volume` / `META.volume`) tetapi **tidak** ikut terhapus saat
+  progres dihapus: itu preferensi perangkat, bukan progres.
+- **Layar setup**: di Godot layar ini pindah ke berkasnya sendiri,
+  `scripts/ui/setup_screen.gd`, dan isinya meniru pane SETUP web —
+  volume, kontrol, pod angka status, zona bahaya. Menghapus progres **ditahan
+  1,2 detik** (batang terisi sebagai umpan balik) di kedua build, karena tombol
+  merah sekali tekan adalah cara tercepat seorang pemain kehilangan lima belas
+  stage karena jempol yang meleset. Diagnostik web berhenti memakai tabel
+  kunci-nilai dan memakai pod angka; tabel adalah bahasa panel admin.
+
+  Satu jebakan khusus Godot yang kini dijaga smoke: `set_anchors_preset()`
+  pada Control yang **sudah** berada di dalam CanvasLayer mempertahankan ukuran
+  lamanya (nol) dengan menulis offset negatif, jadi layarnya tergambar gepeng
+  di pojok kiri atas sementara semua uji fungsional tetap lulus. Penjaganya
+  membandingkan rect layar setup dengan viewport dan menuntut tombol KEMBALI
+  berada di zona ibu jari bawah. Satu catatan uji: `Input.parse_input_event()`
+  tidak berguna headless — tanpa jendela, pick GUI tidak pernah jalan, jadi
+  bukti "tombol benar-benar bisa ditekan" diambil dari Chromium sungguhan.
 - **Count-up**: skor HUD memakai tween 0,2 s dan menolak animasi mundur (skor
   turun = stage baru, langsung dipatok). Layar result memakai rAF sendiri
   karena state saat itu 'menu'; `prefers-reduced-motion` langsung menampilkan
