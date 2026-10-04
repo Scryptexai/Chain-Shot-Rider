@@ -40,17 +40,21 @@
   // hitam di bawah HUD — persis cacat yang terlihat di build sebelumnya.
   var APRON = 14;
 
+  // Palet dunia bergaya fantasi: tanah berlumut, pagar kayu-batu, dan cahaya
+  // obor — bukan neon. Warna aksen per stage tetap datang dari config
+  // (variants[].theme), yang di sini hanya dipakai sebagai sorotan, supaya
+  // arena tidak pernah lebih terang daripada karakternya sendiri.
   var PAL = {
-    bg: 0x060b1e,
-    floor: 0x0d1736,
-    floorFar: 0x070c22,
-    grid: 0x1fd3e8,
-    wall: 0x123a5c,
-    danger: 0xff1744,
-    gatePos: 0x3ddc97,
-    gateNeg: 0xff4d3d,
-    bullet: 0xfff3c4,
-    chain: 0x00e5ff,
+    bg: 0x0b1424,
+    floor: 0x2c3324,
+    floorFar: 0x161b13,
+    grid: 0x6e7a5e,
+    wall: 0x4a4336,
+    danger: 0xc62828,
+    gatePos: 0x6fcf6a,
+    gateNeg: 0xc2503d,
+    bullet: 0xffe9a8,
+    chain: 0xb46bff,
   };
 
   // Model GLB hasil tools/build_assets.py. Dibangun dengan Python + trimesh,
@@ -367,8 +371,18 @@
     var c = document.createElement('canvas');
     c.width = c.height = 256;
     var g = c.getContext('2d');
-    g.fillStyle = '#0d1736'; g.fillRect(0, 0, 256, 256);
-    g.strokeStyle = 'rgba(31,211,232,0.30)'; g.lineWidth = 2;
+    // Lempeng batu berlumut, bukan kisi neon: dua garis nat yang pudar plus
+    // bercak tanah yang ditaburkan dengan acak berbenih tetap, supaya lantai
+    // punya tekstur tanpa satu pun berkas gambar tambahan di build.
+    g.fillStyle = '#2c3324'; g.fillRect(0, 0, 256, 256);
+    var seed = 20260929;
+    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+    for (var i = 0; i < 90; i++) {
+      var r = 6 + rnd() * 26;
+      g.fillStyle = rnd() < 0.5 ? 'rgba(58,68,44,0.55)' : 'rgba(32,38,26,0.55)';
+      g.beginPath(); g.ellipse(rnd() * 256, rnd() * 256, r, r * 0.6, rnd() * 3.14, 0, 6.28); g.fill();
+    }
+    g.strokeStyle = 'rgba(110,122,94,0.35)'; g.lineWidth = 3;
     g.beginPath(); g.moveTo(0, 0); g.lineTo(256, 0); g.moveTo(0, 0); g.lineTo(0, 256); g.stroke();
     var tex = new THREE.CanvasTexture(c);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -437,10 +451,13 @@
 
     camera = makeCamera(9 / 16);
 
-    scene.add(new THREE.HemisphereLight(0x9fd8ff, 0x16224a, 1.3));
-    var sun = new THREE.DirectionalLight(0xfff0e0, 1.7);
+    // Cahaya: langit malam dingin dari atas, matahari-obor hangat dari depan
+    // kanan, dan pantulan api lemah dari belakang. Karakter KayKit dipanggang
+    // warnanya ke vertex, jadi lampu di sini hanya memberi arah dan kedalaman.
+    scene.add(new THREE.HemisphereLight(0xa8c4e8, 0x241f14, 1.25));
+    var sun = new THREE.DirectionalLight(0xfff0d2, 1.75);
     sun.position.set(16, 34, 18); scene.add(sun);
-    var fill = new THREE.DirectionalLight(0x4da6ff, 0.55);
+    var fill = new THREE.DirectionalLight(0xff9a4d, 0.5);
     fill.position.set(-18, 20, -16); scene.add(fill);
 
     // --- static world ---

@@ -2,22 +2,26 @@
 
 Setiap varian harus mengubah **cara pemain berpikir**, bukan sekadar warna. Aturan desainnya: satu varian = satu pertanyaan taktis baru.
 
+> Sejak v2.0 nama tampilannya fantasi (lihat `variants[].name` di
+> `Config/arena_config.json`); `id` di config **tidak berubah**, jadi save
+> lama, tes, dan kode yang menyebut `classic_pit` tetap jalan.
+
 | # | Arena | Pertanyaan taktis | Mekanik pembeda |
 |---|---|---|---|
-| 1 | Classic Pit | "Berapa sudut yang benar?" | Bumper simetris, pantulan 45° murni |
-| 2 | Twin Towers | "Lorong mana yang kubuka?" | Koridor sempit, zig-zag bernilai tinggi |
-| 3 | Gravity Chamber | "Kemana peluru ini akan melengkung?" | Lintasan non-linear |
-| 4 | Explosive Yard | "Barrel mana yang jadi pemicu?" | Damage tidak langsung, chain |
-| 5 | Moving Maze | "Kapan waktunya menembak?" | Timing, bukan sudut |
+| 1 | Lembah Batu (`classic_pit`) | "Berapa sudut yang benar?" | Bumper simetris, pantulan 45° murni |
+| 2 | Menara Kembar (`twin_towers`) | "Lorong mana yang kubuka?" | Koridor sempit, zig-zag bernilai tinggi |
+| 3 | Kuil Melayang (`gravity_chamber`) | "Kemana peluru ini akan melengkung?" | Lintasan non-linear |
+| 4 | Ladang Bara (`explosive_yard`) | "Barrel mana yang jadi pemicu?" | Damage tidak langsung, chain |
+| 5 | Labirin Berduri (`moving_maze`) | "Kapan waktunya menembak?" | Timing, bukan sudut |
 
 ---
 
-## 1. Classic Pit — *arena pengajar*
+## 1. Lembah Batu (`classic_pit`) — *arena pengajar*
 
 | | |
 |---|---|
 | **Layout** | 4 bumper simetris di `(±5.5, 13)` dan `(±5.5, 23)` |
-| **Tema** | Cyan `#00E5FF` / Merah `#FF4D3D` / Ungu `#B14DFF`, BG navy → hitam |
+| **Tema** | Obor emas `#FFC24D` / bata `#C2503D` / rune ungu `#9A6BFF`, BG batu malam `#1A2133` → hitam |
 | **Musik** | `base_synth` saja — paling bersih, agar pitch ladder bounce jelas terdengar |
 | **Musuh spesial** | **Runner** — cepat, memecah formasi rapat sehingga pemain belajar memprioritaskan |
 | **Boss** | **Colossus** — HP 1200, turun lambat, slam tiap 4 detik. Titik lemah terbuka 1.5 detik setelah slam |
@@ -26,13 +30,13 @@ Setiap varian harus mengubah **cara pemain berpikir**, bukan sekadar warna. Atur
 
 ---
 
-## 2. Twin Towers — *arena presisi*
+## 2. Menara Kembar (`twin_towers`) — *arena presisi*
 
 | | |
 |---|---|
 | **Layout** | 2 pilar `r = 2.4` di `(±3.6, 20)` + 4 bumper di dinding `(±7.5, 11)` dan `(±7.5, 28)` |
 | **Koridor** | Tengah **2.4 unit**, sisi **4.0 unit** — keduanya di atas minimum 2.0 |
-| **Tema** | Magenta panas `#FF3DBE`, BG ungu klub `#170B2E` |
+| **Tema** | Emas pucat `#E8B44A` / rune `#A15CFF`, BG ungu senja `#241A33` |
 | **Musik** | `base_synth + arp` (arpeggio 16th) — menaikkan detak, terasa menekan |
 | **Musuh spesial** | **Brute** — memantulkan peluru, berfungsi sebagai **bumper hidup** di dalam lorong |
 | **Boss** | **Twin Warden** — sepasang, gerak cermin, HP 900 masing-masing. Keduanya harus mati dalam 3 detik atau yang tersisa menyembuhkan pasangannya |
@@ -41,13 +45,13 @@ Setiap varian harus mengubah **cara pemain berpikir**, bukan sekadar warna. Atur
 
 ---
 
-## 3. Gravity Chamber — *arena intuisi*
+## 3. Kuil Melayang (`gravity_chamber`) — *arena intuisi*
 
 | | |
 |---|---|
 | **Layout** | Gravity well `r = 4, force = 5` di `(-4, 15)` dan `(+4, 26)`, diagonal; 2 bumper di `(±6, 21)` |
 | **Jarak antar well** | 13.6 unit — jauh melebihi jumlah radius (8), jadi medannya **tidak pernah tumpang-tindih** |
-| **Tema** | Teal `#4DFFD2` / Pink `#FF3D6E` / Ungu lembut, BG biru dalam |
+| **Tema** | Giok `#6FE3C4` / merah kuil `#D4544F`, BG batu basah `#0E2630` |
 | **Musik** | `base_synth + pad` (reverb panjang) — melayang, memperlambat persepsi waktu |
 | **Musuh spesial** | **Splitter** — pecah jadi 3 grunt; di dalam medan gravitasi pecahannya tersedot dan menciptakan target sekunder |
 | **Boss** | **Singularity** — HP 1000, orbit + pulse tarikan tiap 3 detik. Shield berputar; inti terbuka hanya saat pulse |
@@ -56,13 +60,13 @@ Setiap varian harus mengubah **cara pemain berpikir**, bukan sekadar warna. Atur
 
 ---
 
-## 4. Explosive Yard — *arena kausalitas*
+## 4. Ladang Bara (`explosive_yard`) — *arena kausalitas*
 
 | | |
 |---|---|
 | **Layout** | 9 barrel dalam 3 kelompok (`z = 12–14`, `z = 18`, `z = 24–27`) + 1 pilar pusat di `(0, 22)` |
 | **Chain** | radius 3.0, delay 0.08 s/tingkat, kedalaman maks 8 |
-| **Tema** | Oranye `#FF8A2B` / Merah `#FF2D55`, BG cokelat terbakar `#2B0C05` |
+| **Tema** | Bara `#FF9D3C` / merah api `#FF5A4D`, BG tanah hangus `#2E140A` |
 | **Musik** | `base_synth + percussion` (tom + industrial hit) — agresif |
 | **Musuh spesial** | **Bomber** — meledak saat mati (r 2.5), menjadi **barrel bergerak** yang masuk sendiri ke kerumunan |
 | **Boss** | **Pyro Baron** — HP 1100, menjatuhkan barrel baru ke arena lalu charge. Titik lemah: ledakan barrel-nya sendiri |
@@ -71,12 +75,12 @@ Setiap varian harus mengubah **cara pemain berpikir**, bukan sekadar warna. Atur
 
 ---
 
-## 5. Moving Maze — *arena ritme*
+## 5. Labirin Berduri (`moving_maze`) — *arena ritme*
 
 | | |
 |---|---|
 | **Layout** | 3 moving platform di `z = 12, 20, 28` (lebar 5, travel ±3, speed 2.0 / 2.5 / 1.8, fase berbeda) + 2 shield wall di `(-6.5, 16)` dan `(+6.5, 24)` |
-| **Tema** | Hijau toksik `#7CFF4D`, BG hijau gelap `#06220F` |
+| **Tema** | Lumut `#9ADB5E` / duri `#C2503D`, BG rimba gelap `#122A17` |
 | **Musik** | `base_synth + glitch` (stutter + bitcrush) — gelisah, sinkron dengan gerak platform |
 | **Musuh spesial** | **Shielder** — kebal dari depan, harus dipukul dari samping/belakang |
 | **Boss** | **Shifter** — HP 1400, teleport antar lajur mengikuti platform. Hanya rentan dari punggung |

@@ -1,7 +1,7 @@
 {
   "$schema": "./arena_config.schema.json",
-  "version": "1.0.0-characters",
-  "notes": "Single source of truth untuk arena CHAIN RIDER. Dipakai oleh tools/blueprint_gen.py, prototype web, dan importer ScriptableObject di Unity. Koordinat dunia: X = -10..+10 (lebar 20), Z = 0..40 (panjang 40), Y = up. Origin (0,0,0) = tengah dinding bawah.",
+  "version": "1.1.0-fantasy",
+  "notes": "Single source of truth untuk arena CHAIN RIDER (arah visual fantasi, karakter KayKit Adventurers CC0). Dipakai oleh tools/blueprint_gen.py, prototype web, dan importer ScriptableObject di Unity. Koordinat dunia: X = -10..+10 (lebar 20), Z = 0..40 (panjang 40), Y = up. Origin (0,0,0) = tengah dinding bawah.",
   "arena": {
     "width": 20.0,
     "height": 40.0,
@@ -220,8 +220,8 @@
       "speed": 0.6,
       "tris": 180,
       "score": 10,
-      "color": "#FF4D3D",
-      "note": "Musuh dasar, mati 1 hit.",
+      "color": "#4E9E5F",
+      "note": "Perampok dasar berbelati, mati 1 hit.",
       "speedWas": 1.2
     },
     {
@@ -230,8 +230,8 @@
       "speed": 1.1,
       "tris": 190,
       "score": 15,
-      "color": "#FF8A2B",
-      "note": "Cepat, memecah formasi.",
+      "color": "#D8B98A",
+      "note": "Pemanah lincah, memecah formasi.",
       "speedWas": 2.2
     },
     {
@@ -240,8 +240,8 @@
       "speed": 0.5,
       "tris": 290,
       "score": 50,
-      "color": "#C2341F",
-      "note": "Tank, butuh bounce ber-stack.",
+      "color": "#C98B5E",
+      "note": "Barbarian berkapak, butuh bounce ber-stack.",
       "speedWas": 0.6
     },
     {
@@ -250,8 +250,8 @@
       "speed": 0.5,
       "tris": 260,
       "score": 40,
-      "color": "#FFC93C",
-      "note": "Shield depan, hanya rusak dari samping/belakang.",
+      "color": "#8FA3C4",
+      "note": "Ksatria berperisai, hanya rusak dari samping/belakang.",
       "speedWas": 0.9
     },
     {
@@ -260,8 +260,8 @@
       "speed": 0.5,
       "tris": 240,
       "score": 35,
-      "color": "#FF5FA2",
-      "note": "Pecah jadi 3 grunt saat mati.",
+      "color": "#8B6FD4",
+      "note": "Penyihir; pecah jadi 3 perampok saat mati.",
       "speedWas": 1.0
     },
     {
@@ -270,8 +270,8 @@
       "speed": 0.7,
       "tris": 220,
       "score": 45,
-      "color": "#FFE04D",
-      "note": "Meledak saat mati, radius 2.5, chain kill.",
+      "color": "#3E6B4A",
+      "note": "Penyelinap bom asap, meledak saat mati, radius 2.5, chain kill.",
       "speedWas": 1.4
     }
   ],
@@ -310,14 +310,14 @@
     {
       "id": "classic_pit",
       "index": 1,
-      "name": "Classic Pit",
+      "name": "Lembah Batu",
       "theme": {
-        "primary": "#00E5FF",
-        "enemy": "#FF4D3D",
-        "bumper": "#B14DFF",
-        "bgTop": "#0A1030",
-        "bgBottom": "#03060F",
-        "grid": "#1FD3E8"
+        "primary": "#FFC24D",
+        "enemy": "#C2503D",
+        "bumper": "#9A6BFF",
+        "bgTop": "#1A2133",
+        "bgBottom": "#070A12",
+        "grid": "#6E7A5E"
       },
       "musicLayer": "base_synth",
       "specialEnemy": "runner",
@@ -353,14 +353,14 @@
     {
       "id": "twin_towers",
       "index": 2,
-      "name": "Twin Towers",
+      "name": "Menara Kembar",
       "theme": {
-        "primary": "#00E5FF",
-        "enemy": "#FF6A1F",
-        "bumper": "#FF3DBE",
-        "bgTop": "#170B2E",
-        "bgBottom": "#05020C",
-        "grid": "#C24DFF"
+        "primary": "#E8B44A",
+        "enemy": "#B4553A",
+        "bumper": "#A15CFF",
+        "bgTop": "#241A33",
+        "bgBottom": "#0A0612",
+        "grid": "#7A6EA0"
       },
       "musicLayer": "base_synth+arp",
       "specialEnemy": "brute",
@@ -408,14 +408,14 @@
     {
       "id": "gravity_chamber",
       "index": 3,
-      "name": "Gravity Chamber",
+      "name": "Kuil Melayang",
       "theme": {
-        "primary": "#4DFFD2",
-        "enemy": "#FF3D6E",
-        "bumper": "#8A5CFF",
-        "bgTop": "#04182B",
-        "bgBottom": "#01070E",
-        "grid": "#3DF0FF"
+        "primary": "#6FE3C4",
+        "enemy": "#D4544F",
+        "bumper": "#7A5CFF",
+        "bgTop": "#0E2630",
+        "bgBottom": "#040B0F",
+        "grid": "#4E8C84"
       },
       "musicLayer": "base_synth+pad",
       "specialEnemy": "splitter",
@@ -453,14 +453,14 @@
     {
       "id": "explosive_yard",
       "index": 4,
-      "name": "Explosive Yard",
+      "name": "Ladang Bara",
       "theme": {
-        "primary": "#00E5FF",
-        "enemy": "#FF8A2B",
-        "bumper": "#FF2D55",
-        "bgTop": "#2B0C05",
-        "bgBottom": "#0A0301",
-        "grid": "#FF7A3D"
+        "primary": "#FF9D3C",
+        "enemy": "#D9603A",
+        "bumper": "#FF5A4D",
+        "bgTop": "#2E140A",
+        "bgBottom": "#0C0402",
+        "grid": "#A35A2E"
       },
       "musicLayer": "base_synth+percussion",
       "specialEnemy": "bomber",
@@ -523,14 +523,14 @@
     {
       "id": "moving_maze",
       "index": 5,
-      "name": "Moving Maze",
+      "name": "Labirin Berduri",
       "theme": {
-        "primary": "#7CFF4D",
-        "enemy": "#FF4D3D",
-        "bumper": "#B14DFF",
-        "bgTop": "#06220F",
-        "bgBottom": "#010A04",
-        "grid": "#6BFF9E"
+        "primary": "#9ADB5E",
+        "enemy": "#C2503D",
+        "bumper": "#8A5CFF",
+        "bgTop": "#122A17",
+        "bgBottom": "#040D06",
+        "grid": "#4E7A4A"
       },
       "musicLayer": "base_synth+glitch",
       "specialEnemy": "shielder",
@@ -630,7 +630,7 @@
   },
   "balance": {
     "tunedOn": "2026-09-30",
-    "method": "tools/sim_test.js \u2014 bot mahir, 5 seed x 5 varian = 25 run per konfigurasi",
+    "method": "tools/sim_test.js — bot mahir, 5 seed x 5 varian = 25 run per konfigurasi",
     "targets": {
       "sessionSeconds": [
         60,
@@ -771,57 +771,57 @@
     "cards": [
       {
         "id": "extra_troops",
-        "name": "Reinforcements",
-        "desc": "+4 starting troops",
+        "name": "Panggilan Perang",
+        "desc": "+4 prajurit awal",
         "stat": "startTroops",
         "add": 4.0
       },
       {
         "id": "fire_rate",
-        "name": "Trigger Discipline",
-        "desc": "+15% auto-fire rate",
+        "name": "Tempo Busur",
+        "desc": "+15% laju serang otomatis",
         "stat": "fireRateMul",
         "mul": 1.15
       },
       {
         "id": "auto_damage",
-        "name": "Hollow Points",
-        "desc": "+20% auto-fire damage",
+        "name": "Mata Panah Perak",
+        "desc": "+20% damage serang otomatis",
         "stat": "autoDamageMul",
         "mul": 1.2
       },
       {
         "id": "chain_bounces",
-        "name": "Live Wire",
-        "desc": "+5 chain shot bounces",
+        "name": "Sihir Pantul",
+        "desc": "+5 pantulan chain shot",
         "stat": "bounceBudget",
         "add": 5.0
       },
       {
         "id": "chain_damage",
-        "name": "Heavy Core",
-        "desc": "+25% chain shot damage",
+        "name": "Inti Naga",
+        "desc": "+25% damage chain shot",
         "stat": "chainDamageMul",
         "mul": 1.25
       },
       {
         "id": "charge_speed",
-        "name": "Overcharge",
-        "desc": "Chain shot charges 20% faster",
+        "name": "Mantra Cepat",
+        "desc": "Chain shot terisi 20% lebih cepat",
         "stat": "chargeRateMul",
         "mul": 1.2
       },
       {
         "id": "move_speed",
-        "name": "Light Boots",
-        "desc": "+12% squad move speed",
+        "name": "Sepatu Peri",
+        "desc": "+12% kecepatan gerak squad",
         "stat": "moveSpeedMul",
         "mul": 1.12
       },
       {
         "id": "gate_luck",
-        "name": "Good Intel",
-        "desc": "Negative gates 25% less common",
+        "name": "Ramalan Baik",
+        "desc": "Gerbang negatif 25% lebih jarang",
         "stat": "negativeSideChance",
         "mul": 0.75
       }

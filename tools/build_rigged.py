@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-build_rigged.py — Karakter ber-tulang CHAIN RIDER (v1.0).
+build_rigged.py — Karakter ber-tulang CHAIN RIDER (v1.0, PENSIUN).
+
+PERINGATAN: sejak v2.0 karakter dihasilkan `tools/build_kaykit.py` dari pack
+KayKit Adventurers (CC0), dan keluarannya ada di folder yang sama. Menjalankan
+skrip ini akan MENIMPA karakter KayKit dengan model prosedural lama, jadi ia
+menolak jalan kecuali diminta secara eksplisit:
+
+    python3 tools/build_rigged.py --overwrite-kaykit
+
+Skrip ini dipertahankan karena ia satu-satunya contoh lengkap pemakaian
+`tools/rigkit.py` — berguna kalau suatu saat perlu membuat unit baru tanpa
+pack berlisensi.
 
 v0.x menggambar pasukan dan musuh sebagai kotak statis: mereka meluncur di
 lantai seperti bidak catur. v1.0 menuntut karakter sungguhan — kaki melangkah,
@@ -25,6 +36,7 @@ Hasil: assets/models/rigged/*.glb
 from __future__ import annotations
 
 import pathlib
+import sys
 
 from rigkit import Bone, Clip, Rig, export
 
@@ -383,6 +395,9 @@ UNITS = {
 
 
 def main() -> None:
+    if "--overwrite-kaykit" not in sys.argv:
+        print(__doc__.strip().split("\n\n", 1)[1])
+        raise SystemExit(2)
     print("\nCHAIN RIDER — karakter ber-tulang (v1.0)\n")
     total = 0
     for name, builder in UNITS.items():

@@ -158,35 +158,36 @@ mengosongkannya.
 
 ### Pipeline aset 3D
 
-Model tidak diunduh dan tidak digambar artist — semuanya **dihasilkan kode**.
-Ada dua lapis, dan keduanya dipakai bersamaan:
-
-**Lapis dekat (v1.0): delapan karakter ber-tulang.** Prajurit, enam jenis
-musuh, dan bos dengan skeleton 16 tulang, lima klip animasi (`idle`, `run`,
-`shoot`, `hit`, `die`), senjata di tangan, dan soket moncong untuk kilatan
-tembakan. Ditulis tanpa dependensi apa pun:
+**Karakter (v2.0): KayKit Adventurers 2.0 FREE** — Kay Lousberg, lisensi
+**CC0** (bebas komersial, kredit opsional; salinan lisensi ikut di
+`assets/models/kaykit/License.txt`). Pack aslinya disimpan utuh di
+`KayKit_Adventurers_2.0_FREE.zip`, dan satu skrip mengubahnya jadi delapan
+peran game:
 
 ```bash
-cd tools && python3 build_rigged.py       # -> assets/models/rigged/*.glb
+python3 tools/build_kaykit.py             # -> assets/models/rigged/*.glb (dekat)
+                                          #    assets/models/*.glb        (LOD jauh)
 ```
 
-Detail lengkap — skeleton, klip, anggaran LOD, dan jebakan yang ditemui di
-three.js r128 maupun importer Godot — ada di
+Skrip itu menggabungkan 7–9 mesh node tiap karakter jadi **satu primitif**
+(208 → 26 draw call untuk kerumunan penuh), memanggang atlas tekstur jadi
+vertex color, menempelkan pedang/busur/perisai sebagai verteks ter-skin di
+tulang `handslot_r`, menyalin lima klip animasi dari rig terpisah, lalu
+memanggang versi statis LOD jauh dari pose siaga yang sama. Tanpa dependensi
+pip — hanya pustaka standar Python (`tools/gltfkit.py`).
+
+Detail lengkap — peta peran, jebakan sumbu V atlas, anggaran LOD, dan hal-hal
+khas three.js r128 maupun importer Godot — ada di
 [`docs/16-characters.md`](docs/16-characters.md).
 
-**Lapis jauh (sejak v0.5): model statis.** Unit yang jaraknya puluhan meter
-tingginya cuma beberapa piksel, jadi mereka tetap memakai mesh statis:
+**Props arena: tetap dihasilkan kode.** Tong mesiu, batu rune, dan palisade
+dibangun prosedural:
 
 ```bash
 python3 -m venv ~/.cache/venv
 ~/.cache/venv/bin/pip install trimesh numpy
 ~/.cache/venv/bin/python tools/build_assets.py
 ```
-
-Keluarannya 11 GLB: prajurit squad, 6 tipe musuh dengan siluet berbeda, boss,
-barrel, bumper, dan shield wall. Warna dipanggang sebagai vertex color dari
-palet resmi project, dan vertex sengaja dipisah per face supaya shading-nya
-flat dan bentuk kotak terlihat bersudut.
 
 GLB yang sama bisa dipakai build Godot maupun build web, jadi keduanya tidak
 akan menyimpang secara visual.
@@ -203,9 +204,9 @@ engine yang diekspor.
 | Kanvas | `<canvas id="webgl-canvas">` dengan `THREE.WebGLRenderer` |
 | Kamera | `PerspectiveCamera` FOV 41, tinggi 51, miring 33,7 derajat ke arena 20x40 |
 | Cahaya | `HemisphereLight` + matahari `DirectionalLight` + fill — tanpa shadow map demi HP kentang |
-| Model | **GLB sungguhan**: 11 statis di `assets/models/` + 8 karakter ber-tulang di `assets/models/rigged/`, dimuat `THREE.GLTFLoader` |
+| Model | **GLB sungguhan**: 11 statis di `assets/models/` + 8 karakter KayKit ber-tulang di `assets/models/rigged/`, dimuat `THREE.GLTFLoader` |
 | Karakter | 10 prajurit + 16 musuh terdekat + bos digambar sebagai SkinnedMesh ber-animasi; sisanya mesh statis (lihat docs 16) |
-| Pembuat model | `tools/build_assets.py` — Python + `trimesh`, prosedural, **tanpa Blender dan tanpa Godot** |
+| Pembuat model | `tools/build_kaykit.py` (karakter, stdlib saja) + `tools/build_assets.py` (props, `trimesh`) — **tanpa Blender dan tanpa Godot** |
 | Fallback | kalau GLB belum selesai dimuat, primitif Three.js dipakai lebih dulu supaya tidak ada layar kosong |
 | Build step | tidak ada |
 

@@ -24,32 +24,53 @@
 
 ### Core palette
 
+Sejak v2.0 arah visualnya **fantasi**, bukan arcade neon: karakter KayKit
+Adventurers (CC0) adalah benda paling terang di layar, dan arena berperan
+sebagai medan tempur yang redup di sekelilingnya. Neon dikurangi di mana-mana;
+yang tersisa hanya satu warna sihir untuk bumper dan chain shot.
+
 | Peran | Hex | Penggunaan |
 |---|---|---|
-| Player Cyan | `#00E5FF` | Body player, peluru, trail, steer meter, garis pertahanan |
-| Player Cyan Deep | `#0077B6` | Shadow/ambient occlusion fake pada aset player |
-| Enemy Red | `#FF4D3D` | Grunt, splitter base |
-| Enemy Orange | `#FF8A2B` | Runner, bomber |
-| Enemy Yellow | `#FFC93C` | Shielder, highlight rim musuh |
-| Bumper Magenta | `#B14DFF` | Dinding pantul, pilar, bumper |
-| Bumper Magenta Hot | `#FF3DBE` | Flash saat bounce (1 frame boost) |
-| BG Navy | `#0A1030` | Gradient atas background |
-| BG Black | `#03060F` | Gradient bawah background |
-| Grid Neon | `#1FD3E8` @ 18% alpha | Garis grid lantai |
-| Danger Red | `#FF1744` | Vignette saat musuh lewat garis, HP hilang |
+| Obor Emas | `#FFC24D` | Aksen pemain: cincin chain shot, garis HUD, highlight stage |
+| Lumut Gelap | `#2C3324` | Lantai arena (tekstur batu-berlumut, `makeGridTexture`) |
+| Nat Batu | `#6E7A5E` @ 35% alpha | Garis nat lantai, pengganti grid neon |
+| Kayu Pagar | `#4A4336` | Dinding samping arena, palisade |
+| Kayu Tong | `#7A5430` | Tong mesiu, tiang |
+| Besi | `#60666E` | Simpai tong, palang perisai, baja ksatria |
+| Sihir Ungu | `#B46BFF` | Cincin rune bumper, peluru chain shot, trail |
+| Bara | `#FFE9A8` | Peluru auto-fire, kilatan moncong, sumbu tong |
+| Langit Malam | `#0B1424` | Latar + kabut arena |
+| Darah Gerbang | `#C62828` | Garis pertahanan, vignette saat kebobolan |
 | Combo Gold | `#FFD54F` | Combo popup, floating text, milestone |
+
+### Warna tiap tipe musuh
+
+Diambil dari karakter KayKit yang mewakilinya (`Config/arena_config.json` →
+`enemyTypes[].color`), supaya musuh jauh di jalur MultiMesh berwarna sama
+dengan tubuh ber-tulang yang menggantikannya saat mendekat.
+
+| Tipe | Hex | Karakter |
+|---|---|---|
+| grunt | `#4E9E5F` | Rogue (tunik hijau, belati) |
+| runner | `#D8B98A` | Ranger (busur, krem-cokelat) |
+| brute | `#C98B5E` | Barbarian (kapak dua tangan) |
+| shielder | `#8FA3C4` | Knight baja dingin (perisai persegi) |
+| splitter | `#8B6FD4` | Mage (tongkat, jubah ungu) |
+| bomber | `#3E6B4A` | Rogue bertudung (bom asap) |
 
 ### Tema per varian
 
 | Varian | Primary | Enemy | Bumper | BG | Mood |
 |---|---|---|---|---|---|
-| 1. Classic Pit | `#00E5FF` | `#FF4D3D` | `#B14DFF` | `#0A1030 → #03060F` | Netral, arcade murni |
-| 2. Twin Towers | `#00E5FF` | `#FF6A1F` | `#FF3DBE` | `#170B2E → #05020C` | Ungu klub, sempit, menekan |
-| 3. Gravity Chamber | `#4DFFD2` | `#FF3D6E` | `#8A5CFF` | `#04182B → #01070E` | Dingin, sci-fi, melayang |
-| 4. Explosive Yard | `#00E5FF` | `#FF8A2B` | `#FF2D55` | `#2B0C05 → #0A0301` | Panas, industrial, berbahaya |
-| 5. Moving Maze | `#7CFF4D` | `#FF4D3D` | `#B14DFF` | `#06220F → #010A04` | Toksik, gelisah, ritmik |
+| 1. Lembah Batu | `#FFC24D` | `#C2503D` | `#9A6BFF` | `#1A2133 → #070A12` | Netral, batu dan obor |
+| 2. Menara Kembar | `#E8B44A` | `#B4553A` | `#A15CFF` | `#241A33 → #0A0612` | Lorong sempit, ungu senja |
+| 3. Kuil Melayang | `#6FE3C4` | `#D4544F` | `#7A5CFF` | `#0E2630 → #040B0F` | Dingin, giok, melayang |
+| 4. Ladang Bara | `#FF9D3C` | `#D9603A` | `#FF5A4D` | `#2E140A → #0C0402` | Panas, bara, berbahaya |
+| 5. Labirin Berduri | `#9ADB5E` | `#C2503D` | `#8A5CFF` | `#122A17 → #040D06` | Rimba, gelisah, ritmik |
 
-> Aturan: **cyan player tidak pernah berubah** di semua varian kecuali varian 3 & 5 (yang menggeser hue ≤ 30°). Warna player adalah jangkar identitas pemain.
+> Aturan: **aksen pemain selalu hangat** (emas obor) kecuali varian 3 & 5 yang
+> menggesernya ke giok dan lumut. Warna aksen adalah jangkar identitas pemain,
+> dan tidak pernah dipakai untuk musuh.
 
 ---
 

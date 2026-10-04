@@ -61,6 +61,17 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
 - [ ] SRP Batcher ON; shader memakai `CBUFFER` yang kompatibel.
 - [ ] Static batching untuk lantai, dinding, pilar (`Static` flag ON).
 - [ ] Target draw call: **≤ 45**. SetPass call: **≤ 20**.
+- [x] **Karakter KayKit digabung jadi satu primitif per unit.** Pack aslinya
+      memecah tiap karakter jadi 7–9 mesh node (lengan, kepala, helm, jubah…).
+      Dipakai apa adanya, 26 aktor ber-skeleton = ±208 draw call — empat kali
+      lipat anggaran. Karena semuanya memakai satu material,
+      `tools/build_kaykit.py` menggabungkannya jadi satu primitif: **26 aktor =
+      26 draw call**, dan senjata ikut di dalamnya (verteks ter-skin ke tulang
+      `handslot_r`), bukan sebagai objek anak.
+- [x] **Tanpa pengikatan tekstur untuk karakter.** Atlas 1024² KayKit
+      dipanggang jadi `COLOR_0` saat build, jadi delapan karakter tidak
+      menambah satu pun SetPass untuk tekstur, dan tidak ada atlas yang ikut
+      dikirim ke build.
 - [ ] Atlas tekstur tunggal 2048² untuk semua UI.
 - [ ] Shader musuh: **unlit/simple-lit**, tanpa normal map, tanpa tangent.
 - [ ] Animasi jalan musuh lewat **vertex shader** (sin wave), bukan Animator. 200 Animator = mustahil.
@@ -68,6 +79,17 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
 ## 8.4 LOD & Culling
 
 - [ ] LOD musuh: `< 26 u` = mesh penuh, `≥ 26 u` = billboard 2 tris.
+- [x] **Dua tingkat model karakter, dari sumber yang sama.** Dekat: GLB
+      ber-tulang 6.2k–9.6k tris (`assets/models/rigged/`). Jauh: pose siaga
+      yang dipanggang lalu didesimasi ke 1.7k–2.0k tris
+      (`assets/models/*.glb`), dipakai jalur MultiMesh/kolam mesh.
+- [ ] **Risiko terbuka yang harus diukur di perangkat.** Dengan 26 aktor
+      ber-skeleton penuh, beban segitiga puncak naik dari ±6k (model prosedural
+      v1.0) ke **±190k**. Secara draw call aman, dan shader-nya tetap
+      Lambert/unlit tanpa tekstur, tapi angka ini belum pernah diuji di
+      Snapdragon 660 sungguhan. Kalau meleset, tuas pertama yang ditarik:
+      turunkan `BUDGET.enemies` dari 16 ke 10, lalu perbesar `CLUSTER` di
+      `tools/build_kaykit.py` supaya model LOD jauh lebih ringan.
 - [ ] Occlusion culling ON untuk obstacle besar (pilar), OFF untuk crowd (semuanya terlihat).
 - [ ] Frustum culling manual di `RenderCrowd` — musuh di luar frustum tidak masuk batch.
 - [ ] `Camera.farClipPlane = 60` (arena hanya 40 unit).

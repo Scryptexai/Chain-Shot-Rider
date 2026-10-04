@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
-build_assets.py — Produksi model 3D CHAIN RIDER menjadi berkas GLB.
+build_assets.py — Produksi PROPS arena CHAIN RIDER menjadi berkas GLB.
 
-Pola ini diambil dari Last Harbor: model dibangun secara prosedural dengan
-Python + trimesh, diekspor ke GLB, lalu dimuat di web oleh Three.js GLTFLoader.
-Tidak perlu Godot, tidak perlu Blender, tidak perlu artist — dan GLB yang sama
-bisa dipakai build Godot maupun build web, jadi keduanya tidak menyimpang.
+Model dibangun secara prosedural dengan Python + trimesh, diekspor ke GLB, lalu
+dimuat di web oleh Three.js GLTFLoader. Tidak perlu Godot, tidak perlu Blender,
+dan GLB yang sama bisa dipakai build Godot maupun build web, jadi keduanya
+tidak menyimpang.
+
+KARAKTER TIDAK LAGI DIBUAT DI SINI. Sejak pack KayKit Adventurers (CC0) masuk,
+prajurit, tujuh tipe musuh, dan boss — baik versi ber-tulang di
+assets/models/rigged/ maupun versi statis LOD jauh di assets/models/ — semuanya
+dihasilkan tools/build_kaykit.py. Menjalankan skrip ini tidak boleh menimpa
+mereka; yang tersisa di sini hanya perabot arena.
 
 Warna dipanggang sebagai vertex color memakai palet resmi project. Material di
 Three.js mengalikan warna itu, jadi tema tiap arena masih bisa menimpanya saat
@@ -29,16 +35,17 @@ import trimesh
 
 OUT = pathlib.Path(__file__).resolve().parent.parent / "assets" / "models"
 
-# Palet resmi project (docs/02-visual-style-guide.md).
-INK = (232, 243, 255)
-CYAN = (0, 229, 255)
-DEEP = (0, 119, 182)
-ENEMY = (255, 77, 61)
-ORANGE = (255, 138, 43)
-YELLOW = (255, 201, 60)
-MAGENTA = (177, 77, 255)
-STEEL = (120, 142, 170)
-DARK = (28, 38, 66)
+# Palet props fantasi (docs/02-visual-style-guide.md). Kayu, batu, besi, dan
+# satu warna sihir — tidak ada neon, karena karakter KayKit yang harus jadi
+# benda paling terang di layar, bukan perabotnya.
+WOOD = (122, 84, 48)
+WOOD_DARK = (74, 50, 30)
+IRON = (96, 102, 110)
+STONE = (120, 118, 106)
+STONE_DARK = (74, 74, 68)
+MOSS = (86, 110, 64)
+RUNE = (180, 107, 255)
+EMBER = (255, 157, 60)
 BONE = (214, 226, 240)
 
 
@@ -49,25 +56,25 @@ def tint(mesh: trimesh.Trimesh, rgb) -> trimesh.Trimesh:
     return mesh
 
 
-def box(size, pos=(0, 0, 0), color=INK) -> trimesh.Trimesh:
+def box(size, pos=(0, 0, 0), color=STONE) -> trimesh.Trimesh:
     m = trimesh.creation.box(extents=size)
     m.apply_translation(pos)
     return tint(m, color)
 
 
-def cyl(radius, height, pos=(0, 0, 0), color=INK, sections=12) -> trimesh.Trimesh:
+def cyl(radius, height, pos=(0, 0, 0), color=STONE, sections=12) -> trimesh.Trimesh:
     m = trimesh.creation.cylinder(radius=radius, height=height, sections=sections)
     m.apply_translation(pos)
     return tint(m, color)
 
 
-def ball(radius, pos=(0, 0, 0), color=INK, subdiv=2) -> trimesh.Trimesh:
+def ball(radius, pos=(0, 0, 0), color=STONE, subdiv=2) -> trimesh.Trimesh:
     m = trimesh.creation.icosphere(subdivisions=subdiv, radius=radius)
     m.apply_translation(pos)
     return tint(m, color)
 
 
-def cone(radius, height, pos=(0, 0, 0), color=INK, sections=12) -> trimesh.Trimesh:
+def cone(radius, height, pos=(0, 0, 0), color=STONE, sections=12) -> trimesh.Trimesh:
     m = trimesh.creation.cone(radius=radius, height=height, sections=sections)
     m.apply_translation(pos)
     return tint(m, color)
@@ -90,157 +97,52 @@ def save(parts, name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SQUAD
-# ---------------------------------------------------------------------------
-def build_soldier():
-    """Prajurit squad. Dibuat ramping dan tegak supaya barisan mudah dibaca."""
-    p = []
-    p.append(box((0.13, 0.30, 0.13), (-0.09, 0.15, 0), DARK))     # leg L
-    p.append(box((0.13, 0.30, 0.13), (0.09, 0.15, 0), DARK))      # leg R
-    p.append(box((0.34, 0.38, 0.22), (0, 0.49, 0), INK))          # torso
-    p.append(box((0.42, 0.10, 0.24), (0, 0.63, 0), DEEP))         # shoulders
-    p.append(ball(0.13, (0, 0.80, 0), BONE))                      # head
-    p.append(box((0.07, 0.07, 0.42), (0.17, 0.52, -0.18), STEEL))  # rifle
-    p.append(box((0.10, 0.04, 0.10), (0.17, 0.52, -0.40), CYAN))   # muzzle glow
-    save(p, "soldier")
-
-
-# ---------------------------------------------------------------------------
-# MUSUH — tiap tipe harus punya siluet berbeda, bukan sekadar warna berbeda
-# ---------------------------------------------------------------------------
-def build_grunt():
-    p = [
-        box((0.14, 0.22, 0.14), (-0.11, 0.11, 0), DARK),
-        box((0.14, 0.22, 0.14), (0.11, 0.11, 0), DARK),
-        box((0.40, 0.34, 0.26), (0, 0.39, 0), ENEMY),
-        ball(0.15, (0, 0.66, 0), ENEMY),
-        box((0.10, 0.06, 0.08), (0, 0.68, -0.13), YELLOW),   # mata
-    ]
-    save(p, "enemy_grunt")
-
-
-def build_runner():
-    """Condong ke depan: terbaca cepat meski kecil."""
-    p = [
-        box((0.10, 0.34, 0.12), (-0.09, 0.17, 0.04), DARK),
-        box((0.10, 0.34, 0.12), (0.09, 0.17, -0.04), DARK),
-        box((0.26, 0.30, 0.20), (0, 0.50, -0.05), ORANGE),
-        ball(0.12, (0, 0.72, -0.12), ORANGE),
-        box((0.30, 0.05, 0.05), (0, 0.60, -0.16), YELLOW),
-    ]
-    save(p, "enemy_runner")
-
-
-def build_brute():
-    p = [
-        box((0.22, 0.26, 0.22), (-0.18, 0.13, 0), DARK),
-        box((0.22, 0.26, 0.22), (0.18, 0.13, 0), DARK),
-        box((0.68, 0.46, 0.40), (0, 0.49, 0), (190, 60, 50)),
-        box((0.80, 0.14, 0.44), (0, 0.70, 0), STEEL),        # bahu lapis baja
-        ball(0.17, (0, 0.86, 0), (190, 60, 50)),
-        box((0.16, 0.16, 0.16), (-0.42, 0.74, 0), STEEL),
-        box((0.16, 0.16, 0.16), (0.42, 0.74, 0), STEEL),
-    ]
-    save(p, "enemy_brute")
-
-
-def build_shielder():
-    p = [
-        box((0.14, 0.24, 0.14), (-0.12, 0.12, 0), DARK),
-        box((0.14, 0.24, 0.14), (0.12, 0.12, 0), DARK),
-        box((0.38, 0.38, 0.24), (0, 0.43, 0.06), ENEMY),
-        ball(0.14, (0, 0.69, 0.06), ENEMY),
-        box((0.66, 0.70, 0.09), (0, 0.46, -0.18), STEEL),    # perisai depan
-        box((0.10, 0.52, 0.04), (0, 0.46, -0.24), CYAN),     # garis energi
-    ]
-    save(p, "enemy_shielder")
-
-
-def build_splitter():
-    """Dua paruh yang jelas: menyiratkan ia akan pecah saat mati."""
-    p = [
-        ball(0.26, (-0.15, 0.30, 0), MAGENTA),
-        ball(0.26, (0.15, 0.30, 0), MAGENTA),
-        box((0.06, 0.46, 0.34), (0, 0.30, 0), (60, 20, 90)),
-        ball(0.07, (-0.15, 0.44, -0.18), YELLOW),
-        ball(0.07, (0.15, 0.44, -0.18), YELLOW),
-    ]
-    save(p, "enemy_splitter")
-
-
-def build_bomber():
-    p = [
-        ball(0.30, (0, 0.32, 0), (255, 110, 60)),
-        cyl(0.05, 0.22, (0, 0.68, 0), DARK),                 # sumbu
-        ball(0.07, (0, 0.80, 0), YELLOW),                    # percikan
-        box((0.44, 0.07, 0.44), (0, 0.18, 0), DARK),         # cincin
-    ]
-    save(p, "enemy_bomber")
-
-
-# ---------------------------------------------------------------------------
-# BOSS
-# ---------------------------------------------------------------------------
-def build_boss():
-    p = [
-        box((2.3, 0.5, 1.5), (0, 0.3, 0), (70, 86, 120)),        # dasar
-        box((1.9, 1.1, 1.2), (0, 1.05, 0), (150, 60, 55)),       # badan
-        box((2.6, 0.30, 1.35), (0, 1.55, 0), STEEL),             # bahu
-        ball(0.52, (0, 2.00, 0), (190, 70, 60)),                 # kepala
-        box((0.70, 0.18, 0.18), (0, 2.02, -0.48), ENEMY),        # visor
-        cyl(0.26, 1.3, (-1.25, 1.2, -0.2), STEEL),               # meriam kiri
-        cyl(0.26, 1.3, (1.25, 1.2, -0.2), STEEL),                # meriam kanan
-        ball(0.20, (-1.25, 1.2, -0.75), YELLOW),
-        ball(0.20, (1.25, 1.2, -0.75), YELLOW),
-    ]
-    save(p, "boss")
-
-
-# ---------------------------------------------------------------------------
 # RINTANGAN
 # ---------------------------------------------------------------------------
 def build_barrel():
+    """Tong mesiu kayu: duga kayu, dua simpai besi, sumbu membara di tutupnya."""
     p = [
-        cyl(0.34, 0.80, (0, 0.40, 0), ORANGE),
-        cyl(0.37, 0.07, (0, 0.18, 0), DARK),
-        cyl(0.37, 0.07, (0, 0.62, 0), DARK),
-        cyl(0.22, 0.05, (0, 0.82, 0), YELLOW),
+        cyl(0.34, 0.80, (0, 0.40, 0), WOOD),
+        cyl(0.37, 0.09, (0, 0.18, 0), IRON),
+        cyl(0.37, 0.09, (0, 0.62, 0), IRON),
+        cyl(0.30, 0.05, (0, 0.82, 0), WOOD_DARK),
+        cyl(0.05, 0.14, (0, 0.90, 0), EMBER),
     ]
     save(p, "barrel")
 
 
 def build_bumper():
-    """Pemantul: kubah rendah dengan cincin menyala, mudah dikenali dari atas."""
+    """Batu rune: tumpukan batu berlumut dengan cincin rune yang berpendar.
+
+    Bentuk kubahnya dipertahankan dari versi lama — pemain membaca pantulan
+    dari siluet, bukan dari bahannya — tapi bahannya kini batu dan sihir, bukan
+    logam neon.
+    """
     p = [
-        cyl(0.90, 0.26, (0, 0.13, 0), DEEP, sections=20),
-        cyl(0.94, 0.07, (0, 0.28, 0), CYAN, sections=20),
-        ball(0.62, (0, 0.20, 0), (20, 60, 110)),
+        cyl(0.90, 0.26, (0, 0.13, 0), STONE_DARK, sections=20),
+        cyl(0.94, 0.07, (0, 0.28, 0), RUNE, sections=20),
+        ball(0.62, (0, 0.20, 0), STONE),
+        cyl(0.30, 0.10, (0, 0.74, 0), MOSS, sections=12),
     ]
     save(p, "bumper")
 
 
 def build_shield_wall():
+    """Palisade kayu berpalang besi; sisi lemahnya tetap punggung, seperti dulu."""
     p = [
-        box((4.0, 1.15, 0.26), (0, 0.58, 0), (60, 30, 95)),
-        box((4.1, 0.10, 0.32), (0, 1.12, 0), MAGENTA),
-        box((0.12, 1.0, 0.34), (-1.2, 0.58, 0), MAGENTA),
-        box((0.12, 1.0, 0.34), (0, 0.58, 0), MAGENTA),
-        box((0.12, 1.0, 0.34), (1.2, 0.58, 0), MAGENTA),
+        box((4.0, 1.15, 0.26), (0, 0.58, 0), WOOD_DARK),
+        box((4.1, 0.10, 0.32), (0, 1.12, 0), IRON),
+        box((0.12, 1.0, 0.34), (-1.2, 0.58, 0), WOOD),
+        box((0.12, 1.0, 0.34), (0, 0.58, 0), WOOD),
+        box((0.12, 1.0, 0.34), (1.2, 0.58, 0), WOOD),
+        box((3.6, 0.08, 0.30), (0, 0.30, 0), IRON),
     ]
     save(p, "shield_wall")
 
 
 def main():
-    print("\nCHAIN RIDER — produksi aset 3D (trimesh -> GLB)")
+    print("\nCHAIN RIDER — produksi props arena (trimesh -> GLB)")
     print("=" * 62)
-    build_soldier()
-    build_grunt()
-    build_runner()
-    build_brute()
-    build_shielder()
-    build_splitter()
-    build_bomber()
-    build_boss()
     build_barrel()
     build_bumper()
     build_shield_wall()
