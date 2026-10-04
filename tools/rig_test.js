@@ -120,7 +120,7 @@ async function main() {
   console.log('\nCHAIN RIDER — uji karakter ber-tulang\n');
   for (const u of report) {
     if (!u.isSkinned) { fail(`${u.name}: bukan SkinnedMesh`); continue; }
-    if (u.bones !== 16) fail(`${u.name}: ${u.bones} tulang, harusnya 16`);
+    if (u.bones !== 24) fail(`${u.name}: ${u.bones} tulang, harusnya 24`);
     if (!u.hasColor) fail(`${u.name}: tanpa COLOR_0, modelnya akan putih polos`);
     if (u.verts < 300) fail(`${u.name}: cuma ${u.verts} vertex`);
     const names = u.clips.map((c) => c.name);
@@ -132,7 +132,10 @@ async function main() {
     }
     // Tinggi: prajurit ~0.95 unit, boss ~2x, tidak ada yang boleh di luar ini.
     if (u.height < 0.6 || u.height > 2.6) fail(`${u.name}: tinggi ${u.height} unit di luar akal`);
-    if (u.width > 1.6) fail(`${u.name}: lebar ${u.width} unit, akan saling tembus di formasi`);
+    // Lebar diukur relatif tinggi: boss setinggi dua meter memang merentang
+    // lebih jauh (kapak dua tangan + perisai) tanpa itu berarti salah skala.
+    const maxWidth = Math.max(1.6, u.height * 1.3);
+    if (u.width > maxWidth) fail(`${u.name}: lebar ${u.width} unit, akan saling tembus di formasi`);
     if (!u.sockets.includes('muzzle')) fail(`${u.name}: soket 'muzzle' hilang`);
     // Gerak nyata, per tulang yang memang bertanggung jawab atas klip itu.
     const m = u.moved;
