@@ -1,12 +1,12 @@
 class_name UiTheme
 extends RefCounted
-## Neon arcade skin, built in code from the active arena palette.
+## Fantasy battlefield skin, built in code from the active arena palette.
 ##
 ## Every colour here comes from the variant's theme block in
 ## Config/arena_config.json — the same block that tints the arena, the crowd
 ## and the bumpers. That is the whole point: when the player switches from
-## Classic Pit to Gravity Chamber, the HUD has to move with the world. A UI
-## that stays cyan while the arena turns toxic green reads as a different
+## Lembah Batu to Kuil Melayang, the HUD has to move with the world. A UI
+## that stays torch-gold while the arena turns jade reads as a different
 ## app bolted on top of the game.
 ##
 ## Built in code rather than as a .theme resource because the palette is only
@@ -34,16 +34,16 @@ const INK_DEEP := Color("#06240E")
 ## Reads a variant theme block into a palette dictionary with safe fallbacks.
 static func palette(theme: Dictionary) -> Dictionary:
 	return {
-		"primary": _color(theme, "primary", "#00E5FF"),
-		"enemy": _color(theme, "enemy", "#FF4D3D"),
-		"bumper": _color(theme, "bumper", "#B14DFF"),
-		"bg_top": _color(theme, "bgTop", "#0A1030"),
-		"bg_bottom": _color(theme, "bgBottom", "#03060F"),
-		"grid": _color(theme, "grid", "#1FD3E8"),
+		"primary": _color(theme, "primary", "#FFC24D"),
+		"enemy": _color(theme, "enemy", "#C2503D"),
+		"bumper": _color(theme, "bumper", "#9A6BFF"),
+		"bg_top": _color(theme, "bgTop", "#1A2133"),
+		"bg_bottom": _color(theme, "bgBottom", "#070A12"),
+		"grid": _color(theme, "grid", "#6E7A5E"),
 	}
 
 
-## Translucent panel with a neon edge — the base of every HUD chip.
+## Translucent panel with a lit edge — the base of every HUD chip.
 static func panel(accent: Color, radius: int = 18, fill_alpha: float = 0.10) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(accent.r, accent.g, accent.b, fill_alpha)
