@@ -66,6 +66,10 @@ function makeEnv() {
   // Recorded rather than discarded so a test can assert on the palette.
   const cssVars = {};
   global.document = { getElementById: id => (id === 'c' ? canvas : mkEl()),
+                      // Lapisan confetti menumbuhkan node sendiri, jadi stub
+                      // harus bisa membuatnya — kalau tidak, harness menguji
+                      // jalur kode yang berbeda dari jalur browser.
+                      createElement: () => mkEl(),
                       querySelectorAll: () => [], body: mkEl(),
                       documentElement: { style: {
                         setProperty: (k, v) => { cssVars[k] = v; },

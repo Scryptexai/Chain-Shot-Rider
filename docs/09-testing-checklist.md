@@ -71,7 +71,7 @@ Sebuah build dinyatakan lolos hanya kalau **seluruh item wajib (⚑)** hijau di 
 | B-4 ⚑ | **Lintas frame rate** | Jalankan replay pada 30, 60, 120 FPS (cap manual) | Hasil identik (fixed-step bekerja) |
 | B-5 | **Dengan slow-mo** | Replay yang memicu bullet time berkali-kali | Identik — slow-mo hanya mengubah frekuensi tick |
 | B-6 | **Audit `UnityEngine.Random`** | `grep -rn "Random\." Scripts/` | Hanya muncul di kode kosmetik (VFX/pitch), **tidak** di jalur simulasi |
-| B-6b | **Audit `Math.random()` di prototipe** | `grep -n "Math.random()" index.html` | Hanya 2 kemunculan, keduanya bertanda `// kosmetik` (pitch SFX, shake render). Semua keacakan simulasi lewat `S.rng` |
+| B-6b | **Audit `Math.random()` di prototipe** | `grep -n "Math.random()" index.html` | Tiga tempat, semuanya bertanda `// kosmetik`: pitch SFX, shake render, dan sebaran confetti. Semua keacakan simulasi lewat `S.rng` — menarik satu angka dari RNG sim untuk perayaan akan menggeser setiap undian setelahnya |
 | B-7 | **Audit `Time.deltaTime`** | `grep -rn "Time.deltaTime\|Time.time" Scripts/` | Hanya di kode render/UI; simulasi memakai `SimClock` |
 | B-8 | **Urutan iterasi** | Review kode | Tidak ada `foreach` `Dictionary`/`HashSet` yang memengaruhi state |
 | B-9 | Pause/resume | Pause 10 detik di tengah run, lanjutkan | Tidak ada lompatan posisi; akumulator waktu dibuang dengan benar |
@@ -170,7 +170,8 @@ grep -rn "Time.deltaTime\|Time.time\b" unity/Assets/ChainRider/Scripts/ \
 | C7-2 | Kurva kesulitan | 30 → 50 → 80 → 120 → 200 musuh terasa menanjak, bukan melompat |
 | C7-3 | Menang | Wave 5 bersih → Victory + skor akhir |
 | C7-4 | Kalah | HP 0 → Defeat + skor akhir |
-| C7-5 | Perfect clear | Nol kebocoran → +50 koin + banner |
+| C7-5 | Perfect clear | Nol kebocoran → +50 koin + banner (`node tools/juice_test.js`, dan `perfect_clear` di `juice_suite.gd`) |
+| C7-9 | **Milestone & juice** | `node tools/juice_test.js` (16 pemeriksaan) + blok juice di smoke Godot. Tiap kelipatan lima pantulan: kilat + bunyi + denyut slow motion. Ambang 50/100/200 kill: bonus skor config + confetti. Near miss: heartbeat **sekali per musuh**. Peluru penutup gelombang: zoom sinematik 1,2 s yang padam sendiri |
 | C7-6 ⚑ | Restart | Tidak ada state yang bocor dari run sebelumnya (skor, combo, pool, event bus) |
 | C7-7 | Ganti varian arena | Obstacle lama dibersihkan total |
 | C7-8 ⚑ | `GameEvents.ClearAll()` | Dipanggil saat keluar scene — tidak ada listener hantu |

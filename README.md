@@ -280,6 +280,16 @@ sana. Lapisan meta diuji terpisah di DOM sungguhan dengan jsdom — klik asli,
 npm install --no-save jsdom && node tools/meta_test.js
 ```
 
+Lapisan rasa — milestone pantulan, ambang kill, near miss, perfect clear, dan
+peluru terakhir — punya harness sendiri. Yang diuji bukan angka balance,
+melainkan reaksi, dan tiap reaksi diperiksa dalam dua keadaan berlawanan
+(pantulan ke-4 diam, ke-5 berbunyi; zoom sinematik menyala lalu benar-benar
+padam):
+
+```bash
+node tools/juice_test.js
+```
+
 Renderer WebGL diuji tanpa GPU oleh `tools/render3d_test.js`. Three.js menghitung
 matriks proyeksi di CPU, jadi framing kamera bisa **dibuktikan secara matematis**:
 tes memproyeksikan sudut-sudut arena lewat kamera yang sama persis yang dipakai

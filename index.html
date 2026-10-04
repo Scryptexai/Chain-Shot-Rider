@@ -228,6 +228,12 @@
   .banner { position:absolute; left:0; right:0; top:44%; text-align:center;
     font:900 110px/1 var(--display); letter-spacing:2px; opacity:0;
     text-shadow:0 10px 0 rgba(0,0,0,.5), 0 0 60px rgba(0,0,0,.6); }
+  /* Confetti ambang kill. Lapisan HUD, bukan kanvas: renderer web adalah
+     WebGL dan fallback 2D sekaligus, dan perayaan tidak boleh hilang hanya
+     karena mesin gambarnya berganti. */
+  #confetti { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  #confetti i { position:absolute; left:0; top:0; display:block;
+    width:26px; height:11px; border-radius:2px; will-change:transform; }
   #flash { position:absolute; inset:0; background:var(--danger); opacity:0; }
   #vig { position:absolute; inset:0; pointer-events:none; opacity:0;
     background:radial-gradient(ellipse at center, transparent 42%, rgba(0,52,77,.85) 100%);
@@ -517,6 +523,7 @@
           <div class="bossTrack"><div class="bossFill" id="bossFill"></div></div>
         </div>
 
+        <div id="confetti"></div>
         <div class="popupWrap"><div class="popup" id="popup"></div></div>
         <div class="banner" id="banner"></div>
 
@@ -2434,19 +2441,6 @@ function draw(){
     }
   }
 
-  // ---- confetti (layar, bukan arena) ----
-  for(const c of S.confetti){
-    const a = Math.max(0, Math.min(1, c.t/c.max));
-    ctx.save();
-    ctx.globalAlpha = a;
-    ctx.translate(c.x*W, c.y*H);
-    ctx.rotate(c.rot);
-    ctx.fillStyle = c.color;
-    ctx.fillRect(-W*0.012, -W*0.005, W*0.024, W*0.010);
-    ctx.restore();
-  }
-  ctx.globalAlpha = 1;
-
   // ---- floating text ----
   ctx.font='700 15px system-ui'; ctx.textAlign='center';
   for(const f of S.floats){
@@ -2507,6 +2501,7 @@ function burstConfetti(){
   const palette = [th.primary, '#FFD54F', th.bumper];
   for(let i=0;i<36;i++){
     S.confetti.push({
+      // kosmetik: confetti (lihat docs/09 §B-6b) — tidak pernah masuk sim
       x: Math.random(), y: -0.06 + Math.random()*0.08,
       vx: (Math.random()*2-1)*0.18, vy: 0.10 + Math.random()*0.45,
       rot: Math.random()*6.283, spin: (Math.random()*2-1)*9,
@@ -2515,6 +2510,9 @@ function burstConfetti(){
   }
 }
 
+/** Kolam elemen confetti, dipakai ulang antar letusan. */
+const CONFETTI_NODES = [];
+
 /** Kosmetik murni: dijalankan dengan waktu nyata, bukan waktu simulasi. */
 function tickConfetti(dt){
   for(let i=S.confetti.length-1;i>=0;i--){
@@ -2522,6 +2520,37 @@ function tickConfetti(dt){
     c.t -= dt;
     if(c.t<=0){ S.confetti.splice(i,1); continue; }
     c.vy += 1.1*dt; c.x += c.vx*dt; c.y += c.vy*dt; c.rot += c.spin*dt;
+  }
+  paintConfetti();
+}
+
+/**
+ * Menaruh kepingan di lapisan HUD.
+ *
+ * Elemennya dipakai ulang dari kolam: 36 node yang ditampilkan dan
+ * disembunyikan jauh lebih murah daripada 36 node yang dibuat dan dibuang
+ * tiap letusan, dan tidak membangunkan garbage collector di tengah combo.
+ */
+function paintConfetti(){
+  const host = el.confetti;
+  if(!host || typeof host.appendChild !== 'function') return;
+  while(CONFETTI_NODES.length < S.confetti.length){
+    const node = document.createElement('i');
+    host.appendChild(node);
+    CONFETTI_NODES.push(node);
+  }
+  // Ukuran diambil dari host, bukan dari viewport: permainan hidup di dalam
+  // bingkai 9:16 yang bisa lebih kecil dari layar.
+  const hw = Number(host.clientWidth) || 0, hh = Number(host.clientHeight) || 0;
+  for(let i=0;i<CONFETTI_NODES.length;i++){
+    const node = CONFETTI_NODES[i], c = S.confetti[i];
+    if(!c){ node.style.display='none'; continue; }
+    const deg = c.rot*57.2958;
+    node.style.display = 'block';
+    node.style.background = c.color;
+    node.style.opacity = String(Math.max(0, Math.min(1, c.t/c.max)));
+    node.style.transform =
+      `translate(${(c.x*hw).toFixed(1)}px, ${(c.y*hh).toFixed(1)}px) rotate(${deg.toFixed(1)}deg)`;
   }
 }
 
@@ -2559,6 +2588,7 @@ const el = {
   hp:document.getElementById('hp'), steerRow:document.getElementById('steerRow'),
   steerFill:document.getElementById('steerFill'), steerSec:document.getElementById('steerSec'),
   popup:document.getElementById('popup'), banner:document.getElementById('banner'),
+  confetti:document.getElementById('confetti'),
   flash:document.getElementById('flash'), vig:document.getElementById('vig'),
   hint:document.getElementById('hint'), squad:document.getElementById('squad'),
   bossBar:document.getElementById('bossBar'), bossName:document.getElementById('bossName'),

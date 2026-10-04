@@ -151,6 +151,8 @@ Catatan sandbox: `.cache` tidak ikut snapshot, jadi tiap sesi baru perlu menjala
 | Formasi crowd | `sim/formation.gd` | rect / vshape / diamond / circle, fungsi murni supaya replay tetap jujur. |
 | Slow-mo, shake, FOV | `view/game_feel.gd` | `Engine.time_scale` sebagai tuas, jadi tick simulasi tidak berubah dan replay tetap identik. Shake memakai sinus meluruh, bukan noise, supaya 30 fps dan 60 fps sepakat. |
 | Efek hantaman | `view/arena_view.gd` | 48 shell aditif yang dipakai ulang; alokasi per-kill adalah sampah per-frame yang dilarang budget. |
+| Buku prestasi | `sim/milestones.gd` | ambang combo/kill, tangga pantulan, perfect clear, pita near-miss. Dipisah supaya `sim_world.gd` tetap di bawah seribu baris dan supaya kedua build menimbang prestasi dari angka config yang sama. |
+| Aritmetika gerbang | `sim/gate_ops.gd` | memilih sisi gerbang dan menghitung arti `x2`/`+8`/`-6`/`:2` untuk pasukan maupun peluru. Urutan undian dijaga persis seperti sebelumnya; hasil run dicek identik sebelum/sesudah pemindahan. |
 | Pembacaan config | `sim/cfg.gd` | `Cfg.num()` fail-soft, dipakai bersama oleh sim dan obstacle. |
 
 Hasil terukur setelah semuanya: **0 buntu, 2/5 menang, rata-rata 75,7 detik** (jendela target 60–180), determinisme lulus 7200 tick × 5 varian, dan smoke test menembus renderer di kelima varian dengan slow-mo turun ke 0,30.
@@ -270,6 +272,8 @@ target rilis mobile. Beberapa item sudah selesai di satu sisi saja.
 | Pemilih arena 5 kartu | **selesai** | **selesai** |
 | Count-up tween (HUD + baris result) | **selesai** | **selesai** |
 | Daftar upgrade aktif (layar SQUAD) | **selesai** | **selesai** |
+| Milestone pantulan + ambang kill (docs/01 EVENT & JUICE) | **selesai** | **selesai** |
+| Near miss, perfect clear, peluru terakhir | **selesai** | **selesai** |
 
 Catatan tiap item:
 
@@ -373,10 +377,35 @@ Catatan tiap item:
   memeriksa dua keadaan sekaligus: angkanya belum final tepat setelah layar
   dibuka, dan sudah final setelah tweennya selesai.
 
-- **Cue yang belum pernah terpicu di uji**: `combo_milestone`, `heartbeat`,
-  `perfect_clear`, `kill_milestone`, `boss_roar`, `steer_warn`, `ui_tap`.
-  Semuanya tersambung dan file-nya ada, tapi butuh run lebih panjang atau
-  kondisi spesifik (boss di wave 5, 50 kill, combo 10) daripada smoke 30 detik.
+- **Event & juice**: lima perayaan di docs/01 sekarang dihitung **simulasi**,
+  bukan tampilan — `kills`, `coins`, `leaked`, dan `bounce_total` hidup di
+  SimWorld, dan event `bounce_milestone`, `kill_milestone`, `near_miss`,
+  `perfect_clear`, `last_bullet` menyusul `combo_milestone` yang sudah ada.
+  Alasannya hadiahnya nyata (skor dan koin): hitungan yang hidup di HUD akan
+  hilang bersama HUD, dan dua build bisa memberi angka berbeda untuk
+  permainan yang sama.
+
+  Dua cue sebelumnya menghitung sendiri dan karena itu salah. `perfect_clear`
+  membaca field `leaked` dan `index` dari event `wave_start` yang tidak pernah
+  mengirim keduanya, jadi cue itu **tidak pernah berbunyi sekali pun**; dan
+  `heartbeat` memindai jarak musuh terdekat tiap frame, bukan bereaksi pada
+  musuh yang baru masuk pita. Keduanya kini event-driven.
+
+  Reaksi tampilannya: denyut slow motion 0,18 s pada `slowMo.bouncePulseTimeScale`
+  tiap lima pantulan, confetti di ambang 50/100/200 kill, dan zoom sinematik
+  `scoring.lastBulletZoomDuration` (1,2 s, FOV `slowMo.fovLastBullet`) ketika
+  peluru yang masih terbang menutup sebuah gelombang. Di Godot confetti
+  digambar sendiri di HUD (36 persegi, `draw_colored_polygon`); di web ia
+  lapisan HUD DOM, **bukan** kanvas — renderer web ada dua (WebGL dan fallback
+  2D) dan perayaan tidak boleh hilang hanya karena mesin gambarnya berganti.
+
+  Penjaganya `godot/tests/juice_suite.gd` dan `tools/juice_test.js`, keduanya
+  dua-keadaan: pantulan ke-4 harus diam dan ke-5 berbunyi, musuh di luar pita
+  harus diam dan di dalam pita berdetak **tepat sekali** walau berdiri di sana
+  tiga puluh tick, gelombang yang kebobolan tidak boleh dapat koin, dan zoom
+  sinematik harus padam sendiri setelah 1,2 detik.
+- **Cue yang masih belum terpicu di uji pendek**: `boss_roar`, `steer_warn`,
+  `ui_tap` — butuh boss di wave 5 atau interaksi menu, bukan smoke 30 detik.
 - **Audio selesai** (doc 07): 36 cue SFX + 6 stem musik + 2 stinger, 4,50 MB
   dari budget 12 MB.
 
