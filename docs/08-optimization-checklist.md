@@ -68,10 +68,15 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
       `tools/build_kaykit.py` menggabungkannya jadi satu primitif: **26 aktor =
       26 draw call**, dan senjata ikut di dalamnya (verteks ter-skin ke tulang
       `handslot_r`), bukan sebagai objek anak.
-- [x] **Tanpa pengikatan tekstur untuk karakter.** Atlas 1024² KayKit
-      dipanggang jadi `COLOR_0` saat build, jadi delapan karakter tidak
-      menambah satu pun SetPass untuk tekstur, dan tidak ada atlas yang ikut
-      dikirim ke build.
+- [x] **Satu tekstur per karakter, lima atlas untuk delapan peran.** Atlas
+      1024² KayKit ditanam ke GLB apa adanya (PNG 12–15 KB masing-masing,
+      karena isinya petak gradien yang kompres nyaris sempurna). Knight dipakai
+      ulang oleh `trooper`/`shielder`/`boss`, jadi lima atlas menutupi delapan
+      peran dan GPU hanya perlu lima pengikatan tekstur untuk seluruh cast.
+      Versi sebelumnya memanggang atlas jadi `COLOR_0` (nol tekstur), tapi itu
+      membuang detail yang tidak bisa diwakili satu warna per verteks — lihat
+      docs/16 §2b. Tekstur sekarang wajib ikut; biayanya murah, kerusakan
+      visualnya tidak.
 - [ ] Atlas tekstur tunggal 2048² untuk semua UI.
 - [ ] Shader musuh: **unlit/simple-lit**, tanpa normal map, tanpa tangent.
 - [ ] Animasi jalan musuh lewat **vertex shader** (sin wave), bukan Animator. 200 Animator = mustahil.
@@ -81,12 +86,14 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
 - [ ] LOD musuh: `< 26 u` = mesh penuh, `≥ 26 u` = billboard 2 tris.
 - [x] **Dua tingkat model karakter, dari sumber yang sama.** Dekat: GLB
       ber-tulang 6.2k–9.6k tris (`assets/models/rigged/`). Jauh: pose siaga
-      yang dipanggang lalu didesimasi ke 1.7k–2.0k tris
-      (`assets/models/*.glb`), dipakai jalur MultiMesh/kolam mesh.
+      yang dipanggang lalu didesimasi ke 3,6k–4,2k tris bertekstur
+      (`assets/models/*.glb`), dipakai jalur MultiMesh/kolam mesh. Desimasinya
+      sengaja lebih lembut daripada versi vertex color: sel yang lebih besar
+      menarik verteks melewati batas petak atlas dan wajahnya rusak.
 - [ ] **Risiko terbuka yang harus diukur di perangkat.** Dengan 26 aktor
       ber-skeleton penuh, beban segitiga puncak naik dari ±6k (model prosedural
       v1.0) ke **±190k**. Secara draw call aman, dan shader-nya tetap
-      Lambert/unlit tanpa tekstur, tapi angka ini belum pernah diuji di
+      Lambert dengan satu tekstur tanpa normal map, tapi angka ini belum pernah diuji di
       Snapdragon 660 sungguhan. Kalau meleset, tuas pertama yang ditarik:
       turunkan `BUDGET.enemies` dari 16 ke 10, lalu perbesar `CLUSTER` di
       `tools/build_kaykit.py` supaya model LOD jauh lebih ringan.

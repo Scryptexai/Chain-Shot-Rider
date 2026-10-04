@@ -21,7 +21,7 @@ di ujung senjata, dan lima klip `idle` / `run` / `shoot` / `hit` / `die`.
 | `KayKit_Adventurers_2.0_FREE.zip` | Pack asli dari pembuatnya, 13 MB, disimpan utuh di akar repo sebagai sumber yang bisa dilacak |
 | `assets/models/kaykit/` | Subset yang benar-benar dipakai pipeline (6 karakter, 2 GLB animasi, 30 aset senjata, `License.txt`). Diekstrak otomatis saat build pertama; ada `.gdignore` supaya Godot tidak ikut mengimpor 40-an berkas sumber |
 | `tools/gltfkit.py` | Pembaca/penulis glTF **tanpa dependensi** (stdlib saja): accessor, skin, animasi, dekoder PNG, dan penulis GLB |
-| `tools/build_kaykit.py` | Resep per peran: karakter mana, senjata apa, klip mana, tinggi berapa, warna digeser ke mana |
+| `tools/build_kaykit.py` | Resep per peran: karakter mana, senjata apa, klip mana, tinggi berapa. Warna **tidak** disentuh — atlas bawaan ikut apa adanya |
 
 ```bash
 python3 tools/build_kaykit.py            # semua peran (~26 detik)
@@ -37,14 +37,14 @@ butuh trimesh) kini hanya membangun **props** arena — tong, batu rune, palisad
 
 | Peran | Karakter KayKit | Tangan kanan | Tangan kiri | Klip `shoot` | Tinggi | Tris dekat | Tris LOD jauh |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `trooper` (squad) | Knight | `sword_1handed` | `shield_round_color` | `Throw` | 0,960 | 6.384 | 2.000 |
-| `grunt` | Rogue | `dagger` | — | `Throw` | 0,960 | 7.734 | 1.769 |
-| `runner` | Ranger | `bow_withString` | — | `Throw` | 0,883 | 9.584 | 1.741 |
-| `brute` | Barbarian | `axe_2handed` | — | `Throw` | 1,392 | 7.631 | 1.857 |
-| `splitter` | Mage | `staff` | `spellbook_closed` | `Use_Item` | 0,960 | 7.400 | 1.909 |
-| `bomber` | Rogue_Hooded | `smokebomb` | — | `Throw` | 0,941 | 7.495 | 1.920 |
-| `shielder` | Knight (baja dingin) | `sword_1handed` | `shield_square_color` | `Throw` | 1,008 | 6.362 | 1.905 |
-| `boss` | Knight (gelap, 2×) | `sword_2handed_color` | — | `Throw` | 2,016 | 6.212 | 1.769 |
+| `trooper` (squad) | Knight | `sword_1handed` | `shield_round_color` | `Throw` | 0,960 | 6.384 | 3.736 |
+| `grunt` | Rogue | `dagger` | — | `Throw` | 0,960 | 7.734 | 4.031 |
+| `runner` | Ranger | `bow_withString` | — | `Throw` | 0,883 | 9.584 | 4.007 |
+| `brute` | Barbarian | `axe_2handed` | — | `Throw` | 1,392 | 7.631 | 3.754 |
+| `splitter` | Mage | `staff` | `spellbook_closed` | `Use_Item` | 0,960 | 7.400 | 3.901 |
+| `bomber` | Rogue_Hooded | `smokebomb` | — | `Throw` | 0,941 | 7.495 | 4.150 |
+| `shielder` | Knight | `sword_1handed` | `shield_square_color` | `Throw` | 1,008 | 6.362 | 3.723 |
+| `boss` | Knight (skala 2×) | `sword_2handed_color` | — | `Throw` | 2,016 | 6.212 | 3.600 |
 
 Tinggi setiap peran **sama persis dengan model v1.0 yang digantikannya**, jadi
 `CHAR_SCALE = 2.0`, kotak tabrakan, framing kamera, dan jarak formasi tidak
@@ -53,8 +53,16 @@ perlu disetel ulang sama sekali.
 Senjata dipilih dari keluarga tekstur karakternya (pedang knight memakai atlas
 knight, kapak memakai atlas barbarian, dan seterusnya). Itu bukan selera: satu
 atlas per aktor berarti satu material, dan satu material berarti satu draw
-call. Perbedaan kawan–lawan dijaga dengan pengali warna halus per peran (`tint`
-di resep): pasukan condong dingin-terang, musuh ke merah/ungu/hijau.
+call. Aturan itu ditegakkan builder — kalau sebuah resep meminta senjata dari
+atlas lain, build berhenti dengan error, bukan diam-diam menambah material.
+
+**Warna bawaan tidak digeser sama sekali.** Versi pertama pipeline ini memakai
+pengali warna per peran supaya kawan terlihat dingin dan lawan kemerahan;
+pendekatan itu dibuang. Menggeser palet KayKit sama saja dengan mengedit
+karakternya, dan karakter yang diedit berhenti terlihat seperti karakter
+aslinya. Peran dibedakan lewat tiga hal yang tidak merusak aset: **pilihan
+karakternya** (Knight, Rogue, Ranger, Barbarian, Mage, Rogue_Hooded),
+**senjatanya**, dan **skalanya** (boss 2×).
 
 ---
 
@@ -65,16 +73,32 @@ node). 26 aktor × 8 bagian ≈ **208 draw call**, sementara anggaran docs/08
 adalah 45. Karena semuanya satu material, semua bagian digabung jadi satu
 primitif → **26 draw call**.
 
-**b. Panggang atlas jadi vertex color.** Tekstur KayKit adalah petak gradien
-1024², bukan gambar detail. Warna tiap verteks diambil dari UV-nya (ditarik 25%
-ke titik tengah segitiga supaya tidak meleset ke petak sebelah) dan disimpan
-sebagai `COLOR_0`. Hasilnya: nol pengikatan tekstur, jalur material kedua build
-tidak berubah, dan wajah, mata, emblem, serta sabuk tetap terbaca.
+**b. Bawa UV dan atlas aslinya.** Karakter memakai `TEXCOORD_0` asli KayKit,
+dan atlas PNG-nya (12–15 KB, lima berkas untuk delapan peran) ditanam ke dalam
+GLB sebagai `baseColorTexture`. Satu tekstur per aktor, jadi penggabungan
+primitif di keputusan (a) tetap sah.
+
+> **Percobaan yang dibuang: memanggang atlas jadi `COLOR_0`.** Versi pertama
+> mengambil warna per verteks dari UV-nya dan membuang tekstur sama sekali —
+> nol pengikatan tekstur, GLB lebih kecil. Tapi satu verteks hanya bisa
+> menyimpan satu warna, sementara satu permukaan KayKit sering melewati
+> beberapa petak gradien sekaligus. Yang hilang justru detail yang membuat
+> pack ini hidup: garis mata, tepi emblem di perisai, dan peralihan halus di
+> dalam satu potong zirah. Hasilnya karakter yang "mirip", dan mirip bukan
+> yang diminta. Jangan dihidupkan lagi.
 
 > Jebakan yang memakan satu putaran penuh: di glTF **v = 0 adalah baris ATAS**
-> gambar. Membalik sumbu V tidak membuat warna salah sedikit — ia menukar ujung
-> terang gradien dengan ujung gelap, dan seluruh pasukan tampil pucat seperti
-> patung gips. Gejalanya halus justru karena hasilnya "masih masuk akal".
+> gambar, dan three.js memuat tekstur glTF dengan `flipY = false` untuk
+> mematuhi itu. Membalik sumbu V tidak membuat warna salah sedikit — ia
+> menukar ujung terang gradien dengan ujung gelap, dan seluruh pasukan tampil
+> pucat seperti patung gips.
+
+> Jebakan kedua, di sisi render: GLTFLoader menandai `baseColorTexture` sebagai
+> sRGB sementara `renderer.outputEncoding` di proyek ini Linear. Kombinasi itu
+> membuat shader mengonversi dua kali dan zirah peraknya jadi abu lumpur.
+> Atlas KayKit sudah berupa warna jadi, jadi `map.encoding` di-set
+> `LinearEncoding` dan dibaca apa adanya. Tiga tempat memakai aturan yang sama:
+> `js/render3d.js`, `tools/cast_sheet.js`, dan jalur statis `MODELS`.
 
 **c. Senjata sebagai verteks ter-skin.** Rig KayKit punya tulang khusus
 `handslot.l` / `handslot.r` tempat senjata duduk pada transform identitas.
@@ -100,12 +124,20 @@ diam-diam di sisi web dan pencarian tulang antar build berhenti cocok.
 Model statis di `assets/models/*.glb` (jalur MultiMesh/kolam mesh untuk musuh
 jauh) **tidak lagi sisa v0.5**. Skrip yang sama memanggang pose siaga karakter
 (skinning dihitung sekali di Python), meratakan verteks dengan pengelompokan
-kisi sebesar 1/15 tinggi badan, lalu menulis mesh statis 1.7k–2.0k tris.
+kisi, lalu menulis mesh statis bertekstur 3,6k–4,2k tris.
 
-Kunci selnya menyertakan warna, bukan hanya posisi. Tanpa itu sel sebesar itu
-melumatkan kepala ke bahu dan hasilnya gumpalan berwarna lumpur; dengan warna
-sebagai pemisah, batas kulit/baju/logam tetap jadi tepi geometri dan siluetnya
-masih terbaca.
+Dua setelan yang penting di sini:
+
+* **Kunci selnya menyertakan petak UV**, bukan hanya posisi. Tanpa itu sel
+  sebesar ini melumatkan kepala ke bahu dan menggabungkan verteks dari dua
+  petak atlas yang berbeda — hasilnya permukaan yang warnanya meleleh dari
+  kulit ke logam. Dengan petak UV (24×24) sebagai pemisah, batas material
+  tetap jadi tepi geometri.
+* **Selnya 1/26 tinggi badan**, bukan 1/15 seperti versi vertex color. Sel
+  yang lebih besar memang menghasilkan mesh lebih ringan, tapi pada model
+  bertekstur ia menarik verteks melewati batas petak UV dan wajahnya rusak.
+  Selisih biayanya ditanggung di tempat yang benar: LOD jauh dipakai justru
+  saat musuh kecil di layar.
 
 ---
 

@@ -159,15 +159,62 @@ Hasil terukur setelah semuanya: **0 buntu, 2/5 menang, rata-rata 75,7 detik** (j
 
 ---
 
-## Melihat hasil render tanpa GPU
+## Build web: cara melihat renderer Godot yang sebenarnya
 
-Sandbox ini tidak punya GPU, X server, maupun `libGL` (`ldconfig -p | grep -c libGL`
-= 0), dan `apt-get` tidak bisa menjangkau mirror Debian — `sudo apt-get update`
-gagal dengan *Connection failed* ke `deb.debian.org`, jadi `xvfb` dan `mesa`
-tidak bisa dipasang. Konsekuensinya jujur: **render Godot tidak bisa ditangkap
-di sini sama sekali.** Godot hanya jalan `--headless` dengan renderer dummy.
+Lama sekali catatan ini berbunyi "render Godot tidak bisa ditangkap di sini".
+Itu tidak lagi benar. Sandbox memang tidak punya GPU, X server, maupun `libGL`,
+tapi **browser punya WebGL lewat SwiftShader**, dan Godot bisa mengekspor ke
+WebAssembly. Jadi jalan keluarnya bukan memasang driver di sandbox, melainkan
+menjalankan engine-nya di dalam Chromium.
 
-Yang bisa ditangkap adalah prototipe, dan itu ternyata cukup berharga. npm bisa
+Yang dibutuhkan cuma export template, dan dua zip-nya sudah ada di root repo:
+`web_nothreads_debug.zip` dan `web_nothreads_release.zip`.
+
+```bash
+bash tools/export_web.sh              # debug (konsol + remote debug)
+bash tools/export_web.sh release
+python3 tools/serve_web.py 8090       # bind 0.0.0.0, MIME wasm benar
+node tools/godot_web_test.js http://localhost:8090/index.html 60 --play
+```
+
+Empat hal yang perlu diketahui, semuanya hasil tabrakan nyata:
+
+1. **Varian "nothreads" dipilih, bukan varian ber-thread.** Build ber-thread
+   memakai `SharedArrayBuffer`, yang hanya hidup kalau server mengirim header
+   `Cross-Origin-Opener-Policy: same-origin` dan `Cross-Origin-Embedder-Policy:
+   require-corp`. Di belakang proxy preview header itu tidak dijamin lolos, dan
+   gejalanya layar hitam tanpa pesan yang berguna. Varian nothreads jalan di
+   server statis apa adanya.
+2. **`.wasm` wajib dikirim sebagai `application/wasm`.** `python3 -m
+   http.server` mengirimnya sebagai `application/octet-stream` di image ini,
+   dan `WebAssembly.instantiateStreaming` menolaknya. Itu alasan
+   `tools/serve_web.py` ada dan `python3 -m http.server` tidak cukup.
+3. **`index.wasm — net::ERR_ABORTED` di log bukan kegagalan.** Emscripten
+   memulai fetch streaming lalu membatalkannya setelah instantiate memakai
+   body-nya. Harness sengaja mengabaikan pola itu, dan hanya pola itu.
+4. **Booting butuh waktu.** wasm 35 MB dikompilasi tanpa akselerasi apa pun;
+   di sandbox ini layar pertama muncul sekitar 40–60 detik. Timeout yang lebih
+   pendek akan melaporkan "layar kosong" pada build yang sebenarnya sehat.
+
+`tools/godot_web_test.js` memuat build, menunggu, lalu menolak layar yang cuma
+satu-dua warna (gejala renderer mati), request yang gagal, dan `pageerror`.
+Dengan `--play` ia menekan tombol MAIN lewat klik mouse sungguhan dan memotret
+arena — itulah bukti pertama bahwa karakter KayKit benar-benar tergambar di
+target Godot, bukan hanya di renderer three.js. Hasilnya
+`screenshots/godot-web.png` dan `screenshots/godot-web-play.png`.
+
+Folder `build/` tidak di-commit (ada di `.gitignore`): 44 MB dan bisa
+dibangun ulang kapan saja dari zip template yang memang ikut repo.
+
+---
+
+## Prototipe web sebagai cadangan tangkapan layar
+
+Sebelum jalur di atas ada, satu-satunya gambar yang bisa diambil berasal dari
+prototipe web. Jalur itu tetap berguna karena jauh lebih cepat daripada boot
+wasm 35 MB.
+
+npm bisa
 diakses, dan `@napi-rs/canvas` adalah build Skia yang berdiri sendiri tanpa
 dependensi sistem. Prototipe menggambar lewat Canvas2D biasa, jadi mengarahkan
 context-nya ke Skia menghasilkan **frame yang sama persis dengan yang dilihat
@@ -192,8 +239,8 @@ Dua batasan yang harus diingat saat membaca PNG-nya:
    panggilan `fillText`. Jadi skor, nyawa, wave, dan steer meter memang tidak
    ikut tertangkap. Di browser semuanya tetap tampil.
 2. **Ini prototipe, bukan Godot.** Keduanya berbagi palet (docs/02), config, dan
-   spesifikasi layout (docs/06) — bukan renderer. Kecocokan visual Godot masih
-   belum pernah diverifikasi dengan mata.
+   spesifikasi layout (docs/06) — bukan renderer. Untuk melihat renderer Godot
+   yang sebenarnya, pakai build web di bagian sebelumnya.
 
 ### Bug yang baru ketahuan setelah benar-benar dilihat
 
