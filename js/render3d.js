@@ -57,17 +57,9 @@
     chain: 0xb46bff,
   };
 
-  // Model GLB hasil tools/build_assets.py. Dibangun dengan Python + trimesh,
-  // jadi tidak ada aset berhak cipta dan tidak perlu Blender atau Godot.
+  // Props arena (tools/build_assets.py). Hanya benda mati: karakter TIDAK ada
+  // di daftar ini lagi, lihat CAST di bawah.
   var MODELS = {
-    soldier: 'assets/models/soldier.glb',
-    grunt: 'assets/models/enemy_grunt.glb',
-    runner: 'assets/models/enemy_runner.glb',
-    brute: 'assets/models/enemy_brute.glb',
-    shielder: 'assets/models/enemy_shielder.glb',
-    splitter: 'assets/models/enemy_splitter.glb',
-    bomber: 'assets/models/enemy_bomber.glb',
-    boss: 'assets/models/boss.glb',
     barrel: 'assets/models/barrel.glb',
     bumper: 'assets/models/bumper.glb',
     shieldWall: 'assets/models/shield_wall.glb',
@@ -75,18 +67,55 @@
   var loaded = {};      // name -> Object3D prototype
   var loadCount = 0;
 
-  // Karakter ber-tulang v1.0 (tools/build_rigged.py). Berbeda dari MODELS di
-  // atas: ini SkinnedMesh dengan skeleton 16 tulang dan lima klip animasi.
-  var RIGGED = {
-    trooper: 'assets/models/rigged/trooper.glb',
-    grunt: 'assets/models/rigged/grunt.glb',
-    runner: 'assets/models/rigged/runner.glb',
-    brute: 'assets/models/rigged/brute.glb',
-    shielder: 'assets/models/rigged/shielder.glb',
-    splitter: 'assets/models/rigged/splitter.glb',
-    bomber: 'assets/models/rigged/bomber.glb',
-    boss: 'assets/models/rigged/boss.glb',
+  // --- Karakter: berkas KayKit APA ADANYA ------------------------------------
+  //
+  // Tidak ada langkah build, tidak ada GLB turunan, tidak ada mesh yang
+  // digabung atau dipanggang ulang. Yang dimuat di sini persis berkas yang
+  // keluar dari pack-nya:
+  //
+  //   Characters/gltf/Knight.glb          sembilan mesh, satu material, 5.800 tris
+  //   Animations/gltf/Rig_Medium/*.glb    26 klip untuk rig yang sama
+  //   Assets/gltf/sword_1handed.gltf      senjata, lengkap dengan .bin + .png
+  //
+  // Percobaan sebelumnya membangun ulang karakter jadi satu primitif demi
+  // anggaran draw call. Hasilnya lebih murah tapi bukan lagi karakter KayKit,
+  // dan itu bukan keputusan yang boleh diambil pipeline sendiri. Harga yang
+  // dibayar sekarang dicatat jujur di docs/08: sembilan draw call per aktor.
+  var KIT = 'assets/models/kaykit/';
+  var ANIM_FILES = [
+    KIT + 'Animations/gltf/Rig_Medium/Rig_Medium_General.glb',
+    KIT + 'Animations/gltf/Rig_Medium/Rig_Medium_MovementBasic.glb',
+  ];
+
+  // Peran -> karakter, senjata, dan klip. Hanya PEMILIHAN; tidak ada satu pun
+  // angka di sini yang mengubah isi berkasnya.
+  var CAST = {
+    trooper: { model: 'Knight', right: 'sword_1handed', left: 'shield_round_color' },
+    grunt: { model: 'Rogue', right: 'dagger' },
+    runner: { model: 'Ranger', right: 'bow_withString' },
+    brute: { model: 'Barbarian', right: 'axe_2handed' },
+    splitter: { model: 'Mage', right: 'staff', left: 'spellbook_closed', shoot: 'Use_Item' },
+    bomber: { model: 'Rogue_Hooded', right: 'smokebomb' },
+    shielder: { model: 'Knight', right: 'sword_1handed', left: 'shield_square_color' },
+    boss: { model: 'Knight', right: 'sword_2handed_color', size: 2.0 },
   };
+
+  // Nama klip di pack, dipetakan ke nama yang dipakai state machine game.
+  // Klip tidak di-rename di dalam berkas; pemetaan hidup di sini saja.
+  var CLIP_NAMES = {
+    idle: 'Idle_A', run: 'Running_A', shoot: 'Throw', hit: 'Hit_A', die: 'Death_A',
+  };
+
+  // Tinggi karakter di dunia game. Karakter KayKit lahir setinggi 2,2–2,7
+  // unit; arena ini memakai 1,92 (angka yang sama dengan versi sebelumnya,
+  // jadi kamera, formasi, dan kotak tabrakan tidak perlu disetel ulang).
+  // Yang diubah hanya `scale` node pemegangnya — berkasnya tidak disentuh.
+  var CHAR_HEIGHT = 1.92;
+
+  // Tulang tempat senjata digantung. Rig KayKit menyediakannya khusus untuk
+  // ini; three.js membuang titik dari nama node saat memuat glTF, jadi
+  // `handslot.r` di berkas menjadi `handslotr` di memori.
+  var SOCKET = { right: 'handslotr', left: 'handslotl' };
 
   // Anggaran skinning. Satu gelombang bisa berisi 90 musuh; memberi semuanya
   // skeleton berarti 90 x 16 matriks tulang dan 90 draw call per frame, dan
@@ -153,11 +182,10 @@
           // Jaring pengaman: tanpa atribut NORMAL, Lambert menghitung cahaya nol
           // dan modelnya tampil hitam pekat.
           if (!c.geometry.attributes.normal) c.geometry.computeVertexNormals();
-          // MeshStandardMaterial butuh environment map agar enak dilihat;
-          // Lambert lebih murah dan cocok dengan tiga lampu yang sudah ada.
-          // Props memakai vertex color, karakter LOD jauh memakai atlas KayKit;
-          // satu fungsi menangani keduanya.
-          c.material = characterMaterial(c);
+          // Props dibangun sendiri dengan vertex color, jadi materialnya murah
+          // dan cocok dengan tiga lampu yang sudah ada. Karakter TIDAK lewat
+          // sini — materialnya datang utuh dari berkas KayKit.
+          c.material = new THREE.MeshLambertMaterial({ vertexColors: true });
         });
         loaded[name] = root;
         loadCount++;
@@ -169,59 +197,134 @@
   }
 
   /**
-   * Memuat karakter ber-tulang. Terpisah dari loadModels() karena perlakuannya
-   * berbeda: materialnya butuh flag `skinning` (three r128 menghitung pose di
-   * vertex shader hanya kalau flag itu menyala — tanpa itu karakter tampil
-   * membeku di bind pose, tanpa error apa pun), dan frustum culling harus
-   * dimatikan karena bounding box yang dipanggang masih bind pose dan unit
-   * yang merunduk atau roboh akan berkedip hilang di tepi layar.
+   * Memuat karakter KayKit apa adanya.
+   *
+   * Urutannya penting: dua berkas animasi dulu (keduanya dipakai bersama oleh
+   * seluruh cast), lalu tiap karakter unik sekali saja — Knight dipakai tiga
+   * peran, jadi memuatnya per peran berarti mengunduh berkas yang sama tiga
+   * kali. Senjata menyusul belakangan karena ia hanya ditempel ke tulang.
+   *
+   * Material TIDAK disentuh sama sekali. GLTFLoader sudah membuat
+   * MeshStandardMaterial dengan tekstur, sRGB, dan `skinning` yang benar;
+   * setiap kali kode ini menggantinya dengan material buatan sendiri, yang
+   * terjadi justru karakter menggelap atau memutih. Satu-satunya penyesuaian
+   * adalah `frustumCulled = false`, karena bounding box bind pose membuat unit
+   * yang roboh berkedip hilang di tepi layar.
    */
   function loadRigs(onDone) {
     if (!THREE.GLTFLoader) { if (onDone) onDone(0); return; }
     var loader = new THREE.GLTFLoader();
-    var names = Object.keys(RIGGED), pending = names.length;
-    names.forEach(function (name) {
-      loader.load(RIGGED[name], function (gltf) {
+    var clipLib = {};
+    var kinds = Object.keys(CAST);
+
+    // Daftar berkas unik, bukan per peran.
+    var charFiles = {}, itemFiles = {};
+    kinds.forEach(function (kind) {
+      charFiles[CAST[kind].model] = true;
+      ['right', 'left'].forEach(function (hand) {
+        if (CAST[kind][hand]) itemFiles[CAST[kind][hand]] = true;
+      });
+    });
+
+    var scenes = {}, items = {};
+    var pending = ANIM_FILES.length + Object.keys(charFiles).length + Object.keys(itemFiles).length;
+
+    function done() {
+      if (--pending > 0) return;
+      kinds.forEach(function (kind) { buildRig(kind, scenes, items, clipLib); });
+      if (onDone) onDone(rigCount);
+    }
+
+    ANIM_FILES.forEach(function (url) {
+      loader.load(url, function (gltf) {
+        gltf.animations.forEach(function (clip) { clipLib[clip.name] = clip; });
+        done();
+      }, undefined, done);
+    });
+
+    Object.keys(charFiles).forEach(function (name) {
+      loader.load(KIT + 'Characters/gltf/' + name + '.glb', function (gltf) {
         gltf.scene.traverse(function (c) {
-          if (!c.isMesh && !c.isSkinnedMesh) return;
-          c.material = characterMaterial(c);
-          c.frustumCulled = false;
+          if (c.isMesh || c.isSkinnedMesh) c.frustumCulled = false;
         });
-        rigs[name] = gltf;
-        rigCount++;
-        if (--pending === 0 && onDone) onDone(rigCount);
-      }, undefined, function () { if (--pending === 0 && onDone) onDone(rigCount); });
+        scenes[name] = gltf.scene;
+        done();
+      }, undefined, done);
+    });
+
+    Object.keys(itemFiles).forEach(function (name) {
+      loader.load(KIT + 'Assets/gltf/' + name + '.gltf', function (gltf) {
+        gltf.scene.traverse(function (c) { if (c.isMesh) c.frustumCulled = false; });
+        items[name] = gltf.scene;
+        done();
+      }, undefined, done);
     });
   }
 
   /**
-   * Material karakter: Lambert murah, tapi memakai TEKSTUR ASLI dari GLB.
+   * Merakit satu peran dari berkas yang sudah dimuat.
    *
-   * Dua hal yang gampang salah di three.js r128 dan keduanya gagal tanpa
-   * pesan error:
-   *
-   *   · `skinning: true` wajib untuk SkinnedMesh. Tanpa itu pose dihitung
-   *     nol dan karakter membeku di bind pose.
-   *   · GLTFLoader menandai tekstur baseColor sebagai sRGB, sementara
-   *     `renderer.outputEncoding` di sini Linear. Kombinasi itu menggelapkan
-   *     atlas KayKit sampai baju zirahnya jadi abu lumpur. Atlas pack ini
-   *     sudah berupa warna jadi, bukan data linear, jadi ia dibaca apa adanya
-   *     (LinearEncoding) dan tampil persis seperti render resmi pembuatnya.
+   * "Merakit" di sini hanya berarti: menunjuk scene karakter mana yang
+   * dipakai, klip mana yang berlaku, dan berapa faktor skala supaya tingginya
+   * cocok dengan arena. Tidak ada geometri yang disentuh.
    */
-  function characterMaterial(mesh) {
-    var src = mesh.material || {};
-    var map = src.map || null;
-    if (map) {
-      map.encoding = THREE.LinearEncoding;
-      map.flipY = false;
-      map.needsUpdate = true;
-    }
-    return new THREE.MeshLambertMaterial({
-      map: map,
-      color: 0xffffff,
-      vertexColors: !!(mesh.geometry && mesh.geometry.attributes.color),
-      skinning: !!mesh.isSkinnedMesh,
+  function buildRig(kind, scenes, items, clipLib) {
+    var recipe = CAST[kind];
+    var scene = scenes[recipe.model];
+    if (!scene) return;
+
+    var clips = [];
+    Object.keys(CLIP_NAMES).forEach(function (role) {
+      // `shoot` boleh dialihkan per peran (penyihir melempar mantra, bukan
+      // pisau), sisanya seragam untuk seluruh cast.
+      var wanted = role === 'shoot' && recipe.shoot ? recipe.shoot : CLIP_NAMES[role];
+      var clip = clipLib[wanted];
+      if (!clip) return;
+      // Klip disalin lalu diberi nama peran. Salinan, karena satu klip yang
+      // sama dipakai delapan peran sekaligus dan nama di dalam objek klip
+      // adalah kunci yang dipakai mixer.
+      var copy = clip.clone();
+      copy.name = role;
+      clips.push(copy);
     });
+
+    var box = new THREE.Box3().setFromObject(scene);
+    var height = Math.max(0.001, box.max.y - box.min.y);
+    rigs[kind] = {
+      scene: scene,
+      animations: clips,
+      scale: (CHAR_HEIGHT / height) * (recipe.size || 1),
+      right: recipe.right ? items[recipe.right] : null,
+      left: recipe.left ? items[recipe.left] : null,
+    };
+    rigCount++;
+    loaded[kind === 'trooper' ? 'soldier' : kind] = frozenIdle(rigs[kind]);
+  }
+
+  /**
+   * Versi beku dari karakter yang sama, untuk unit di luar anggaran skinning.
+   *
+   * Ini BUKAN model LOD hasil desimasi — geometrinya sama persis, teksturnya
+   * sama persis, senjatanya sama persis. Yang tidak ada hanyalah mixer: pose
+   * siaga dihitung sekali, lalu semua salinan berbagi satu skeleton, sehingga
+   * tiga puluh musuh di ujung lorong tidak menelan tiga puluh pembaruan
+   * tulang per frame.
+   */
+  function frozenIdle(rig) {
+    var proto = cloneSkinned(rig.scene);
+    attachWeapons(proto, rig);
+    var idle = rig.animations.filter(function (c) { return c.name === 'idle'; })[0];
+    if (idle) {
+      var mixer = new THREE.AnimationMixer(proto);
+      mixer.clipAction(idle).play();
+      // Satu langkah nol: pose frame pertama, tanpa pernah maju lagi.
+      mixer.update(0);
+    }
+    // Skala TIDAK dipasang di sini. Pemanggil (jalur crowd) memakai
+    // rigs[kind].scale lewat holder-nya, sama seperti aktor ber-animasi,
+    // supaya tidak ada lompatan ukuran saat unit berpindah jalur.
+    proto.updateMatrixWorld(true);
+    return proto;
   }
 
   /** Menelusuri dua hierarki identik berbarengan. */
@@ -263,12 +366,43 @@
     return clone;
   }
 
+  /**
+   * Menggantung senjata di tulang tangan.
+   *
+   * Inilah cara pack ini memang dirancang dipakai: `handslot.l` / `handslot.r`
+   * adalah tulang kosong di telapak tangan, dan senjata KayKit diekspor pada
+   * titik asal supaya cukup di-parent ke situ tanpa offset apa pun. Tidak ada
+   * verteks yang dipindah, tidak ada mesh yang digabung — persis seperti
+   * menaruh benda di tangan.
+   */
+  function attachWeapons(root, rig) {
+    ['right', 'left'].forEach(function (hand) {
+      var item = rig[hand];
+      if (!item) return;
+      var bone = root.getObjectByName(SOCKET[hand]);
+      if (!bone) return;
+      var copy = item.clone(true);
+      bone.add(copy);
+    });
+  }
+
+  /**
+   * Faktor skala satu peran. Tiap karakter KayKit lahir dengan tinggi
+   * berbeda (Rogue 2,17 unit, Mage 2,66), jadi faktornya dihitung per peran
+   * saat dimuat; di sini hanya dibaca.
+   */
+  function charScale(kind) {
+    var rig = rigs[kind];
+    return rig ? rig.scale : CHAR_SCALE;
+  }
+
   /** Satu karakter hidup: hierarki + mixer + klip + soket moncong. */
   function makeActor(kind) {
     var rig = rigs[kind];
     if (!rig) return null;
     var root = cloneSkinned(rig.scene);
-    root.scale.setScalar(CHAR_SCALE);
+    root.scale.setScalar(rig.scale);
+    attachWeapons(root, rig);
     var mixer = new THREE.AnimationMixer(root);
     var actions = {};
     rig.animations.forEach(function (clip) {
@@ -281,7 +415,11 @@
     });
     return {
       kind: kind, root: root, mixer: mixer, actions: actions,
-      muzzle: root.getObjectByName('muzzle'),
+      // Peluru lahir dari tangan senjata. Versi lama menanam tulang bernama
+      // `muzzle` ke dalam GLB hasil build; berkas KayKit asli tidak punya itu
+      // dan tidak boleh ditambahi, jadi soket tangan kanan yang dipakai —
+      // tulang yang memang disediakan pack untuk memegang senjata.
+      muzzle: root.getObjectByName(SOCKET.right) || root.getObjectByName('handr'),
       // Fase acak per aktor. Tanpa ini semua mixer mulai di detik nol dan
       // maju dengan dt yang sama: tiga puluh musuh melangkah seperti satu
       // tubuh, dan pasukan terlihat seperti barisan baris-berbaris. Acak
@@ -404,20 +542,35 @@
     // Lempeng batu berlumut, bukan kisi neon: dua garis nat yang pudar plus
     // bercak tanah yang ditaburkan dengan acak berbenih tetap, supaya lantai
     // punya tekstur tanpa satu pun berkas gambar tambahan di build.
-    g.fillStyle = '#2c3324'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#222a18'; g.fillRect(0, 0, 256, 256);
     var seed = 20260929;
     function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
     for (var i = 0; i < 90; i++) {
       var r = 6 + rnd() * 26;
-      g.fillStyle = rnd() < 0.5 ? 'rgba(58,68,44,0.55)' : 'rgba(32,38,26,0.55)';
+      g.fillStyle = rnd() < 0.5 ? 'rgba(48,58,36,0.55)' : 'rgba(26,32,20,0.55)';
       g.beginPath(); g.ellipse(rnd() * 256, rnd() * 256, r, r * 0.6, rnd() * 3.14, 0, 6.28); g.fill();
     }
     g.strokeStyle = 'rgba(110,122,94,0.35)'; g.lineWidth = 3;
     g.beginPath(); g.moveTo(0, 0); g.lineTo(256, 0); g.moveTo(0, 0); g.lineTo(0, 256); g.stroke();
     var tex = new THREE.CanvasTexture(c);
+    // Kanvas berisi warna sRGB (itulah arti '#222a18' di CSS). Sejak keluaran
+    // renderer pindah ke sRGB, tekstur yang lupa ditandai akan dianggap data
+    // linear lalu dicerahkan sekali lagi — lantai gelap berlumut berubah jadi
+    // hijau pucat seperti lapangan golf.
+    tex.encoding = THREE.sRGBEncoding;
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set(ARENA.halfWidth, ARENA.depth / 2);
     return tex;
+  }
+
+  /**
+   * Warna hex dunia ini ditulis sebagai warna sRGB (sama seperti di CSS dan
+   * di config). Dengan keluaran renderer sRGB, three.js r128 menganggap
+   * `material.color` sudah linear, jadi tiap warna harus dikonversi sekali —
+   * kalau tidak, seluruh arena tampak satu tingkat terlalu terang dan pucat.
+   */
+  function col(hex) {
+    return new THREE.Color(hex).convertSRGBToLinear();
   }
 
   /** Gate labels ("x2", "+8", "-5") as cached canvas textures. */
@@ -436,6 +589,7 @@
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(text, 128, 68);
     var tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
     labelCache[key] = tex;
     return tex;
   }
@@ -474,20 +628,32 @@
       powerPreference: 'high-performance', precision: 'mediump',
     });
     renderer.setPixelRatio(Math.min(global.devicePixelRatio || 1, 1.25));
+    // Pipeline warna yang benar, dan ini syarat mutlak agar karakter KayKit
+    // tampil seperti di render resminya. GLTFLoader menandai tekstur
+    // baseColor sebagai sRGB; kalau keluaran renderer dibiarkan Linear
+    // (bawaan r128), shader mengubah sRGB->linear lalu menampilkannya mentah,
+    // dan zirah peraknya jadi abu lumpur. Dulu ini "diperbaiki" dengan
+    // memalsukan encoding tekstur — cara yang salah, karena ia juga membuat
+    // warna lain di scene meleset. Sekarang keluarannya yang diperbaiki.
+    renderer.outputEncoding = THREE.sRGBEncoding;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(PAL.bg);
-    scene.fog = new THREE.FogExp2(PAL.bg, 0.009);
+    scene.background = col(PAL.bg);
+    scene.fog = new THREE.FogExp2(col(PAL.bg).getHex(), 0.009);
 
     camera = makeCamera(9 / 16);
 
     // Cahaya: langit malam dingin dari atas, matahari-obor hangat dari depan
-    // kanan, dan pantulan api lemah dari belakang. Karakter KayKit dipanggang
-    // warnanya ke vertex, jadi lampu di sini hanya memberi arah dan kedalaman.
-    scene.add(new THREE.HemisphereLight(0xa8c4e8, 0x241f14, 1.25));
-    var sun = new THREE.DirectionalLight(0xfff0d2, 1.75);
+    // kanan, dan pantulan api lemah dari belakang. Karakter KayKit memakai
+    // MeshStandardMaterial bawaan berkasnya, jadi lampu di sini benar-benar
+    // menentukan terang-gelapnya — bukan sekadar memberi arah.
+    // Intensitas diturunkan sejak keluaran renderer pindah ke sRGB: dengan
+    // pipeline warna yang benar, total 3,8 yang dulu terasa pas langsung
+    // membakar lantai jadi hijau pucat dan menghapus bayangan di zirah.
+    scene.add(new THREE.HemisphereLight(0xa8c4e8, 0x241f14, 0.5));
+    var sun = new THREE.DirectionalLight(0xfff0d2, 1.35);
     sun.position.set(16, 34, 18); scene.add(sun);
-    var fill = new THREE.DirectionalLight(0xff9a4d, 0.5);
+    var fill = new THREE.DirectionalLight(0xff9a4d, 0.25);
     fill.position.set(-18, 20, -16); scene.add(fill);
 
     // --- static world ---
@@ -499,7 +665,7 @@
     scene.add(floor);
 
     var wallMat = new THREE.MeshLambertMaterial({
-      color: PAL.wall, emissive: PAL.grid, emissiveIntensity: 0.18,
+      color: col(PAL.wall), emissive: col(PAL.grid), emissiveIntensity: 0.18,
     });
     [-1, 1].forEach(function (s) {
       var w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, ARENA.depth + APRON), wallMat);
@@ -509,7 +675,7 @@
 
     var line = new THREE.Mesh(
       new THREE.BoxGeometry(ARENA.halfWidth * 2, 0.07, 0.3),
-      new THREE.MeshBasicMaterial({ color: PAL.danger, transparent: true, opacity: 0.85 })
+      new THREE.MeshBasicMaterial({ color: col(PAL.danger), transparent: true, opacity: 0.85 })
     );
     line.position.set(0, 0.04, -ARENA.defenseLineZ);
     scene.add(line);
@@ -884,7 +1050,7 @@
       }
       var t = pools.troops.take();
       ensureVisual(t, 'soldier', function () { return makeTroop(accentColor); });
-      t.scale.setScalar(CHAR_SCALE);
+      t.scale.setScalar(t.userData.isModel ? charScale('trooper') : CHAR_SCALE);
       t.position.set(tx, 0, -tz);
     }
     pools.troops.end();
@@ -930,7 +1096,7 @@
           new THREE.MeshLambertMaterial({ color: en.color || '#ff4d3d' }));
       });
       if (m.userData.isModel) {
-        m.scale.setScalar(CHAR_SCALE);
+        m.scale.setScalar(charScale(kind));
         m.position.set(ex, 0, -ez);
         m.rotation.y = Math.PI;              // model menghadap -Z, musuh menatap pemain
       } else {
@@ -1027,7 +1193,7 @@
         if (bossActor) {
           bossActor.root.position.set(bx, 0, -bz);
           bossActor.root.rotation.y = Math.PI;
-          bossActor.root.scale.setScalar(CHAR_SCALE * pr / 1.8);
+          bossActor.root.scale.setScalar(charScale('boss') * pr / 1.8);
           if (part.hit > 0) oneShot(bossActor, 'hit', 0.3);
           else if (bossActor.lock <= 0) play(bossActor, 'idle');
           bossActor.root.traverse(function (node) {
@@ -1051,7 +1217,7 @@
             new THREE.MeshLambertMaterial({ color: 0xff4d3d }));
         });
         if (pm.userData.isModel) {
-          pm.scale.setScalar(CHAR_SCALE * pr / 1.8);
+          pm.scale.setScalar(charScale('boss') * pr / 1.8);
           pm.position.set(bx, 0, -bz);
           pm.rotation.y = Math.PI;
         } else {
@@ -1114,6 +1280,15 @@
     },
     _setThree: function (t) { THREE = t; },   // for the headless geometry test
     _scene: function () { return scene; },    // ditto
+    // Jalur muat karakter dibuka untuk tes dan lembar kontak. Keduanya DULU
+    // memuat GLB turunan sendiri; sejak karakter dipakai apa adanya dari pack,
+    // tidak ada berkas turunan untuk dimuat — jadi tes harus melewati jalur
+    // yang sama persis dengan game, yang justru membuat tesnya lebih jujur.
+    _loadCast: function (cb) { loadRigs(cb); },
+    _rig: function (kind) { return rigs[kind]; },
+    _makeActor: makeActor,
+    _play: play,
+    _cast: function () { return Object.keys(CAST); },
   };
   global.R3D = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -2,12 +2,15 @@
 /**
  * rig_test.js — Membuktikan karakter ber-tulang itu benar-benar ber-tulang.
  *
- * Generator GLB di `tools/rigkit.py` ditulis dari nol: tidak ada pustaka yang
- * memvalidasi outputnya, dan glTF yang salah sedikit saja (offset bufferView
- * meleset, inverseBindMatrices terbalik, channel animasi menunjuk node yang
- * keliru) tetap memuat tanpa error — modelnya cuma tampil kusut atau diam.
- * Jadi pemeriksaannya dilakukan oleh pemuat yang sama persis dengan yang
- * dipakai game, di Chromium sungguhan:
+ * Karakter dipakai APA ADANYA dari pack KayKit: berkas karakter, berkas
+ * animasi, dan berkas senjata adalah tiga berkas terpisah yang baru menjadi
+ * satu aktor di dalam `js/render3d.js`. Perakitan itulah yang bisa salah
+ * (klip tidak ketemu rignya, senjata nyangkut di tulang yang keliru, skala
+ * meleset sepuluh kali) dan semuanya gagal tanpa satu pun pesan error.
+ *
+ * Maka tes ini memanggil jalur muat milik game sendiri (`R3D._loadCast`,
+ * `R3D._makeActor`) di Chromium sungguhan, bukan memuat berkas turunan yang
+ * kebetulan mirip:
  *
  *   · mesh-nya SkinnedMesh, bukan Mesh biasa,
  *   · jumlah tulangnya sesuai,
@@ -51,21 +54,35 @@ async function main() {
   await page.goto(URL, { waitUntil: 'networkidle2' });
 
   const report = await page.evaluate(async (units) => {
-    const loader = new THREE.GLTFLoader();
+    R3D._setThree(THREE);
+    await new Promise((res) => R3D._loadCast(res));
     const out = [];
     for (const name of units) {
-      const gltf = await new Promise((res, rej) =>
-        loader.load('assets/models/rigged/' + name + '.glb', res, undefined, rej));
-      const root = gltf.scene;
-      let skinned = null; const sockets = {};
+      const actor = R3D._makeActor(name);
+      if (!actor) { out.push({ name, isSkinned: false }); continue; }
+      const root = actor.root;
+      // Semua mesh karakter KayKit ber-skin; yang diperiksa di sini mesh
+      // terbesar (badan), plus hitungan berapa mesh yang ikut terbawa.
+      let skinned = null; let meshes = 0; let weapons = 0;
       root.traverse((o) => {
-        if (o.isSkinnedMesh) skinned = o;
-        if (/^(muzzle|muzzle_l|core)$/.test(o.name)) sockets[o.name] = o;
+        if (o.isSkinnedMesh) {
+          meshes++;
+          if (!skinned || o.geometry.attributes.position.count
+            > skinned.geometry.attributes.position.count) skinned = o;
+        } else if (o.isMesh) {
+          weapons++;
+        }
+      });
+      const sockets = {};
+      ['handslotr', 'handslotl'].forEach((n) => {
+        const o = root.getObjectByName(n);
+        if (o) sockets[n] = o;
       });
       const box = new THREE.Box3().setFromObject(root);
       const entry = {
         name,
         isSkinned: !!skinned,
+        meshes, weapons,
         bones: skinned ? skinned.skeleton.bones.length : 0,
         verts: skinned ? skinned.geometry.attributes.position.count : 0,
         // Warna boleh datang dari dua sumber: atlas KayKit (yang dipakai
@@ -74,7 +91,9 @@ async function main() {
         hasColor: !!(skinned && (skinned.geometry.attributes.color
           || (skinned.material && skinned.material.map))),
         textured: !!(skinned && skinned.material && skinned.material.map),
-        clips: gltf.animations.map((a) => ({ name: a.name, dur: +a.duration.toFixed(3) })),
+        clips: Object.keys(actor.actions).map((k) => ({
+          name: k, dur: +actor.actions[k].getClip().duration.toFixed(3),
+        })),
         height: +(box.max.y - box.min.y).toFixed(3),
         width: +(box.max.x - box.min.x).toFixed(3),
         sockets: Object.keys(sockets),
@@ -84,16 +103,19 @@ async function main() {
       // Jalankan tiap klip dan ukur perpindahan tulang yang relevan.
       // Probe per tulang, bukan satu titik: moncong bomber ada di dada dan
       // memang tidak bergerak saat berlari — yang harus bergerak kakinya.
-      const mixer = new THREE.AnimationMixer(root);
-      const probes = { muzzle: sockets.muzzle || null };
+      const mixer = actor.mixer;
+      const probes = { muzzle: sockets.handslotr || null };
       if (skinned) {
         for (const bone of skinned.skeleton.bones) {
-          if (['hand_r', 'foot_l', 'head', 'hips'].includes(bone.name)) probes[bone.name] = bone;
+          // Nama tulang KayKit ber-titik (`hand.r`); three.js membuang titiknya
+          // saat memuat, jadi di memori ia `handr`.
+          if (['handr', 'footl', 'head', 'hips'].includes(bone.name)) probes[bone.name] = bone;
         }
       }
       const at = (node) => new THREE.Vector3().setFromMatrixPosition(node.matrixWorld);
-      for (const clip of gltf.animations) {
-        const action = mixer.clipAction(clip);
+      for (const key of Object.keys(actor.actions)) {
+        const action = actor.actions[key];
+        const clip = action.getClip();
         action.reset().play();
         const samples = {};
         for (const key of Object.keys(probes)) samples[key] = [];
@@ -114,7 +136,7 @@ async function main() {
           }
           spread[key] = +max.toFixed(4);
         }
-        entry.moved[clip.name] = spread;
+        entry.moved[key] = spread;
         action.stop();
       }
       out.push(entry);
@@ -125,7 +147,14 @@ async function main() {
   console.log('\nCHAIN RIDER — uji karakter ber-tulang\n');
   for (const u of report) {
     if (!u.isSkinned) { fail(`${u.name}: bukan SkinnedMesh`); continue; }
-    if (u.bones !== 24) fail(`${u.name}: ${u.bones} tulang, harusnya 24`);
+    // Rig_Medium punya 23 tulang. Angkanya tidak boleh "kira-kira": kalau
+    // rignya salah, klip dari berkas animasi akan mengikat ke tulang yang
+    // keliru dan karakternya terpelintir.
+    if (u.bones !== 23) fail(`${u.name}: ${u.bones} tulang, harusnya 23`);
+    // Sembilan mesh adalah ciri karakter KayKit yang utuh (lengan, kepala,
+    // helm, jubah, ...). Kalau tinggal satu, berarti ada yang menggabungkannya
+    // lagi di belakang layar.
+    if (u.meshes < 5) fail(`${u.name}: cuma ${u.meshes} mesh — karakter tidak utuh`);
     if (!u.hasColor) fail(`${u.name}: tanpa tekstur maupun COLOR_0, modelnya akan putih polos`);
     if (u.verts < 300) fail(`${u.name}: cuma ${u.verts} vertex`);
     const names = u.clips.map((c) => c.name);
@@ -135,25 +164,30 @@ async function main() {
     for (const c of u.clips) {
       if (c.dur < 0.15 || c.dur > 3.0) fail(`${u.name}: klip '${c.name}' durasi ${c.dur}s`);
     }
-    // Tinggi: prajurit ~0.95 unit, boss ~2x, tidak ada yang boleh di luar ini.
-    if (u.height < 0.6 || u.height > 2.6) fail(`${u.name}: tinggi ${u.height} unit di luar akal`);
+    // Tinggi di dunia game: semua peran disamakan ke 1,92 unit lewat skala
+    // node (berkasnya sendiri lahir 2,17–2,66 unit), kecuali boss yang memang
+    // dua kali lipat. Yang dijaga di sini batas akal, bukan angka persis:
+    // busur Ranger menambah sedikit tinggi kotak batasnya.
+    const hiCap = u.name === 'boss' ? 4.2 : 2.2;
+    if (u.height < 1.4 || u.height > hiCap) fail(`${u.name}: tinggi ${u.height} unit di luar akal`);
     // Lebar diukur relatif tinggi: boss setinggi dua meter memang merentang
     // lebih jauh (kapak dua tangan + perisai) tanpa itu berarti salah skala.
     const maxWidth = Math.max(1.6, u.height * 1.3);
     if (u.width > maxWidth) fail(`${u.name}: lebar ${u.width} unit, akan saling tembus di formasi`);
-    if (!u.sockets.includes('muzzle')) fail(`${u.name}: soket 'muzzle' hilang`);
+    if (!u.sockets.includes('handslotr')) fail(`${u.name}: soket tangan kanan hilang`);
+    if (u.weapons < 1) fail(`${u.name}: tidak ada senjata yang tergantung di tangan`);
     // Gerak nyata, per tulang yang memang bertanggung jawab atas klip itu.
     const m = u.moved;
-    if ((m.run.foot_l || 0) < 0.05) fail(`${u.name}: kaki tidak melangkah di klip run`);
+    if ((m.run.footl || 0) < 0.05) fail(`${u.name}: kaki tidak melangkah di klip run`);
     if ((m.run.hips || 0) < 0.01) fail(`${u.name}: badan tidak naik-turun saat berlari`);
     if ((m.die.head || 0) < 0.10) fail(`${u.name}: klip die tidak merobohkan badan`);
-    if ((m.shoot.hand_r || 0) <= 0.0) fail(`${u.name}: recoil tidak menggerakkan tangan kanan`);
+    if ((m.shoot.handr || 0) <= 0.0) fail(`${u.name}: recoil tidak menggerakkan tangan kanan`);
     if ((m.idle.head || 0) <= 0.0) fail(`${u.name}: idle benar-benar diam seperti patung`);
     ok(
-      `${u.name.padEnd(9)} ${u.bones} tulang, ${String(u.verts).padStart(4)} vert, ` +
-      `${u.textured ? 'atlas' : 'vcol'}, ` +
-      `${u.clips.length} klip, tinggi ${u.height.toFixed(2)}, ` +
-      `langkah ${m.run.foot_l.toFixed(2)} / roboh ${m.die.head.toFixed(2)} / recoil ${m.shoot.hand_r.toFixed(3)}`
+      `${u.name.padEnd(9)} ${u.bones} tulang, ${u.meshes} mesh + ${u.weapons} senjata, ` +
+      `${String(u.verts).padStart(4)} vert, ${u.clips.length} klip, ` +
+      `tinggi ${u.height.toFixed(2)}, langkah ${m.run.footl.toFixed(2)} / ` +
+      `roboh ${m.die.head.toFixed(2)} / recoil ${m.shoot.handr.toFixed(3)}`
     );
   }
   if (errors.length) { errors.slice(0, 5).forEach((e) => fail('konsol: ' + e)); }

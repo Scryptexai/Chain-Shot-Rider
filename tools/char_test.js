@@ -64,7 +64,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     skin: window.R3D ? R3D.SKIN : null,
   }));
   check(loaded.rigs === 8, `8 rig ber-tulang termuat renderer — ${loaded.rigs}`);
-  check(loaded.models >= 11, `model statis LOD jauh tetap ada — ${loaded.models}`);
+  // Props arena saja (barrel, bumper, shield wall). Karakter tidak lagi punya
+  // berkas statis turunan: unit di luar anggaran skinning memakai karakter
+  // KayKit yang sama, hanya dibekukan di pose siaga.
+  check(loaded.models >= 3, `props arena termuat — ${loaded.models}`);
 
   // --- 2. bertempur ---------------------------------------------------------
   await page.evaluate(() => startStage(0));
@@ -134,23 +137,42 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     });
     return { sum: sum, n: n };
   });
-  const a = await probe();
+  // Tunggu sampai benar-benar ADA tulang di layar sebelum mengukur. Tanpa
+  // jeda ini tes bisa menjepret celah antar gelombang, melihat nol tulang,
+  // dan melaporkannya sebagai "tidak bergerak" — kegagalan palsu yang
+  // menyesatkan selama satu putaran penuh.
+  let a = await probe();
+  for (let tries = 0; tries < 20 && a.n === 0; tries++) {
+    await sleep(250);
+    a = await probe();
+  }
   await sleep(260);
   const b = await probe();
   check(a.n > 0 && Math.abs(a.sum - b.sum) > 1e-4,
-    `tulang bergerak antar frame — selisih ${Math.abs(a.sum - b.sum).toFixed(4)}`);
+    `tulang bergerak antar frame — ${a.n} tulang, selisih ${Math.abs(a.sum - b.sum).toFixed(4)}`);
 
   // --- 5. senjata dan efek --------------------------------------------------
   const sockets = await page.evaluate(() => {
-    let muzzles = 0, meshes = 0;
+    let sockets = 0, meshes = 0, weapons = 0;
     R3D._scene().traverse((o) => {
-      if (o.name === 'muzzle') muzzles++;
+      // Tulang soket bawaan rig KayKit; peluru lahir dari sini.
+      if (o.name === 'handslotr') sockets++;
       if (o.isSkinnedMesh) meshes++;
+      // Senjata adalah Mesh biasa (bukan ber-skin) yang leluhurnya sebuah
+      // tulang — itulah tanda ia benar-benar tergantung di tangan, bukan
+      // sekadar ikut terbawa di hierarki karakter.
+      else if (o.isMesh) {
+        for (let up = o.parent; up; up = up.parent) {
+          if (up.isBone) { weapons++; break; }
+        }
+      }
     });
-    return { muzzles: muzzles, meshes: meshes };
+    return { muzzles: sockets, meshes: meshes, weapons: weapons };
   });
   check(sockets.muzzles > 0,
-    `soket senjata ikut ter-clone ke dalam adegan — ${sockets.muzzles} moncong`);
+    `soket tangan ikut ter-clone ke dalam adegan — ${sockets.muzzles} soket`);
+  check(sockets.weapons > 0,
+    `senjata tergantung di tangan aktor — ${sockets.weapons} senjata`);
   check(peakFx.flashes > 0, `kilatan moncong tergambar — puncak ${peakFx.flashes}`);
   check(peakFx.rings + peakFx.blobs > 0,
     `efek hantaman tergambar — cincin ${peakFx.rings}, bola ${peakFx.blobs}`);
