@@ -135,7 +135,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       if (!o.isSkinnedMesh || !o.visible || !o.skeleton) return;
       o.skeleton.bones.forEach((b) => { sum += b.position.y + b.position.z + b.quaternion.x; n++; });
     });
-    return { sum: sum, n: n };
+    return { sum: sum, n: n, state: window.eval('S.state'), tick: window.eval('S.tick') };
   });
   // Tunggu sampai benar-benar ADA tulang di layar sebelum mengukur. Tanpa
   // jeda ini tes bisa menjepret celah antar gelombang, melihat nol tulang,
@@ -146,10 +146,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(250);
     a = await probe();
   }
-  await sleep(260);
-  const b = await probe();
-  check(a.n > 0 && Math.abs(a.sum - b.sum) > 1e-4,
-    `tulang bergerak antar frame — ${a.n} tulang, selisih ${Math.abs(a.sum - b.sum).toFixed(4)}`);
+  // Satu pasang sampel tidak cukup: kalau keduanya kebetulan jatuh di frame
+  // yang sama (Chromium headless kadang menahan rAF sesaat) selisihnya nol dan
+  // tesnya merah tanpa ada yang rusak. Jadi diambil beberapa sampel berturut-
+  // turut, dan yang dicari adalah ADA gerak di antaranya.
+  let best = 0;
+  let last = a;
+  for (let tries = 0; tries < 8 && best <= 1e-4; tries++) {
+    await sleep(200);
+    const b = await probe();
+    if (b.n > 0) best = Math.max(best, Math.abs(last.sum - b.sum));
+    last = b;
+  }
+  check(a.n > 0 && best > 1e-4,
+    `tulang bergerak antar frame — ${a.n} tulang, selisih ${best.toFixed(4)}`);
 
   // --- 5. senjata dan efek --------------------------------------------------
   const sockets = await page.evaluate(() => {

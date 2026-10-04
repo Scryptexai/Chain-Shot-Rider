@@ -69,18 +69,23 @@
 
   // --- Karakter: berkas KayKit APA ADANYA ------------------------------------
   //
-  // Tidak ada langkah build, tidak ada GLB turunan, tidak ada mesh yang
-  // digabung atau dipanggang ulang. Yang dimuat di sini persis berkas yang
-  // keluar dari pack-nya:
+  // Tidak ada langkah build dan tidak ada GLB turunan. Yang dimuat di sini
+  // persis berkas yang keluar dari pack-nya:
   //
   //   Characters/gltf/Knight.glb          sembilan mesh, satu material, 5.800 tris
   //   Animations/gltf/Rig_Medium/*.glb    26 klip untuk rig yang sama
   //   Assets/gltf/sword_1handed.gltf      senjata, lengkap dengan .bin + .png
   //
-  // Percobaan sebelumnya membangun ulang karakter jadi satu primitif demi
-  // anggaran draw call. Hasilnya lebih murah tapi bukan lagi karakter KayKit,
-  // dan itu bukan keputusan yang boleh diambil pipeline sendiri. Harga yang
-  // dibayar sekarang dicatat jujur di docs/08: sembilan draw call per aktor.
+  // Percobaan sebelumnya MENULIS ULANG karakter jadi GLB baru demi anggaran
+  // draw call: satu primitif, atlas dipanggang jadi vertex color, LOD jauh
+  // didesimasi. Hasilnya lebih murah tapi bukan lagi karakter KayKit, dan itu
+  // bukan keputusan yang boleh diambil pipeline sendiri.
+  //
+  // Yang tersisa dari ide itu hanya bagian yang tidak mengubah apa pun:
+  // mergeBody() menyambung kesembilan potongan tubuh jadi satu mesh DI MEMORI
+  // (lihat fungsinya di bawah). Jumlah verteks dan segitiganya tetap sama
+  // persis; yang hilang cuma delapan panggilan GPU per aktor. Angka terukur
+  // ada di docs/08 §8.0.
   var KIT = 'assets/models/kaykit/';
   var ANIM_FILES = [
     KIT + 'Animations/gltf/Rig_Medium/Rig_Medium_General.glb',
@@ -256,6 +261,7 @@
 
     Object.keys(charFiles).forEach(function (name) {
       loader.load(assetURL(KIT + 'Characters/gltf/' + name + '.glb'), function (gltf) {
+        mergeBody(gltf.scene);
         gltf.scene.traverse(function (c) {
           if (c.isMesh || c.isSkinnedMesh) c.frustumCulled = false;
         });
@@ -271,6 +277,100 @@
         done();
       }, undefined, done);
     });
+  }
+
+
+  /**
+   * Menyatukan potongan tubuh menjadi satu SkinnedMesh — di memori, sekali,
+   * saat berkas selesai dimuat.
+   *
+   * Setiap karakter KayKit dikirim sebagai 7–9 mesh terpisah (lengan kiri,
+   * lengan kanan, badan, jubah, kepala, helm, ...). Di layar itu berarti 7–9
+   * draw call per aktor, dan dengan 90 musuh di lorong angkanya tembus 600.
+   *
+   * Yang membuat penyatuannya aman adalah bentuk berkasnya sendiri: kesembilan
+   * mesh memakai **skin yang sama, material yang sama, dan node tanpa
+   * transform**. Jadi menyambung atributnya berturut-turut menghasilkan
+   * geometri yang identik verteks-per-verteks dengan aslinya — UV, normal,
+   * bobot tulang, dan tekstur dibawa apa adanya. Tidak ada yang
+   * disederhanakan, tidak ada yang dipanggang, tidak ada yang hilang; yang
+   * berubah hanya berapa kali GPU dipanggil untuk menggambarnya.
+   *
+   * Kalau sebuah berkas ternyata tidak memenuhi syarat itu (lebih dari satu
+   * material, atau mesh-nya punya transform sendiri), fungsi ini diam-diam
+   * tidak melakukan apa-apa dan karakter digambar seperti aslinya.
+   */
+  function mergeBody(root) {
+    var parts = [];
+    root.traverse(function (n) { if (n.isSkinnedMesh) parts.push(n); });
+    if (parts.length < 2) return;
+
+    var first = parts[0];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p.material !== first.material && p.material.map !== first.material.map) return;
+      if (p.parent !== first.parent) return;
+      if (!p.geometry.index) return;
+      p.updateMatrix();
+      if (!p.matrix.equals(first.matrix)) return;
+      // GLTFLoader membuat objek Skeleton baru per mesh, tapi dari daftar
+      // tulang yang sama persis. Yang harus sama adalah tulangnya (urutan dan
+      // identitas) dan bind matrix-nya, bukan objek Skeleton-nya.
+      if (!p.bindMatrix.equals(first.bindMatrix)) return;
+      if (p.skeleton.bones.length !== first.skeleton.bones.length) return;
+      for (var b = 0; b < p.skeleton.bones.length; b++) {
+        if (p.skeleton.bones[b] !== first.skeleton.bones[b]) return;
+      }
+    }
+
+    var attrs = ['position', 'normal', 'uv', 'skinIndex', 'skinWeight'];
+    for (var a = 0; a < attrs.length; a++) {
+      for (var k = 0; k < parts.length; k++) {
+        if (!parts[k].geometry.attributes[attrs[a]]) return;
+      }
+    }
+
+    var total = 0, idxTotal = 0;
+    parts.forEach(function (p) {
+      total += p.geometry.attributes.position.count;
+      idxTotal += p.geometry.index.count;
+    });
+
+    var merged = new THREE.BufferGeometry();
+    attrs.forEach(function (name) {
+      var size = first.geometry.attributes[name].itemSize;
+      var Ctor = name === 'skinIndex' ? Uint16Array : Float32Array;
+      var out = new Ctor(total * size);
+      var at = 0;
+      parts.forEach(function (p) {
+        var src = p.geometry.attributes[name].array;
+        out.set(src, at);
+        at += src.length;
+      });
+      merged.setAttribute(name, new THREE.BufferAttribute(out, size));
+    });
+
+    var index = new Uint32Array(idxTotal);
+    var vOff = 0, iOff = 0;
+    parts.forEach(function (p) {
+      var src = p.geometry.index.array;
+      for (var i = 0; i < src.length; i++) index[iOff + i] = src[i] + vOff;
+      iOff += src.length;
+      vOff += p.geometry.attributes.position.count;
+    });
+    merged.setIndex(new THREE.BufferAttribute(index, 1));
+    merged.computeBoundingSphere();
+
+    var body = new THREE.SkinnedMesh(merged, first.material);
+    body.name = (root.name || 'char') + '_merged';
+    body.bindMode = first.bindMode;
+    body.bindMatrix.copy(first.bindMatrix);
+    body.bindMatrixInverse.copy(first.bindMatrixInverse);
+    body.bind(first.skeleton, first.bindMatrix);
+
+    var parent = first.parent;
+    parts.forEach(function (p) { parent.remove(p); });
+    parent.add(body);
   }
 
   /**
@@ -1289,6 +1389,15 @@
       return { rings: pools.rings ? pools.rings.used : 0,
                flashes: pools.flashes ? pools.flashes.used : 0,
                blobs: pools.blobs ? pools.blobs.used : 0 };
+    },
+    // Angka draw call sungguhan dari WebGLRenderer. Dipakai tools/perf_probe.js
+    // supaya anggaran di docs/08 adalah hasil ukur, bukan hasil hitung tangan.
+    _info: function () {
+      if (!renderer) return null;
+      var r = renderer.info.render, m = renderer.info.memory;
+      return { calls: r.calls, triangles: r.triangles,
+               geometries: m.geometries, textures: m.textures,
+               programs: renderer.info.programs ? renderer.info.programs.length : 0 };
     },
     _setThree: function (t) { THREE = t; },   // for the headless geometry test
     _scene: function () { return scene; },    // ditto

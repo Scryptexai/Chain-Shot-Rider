@@ -16,6 +16,11 @@ extends Node
 ## shot, which is what slow motion and the ricochet effects hang on.
 const FRAMES_PER_STAGE := 1800
 
+## Jumlah segitiga tiap karakter di dalam pack KayKit, dibaca langsung dari
+## berkasnya. Penyatuan mesh di CharacterPool harus lossless: kalau satu
+## potongan tubuh hilang, angkanya tidak akan cocok dengan satu pun entri ini.
+const PACK_TRIS := [5800, 7562, 8900, 7123, 6668, 7185]
+
 var _failures: Array[String] = []
 
 
@@ -84,7 +89,7 @@ func _run_result_screen(packed: PackedScene) -> void:
 	for i in range(values.size()):
 		var shown := String((values[i] as Label).text)
 		if shown != final_texts[i]:
-			_fail("hasil: baris %d berhenti di \"%s\", seharusnya \"%s\"" % [i, shown, final_texts[i]])
+			_fail('hasil: baris %d berhenti di "%s", seharusnya "%s"' % [i, shown, final_texts[i]])
 	_check_glyphs(screens as Node, "layar hasil")
 	print("  hasil: %d baris menghitung naik lalu mendarat di angka akhir" % values.size())
 	root.queue_free()
@@ -143,14 +148,18 @@ func _run_hud_layout(packed: PackedScene) -> void:
 
 	if fire_rect.size.x < 200.0 or fire_rect.size.y < 200.0:
 		_fail(
-			"hud: tombol chain shot %.0fx%.0f px, terlalu kecil untuk ibu jari"
-			% [fire_rect.size.x, fire_rect.size.y]
+			(
+				"hud: tombol chain shot %.0fx%.0f px, terlalu kecil untuk ibu jari"
+				% [fire_rect.size.x, fire_rect.size.y]
+			)
 		)
 	# Zona ibu jari: aksi utama harus duduk di sepertiga bawah layar.
 	if fire_rect.get_center().y < viewport.y * 0.62:
 		_fail(
-			"hud: tombol chain shot di luar zona ibu jari (y %.0f dari %.0f)"
-			% [fire_rect.get_center().y, viewport.y]
+			(
+				"hud: tombol chain shot di luar zona ibu jari (y %.0f dari %.0f)"
+				% [fire_rect.get_center().y, viewport.y]
+			)
 		)
 	if fire_rect.end.x > viewport.x + 1.0 or fire_rect.end.y > viewport.y + 1.0:
 		_fail("hud: tombol chain shot keluar layar")
@@ -158,8 +167,10 @@ func _run_hud_layout(packed: PackedScene) -> void:
 		_fail("hud: tombol jeda tidak persegi (%.0fx%.0f)" % [pause_rect.size.x, pause_rect.size.y])
 	if pause_rect.size.x < 100.0 or pause_rect.size.y < 100.0:
 		_fail(
-			"hud: tombol jeda %.0fx%.0f px, di bawah lantai 100 px"
-			% [pause_rect.size.x, pause_rect.size.y]
+			(
+				"hud: tombol jeda %.0fx%.0f px, di bawah lantai 100 px"
+				% [pause_rect.size.x, pause_rect.size.y]
+			)
 		)
 	if pause_rect.position.y < 80.0:
 		_fail("hud: tombol jeda masuk wilayah notch (y %.0f)" % pause_rect.position.y)
@@ -188,7 +199,13 @@ func _run_hud_layout(packed: PackedScene) -> void:
 	print(
 		(
 			"  hud: chain shot %.0fx%.0f px @ y %.0f/%.0f, jeda %.0f px, jeda+tembak tersambung"
-			% [fire_rect.size.x, fire_rect.size.y, fire_rect.position.y, viewport.y, pause_rect.size.y]
+			% [
+				fire_rect.size.x,
+				fire_rect.size.y,
+				fire_rect.position.y,
+				viewport.y,
+				pause_rect.size.y
+			]
 		)
 	)
 	Engine.time_scale = 1.0
@@ -221,7 +238,9 @@ func _check_hud_overlap(hud: Object, viewport: Vector2) -> void:
 			continue
 		var rect: Rect2 = control.get_global_rect()
 		if rect.position.x < -1.0 or rect.end.x > viewport.x + 1.0:
-			_fail("hud: %s keluar layar mendatar (%.0f..%.0f)" % [field, rect.position.x, rect.end.x])
+			_fail(
+				"hud: %s keluar layar mendatar (%.0f..%.0f)" % [field, rect.position.x, rect.end.x]
+			)
 		if rect.position.y < -1.0 or rect.end.y > viewport.y + 1.0:
 			_fail("hud: %s keluar layar tegak (%.0f..%.0f)" % [field, rect.position.y, rect.end.y])
 		rects.append(rect)
@@ -252,14 +271,17 @@ func _dump_hud_layout(hud: Object, viewport: Vector2) -> void:
 		if control == null:
 			continue
 		var rect: Rect2 = control.get_global_rect()
-		entries.append(
-			{
-				"label": String(pair[1]),
-				"x": rect.position.x,
-				"y": rect.position.y,
-				"w": rect.size.x,
-				"h": rect.size.y,
-			}
+		(
+			entries
+			. append(
+				{
+					"label": String(pair[1]),
+					"x": rect.position.x,
+					"y": rect.position.y,
+					"w": rect.size.x,
+					"h": rect.size.y,
+				}
+			)
 		)
 	var payload := {
 		"screen": "hud",
@@ -734,7 +756,9 @@ func _run_stage(packed: PackedScene, stage: int) -> void:
 	# berarti slot pose tertukar saat swap-remove, dan di layar entitas itu
 	# terlihat melesat melintasi lapangan dalam satu frame.
 	if pose_gap_max > 1.5:
-		_fail("varian %d: lompatan pose %.2f unit — slot interpolasi tertukar" % [stage, pose_gap_max])
+		_fail(
+			"varian %d: lompatan pose %.2f unit — slot interpolasi tertukar" % [stage, pose_gap_max]
+		)
 	_check_characters(stage, chars, peak_actors, peak_corpses, clips_seen)
 	var cues := _check_audio(root, stage)
 	_check_music(root, stage)
@@ -781,6 +805,23 @@ func _pose_gap(sim: Object) -> float:
 	return gap
 
 
+## Berapa mesh ber-skin per aktor dan berapa segitiganya. Satu aktor harus
+## tinggal SATU mesh tubuh setelah penyatuan, tanpa kehilangan satu segitiga.
+func _body_stats(chars: Node) -> Array:
+	var out: Array = []
+	for child in chars.get_children():
+		var parts := 0
+		var tris := 0
+		for node in child.find_children("*", "MeshInstance3D", true, false):
+			var mi := node as MeshInstance3D
+			if mi.skin == null or mi.mesh == null:
+				continue
+			parts += 1
+			tris += mi.mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX].size() / 3
+		out.append([child.name, parts, tris])
+	return out
+
+
 func _clips_playing(chars: Object) -> Array:
 	var names: Array = []
 	for child in (chars as Node).get_children():
@@ -799,9 +840,7 @@ func _check_characters(
 		_fail("varian %d: ArenaView tidak punya kolam karakter" % (stage + 1))
 		return
 	var loaded := int(chars.call("loaded_count"))
-	var budget: int = (
-		int(CharacterPool.BUDGET["troops"]) + int(CharacterPool.BUDGET["enemies"]) + 1
-	)
+	var budget: int = int(CharacterPool.BUDGET["troops"]) + int(CharacterPool.BUDGET["enemies"]) + 1
 	if loaded < 8:
 		_fail("varian %d: hanya %d model ber-tulang termuat, harus 8" % [stage + 1, loaded])
 	if peak_actors <= 0:
@@ -819,12 +858,28 @@ func _check_characters(
 		_fail("varian %d: musuh mati tanpa pernah roboh" % (stage + 1))
 	if peak_corpses > int(CharacterPool.BUDGET["corpses"]):
 		_fail("varian %d: mayat melewati anggaran (%d)" % [stage + 1, peak_corpses])
+	var body := _body_stats(chars as Node)
+	var worst_parts := 0
+	var odd_tris: Array = []
+	for row in body:
+		worst_parts = maxi(worst_parts, int(row[1]))
+		if not PACK_TRIS.has(int(row[2])):
+			odd_tris.append(row[2])
+
+	if worst_parts > 1:
+		_fail(
+			"varian %d: %d mesh tubuh per aktor, penyatuan tidak jalan" % [stage + 1, worst_parts]
+		)
+	if not odd_tris.is_empty():
+		# Segitiga yang tidak cocok = ada potongan tubuh hilang saat penyatuan.
+		_fail("varian %d: segitiga %s asing bagi pack" % [stage + 1, str(odd_tris)])
 	print(
 		(
 			"    karakter: %d model, puncak %d aktor (batas %d), %d mayat, klip %s"
 			% [loaded, peak_actors, budget, peak_corpses, str(clips.keys())]
 		)
 	)
+	print("    tubuh: %d aktor, %d mesh/aktor, segitiga = berkas pack" % [body.size(), worst_parts])
 
 
 ## Audio is the newest layer and the easiest to leave silently disconnected:
@@ -920,7 +975,7 @@ func _check_glyphs(node: Node, where: String) -> void:
 				if not missing.contains(ch):
 					missing += ch
 		if missing != "":
-			_fail("%s: font tidak punya glyph untuk \"%s\" (teks: %s)" % [where, missing, text])
+			_fail('%s: font tidak punya glyph untuk "%s" (teks: %s)' % [where, missing, text])
 	for child in node.get_children():
 		_check_glyphs(child, where)
 

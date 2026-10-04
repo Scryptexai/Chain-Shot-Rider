@@ -12,7 +12,7 @@
 | Simulasi peluru | **0.8 ms** | sweep 1–3 peluru × 4 substep |
 | Obstacle + wave logic | **0.4 ms** | platform, chain explosion, timer |
 | Render — bangun matriks instancing | **1.5 ms** | 200 `Matrix4x4.TRS` |
-| Render — draw call GPU | **5.0 ms** | ≤ 45 draw call |
+| Render — draw call GPU | **5.0 ms** | ≤ 45 draw call *(lihat §8.0 — angka ini tidak lagi tercapai)* |
 | Post-processing | **2.5 ms** | bloom + vignette (+ CA hanya saat slow-mo) |
 | UI | **1.0 ms** | canvas rebuild terpisah |
 | Audio | **0.6 ms** | 8 voice |
@@ -20,6 +20,58 @@
 | **Headroom** | **0.8 ms** | cadangan untuk hitch OS |
 
 > Kalau satu blok melewati budget, blok lain **tidak** boleh "meminjam". Yang dipotong adalah fitur, bukan frame rate.
+
+## 8.0 Angka terukur, bukan angka harapan
+
+Seluruh anggaran di bawah ditulis sebelum karakter sungguhan masuk. Sejak
+karakter KayKit dipakai **apa adanya** (docs/16), angka draw call-nya diukur,
+bukan ditaksir — `node tools/perf_probe.js` memainkan stage 1 di Chromium dan
+membaca `renderer.info` tiap detik.
+
+Puncak yang terukur pada 4 Oktober 2026, 480×854, gelombang terpadat
+(74 musuh + 5 prajurit + 21 aktor ber-skeleton):
+
+| Besaran | Sebelum penyatuan mesh | Sesudah | Anggaran lama |
+| --- | --- | --- | --- |
+| Draw call | **694** | **184** (ulangan: 178–184) | ≤ 45 |
+| Pengikatan tekstur | 203 | **36** | — |
+| Segitiga | 651.790 | **651.790** | — |
+| Program shader | 9 | 9 | ≤ 20 SetPass |
+
+Dua hal yang harus dibaca bersamaan:
+
+1. **Penyatuan mesh tubuh memangkas 73% draw call tanpa mengubah satu pun
+   piksel.** Jumlah segitiganya identik sampai angka terakhir — itu buktinya
+   tidak ada yang dibuang. Yang hilang hanya delapan panggilan GPU per aktor
+   (KayKit memecah tubuh jadi 7–9 mesh bermaterial sama). Sisi Godot melakukan
+   hal yang sama di `CharacterPool._merge_body`, dan `tests/smoke.tscn`
+   memverifikasi 1 mesh per aktor dengan jumlah segitiga yang cocok dengan
+   berkas pack.
+2. **184 masih empat kali anggaran lama, dan anggaran lama itu memang sudah
+   mati.** Ia ditulis untuk kapsul dan kubus. Satu aktor sekarang = 1 draw call
+   tubuh + 1–2 senjata (senjata punya atlas sendiri, jadi tidak bisa ikut
+   digabung tanpa mengedit tekstur pack — dan itu dilarang).
+
+Batas kerja yang menggantikannya, sampai ada pengukuran di perangkat asli:
+
+| Besaran | Batas baru | Alasan |
+| --- | --- | --- |
+| Draw call | **≤ 200** | terukur 184 pada gelombang terpadat |
+| Segitiga | **≤ 700k** | terukur 652k; ini angka yang paling berisiko |
+| Pengikatan tekstur | **≤ 40** | satu atlas per karakter, satu per senjata |
+
+Tuas yang belum ditarik, berurutan dari yang paling murah:
+
+1. Musuh di luar anggaran skinning digambar sebagai `InstancedMesh` ber-pose
+   beku (satu draw call per peran, bukan per musuh) → taksiran ±60 draw call.
+2. Pita terjauh (> 26 unit) kembali ke kapsul seperti jalur MultiMesh Godot →
+   memangkas draw call **dan** segitiga, dengan harga siluet.
+3. Turunkan `SKIN.enemies` / `BUDGET.enemies` dari 24.
+
+Belum satu pun diambil karena keduanya menukar tampilan dengan angka, dan
+angkanya belum pernah diuji di Snapdragon 660 sungguhan.
+
+---
 
 ### Anggaran karakter ber-tulang (v1.0)
 
@@ -30,10 +82,10 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
 | Hal | Batas | Alasan |
 |---|---|---|
 | Prajurit ber-tulang | 10 barisan depan | sisanya tertutup punggung teman sendiri |
-| Musuh ber-tulang | 16 terdekat (urut `z`) | musuh di ujung lorong tingginya dua piksel |
+| Musuh ber-tulang | 24 terdekat (urut `z`) | musuh di ujung lorong tingginya dua piksel |
 | Mayat | 8 sekaligus, umur 1,5 s | efek, bukan kuburan |
 | Bos | 1 (selalu) | satu-satunya yang ditatap lama |
-| **Total skeleton aktif** | **≈ 27** | sisanya MultiMesh / kolam mesh statis |
+| **Total skeleton aktif** | **≈ 35** (terukur 34) | sisanya MultiMesh (Godot) / salinan beku (web) |
 
 - [ ] Aktor yang tidak dipinjam frame ini **disembunyikan DAN mixer-nya
       dihentikan** — skeleton tak terlihat tidak boleh ikut dibayar.
@@ -61,13 +113,17 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
 - [ ] SRP Batcher ON; shader memakai `CBUFFER` yang kompatibel.
 - [ ] Static batching untuk lantai, dinding, pilar (`Static` flag ON).
 - [ ] Target draw call: **≤ 45**. SetPass call: **≤ 20**.
-- [x] **Karakter KayKit digabung jadi satu primitif per unit.** Pack aslinya
-      memecah tiap karakter jadi 7–9 mesh node (lengan, kepala, helm, jubah…).
-      Dipakai apa adanya, 26 aktor ber-skeleton = ±208 draw call — empat kali
-      lipat anggaran. Karena semuanya memakai satu material,
-      `tools/build_kaykit.py` menggabungkannya jadi satu primitif: **26 aktor =
-      26 draw call**, dan senjata ikut di dalamnya (verteks ter-skin ke tulang
-      `handslot_r`), bukan sebagai objek anak.
+- [x] **Potongan tubuh KayKit disatukan di memori, bukan di berkas.** Pack
+      memecah tiap karakter jadi 7–9 mesh (lengan, kepala, helm, jubah…) yang
+      memakai satu material dan satu skin. Renderer menyambung atributnya jadi
+      satu mesh saat berkas dimuat — `mergeBody()` di `js/render3d.js`,
+      `_merge_body()` di `character_pool.gd`. Lossless (jumlah segitiga dan
+      verteks sama persis, diperiksa `rig_test.js` dan `smoke.tscn`), dan
+      terukur 694 → 184 draw call. Versi lama menggabungkannya dengan menulis
+      ulang GLB-nya; itu ditolak karena yang ikut berubah adalah karakternya.
+- [ ] **Senjata masih draw call sendiri.** Tiap senjata membawa atlas-nya
+      sendiri, jadi 1–2 panggilan tambahan per aktor. Menggabungnya menuntut
+      penggabungan atlas — mengedit tekstur pack, dilarang.
 - [x] **Satu tekstur per karakter, lima atlas untuk delapan peran.** Atlas
       1024² KayKit ditanam ke GLB apa adanya (PNG 12–15 KB masing-masing,
       karena isinya petak gradien yang kompres nyaris sempurna). Knight dipakai
@@ -84,19 +140,19 @@ ulang tiap frame. Batas keras, sama di web dan Godot (lihat [docs 16](16-charact
 ## 8.4 LOD & Culling
 
 - [ ] LOD musuh: `< 26 u` = mesh penuh, `≥ 26 u` = billboard 2 tris.
-- [x] **Dua tingkat model karakter, dari sumber yang sama.** Dekat: GLB
-      ber-tulang 6.2k–9.6k tris (`assets/models/rigged/`). Jauh: pose siaga
-      yang dipanggang lalu didesimasi ke 3,6k–4,2k tris bertekstur
-      (`assets/models/*.glb`), dipakai jalur MultiMesh/kolam mesh. Desimasinya
-      sengaja lebih lembut daripada versi vertex color: sel yang lebih besar
-      menarik verteks melewati batas petak atlas dan wajahnya rusak.
-- [ ] **Risiko terbuka yang harus diukur di perangkat.** Dengan 26 aktor
-      ber-skeleton penuh, beban segitiga puncak naik dari ±6k (model prosedural
-      v1.0) ke **±190k**. Secara draw call aman, dan shader-nya tetap
-      Lambert dengan satu tekstur tanpa normal map, tapi angka ini belum pernah diuji di
-      Snapdragon 660 sungguhan. Kalau meleset, tuas pertama yang ditarik:
-      turunkan `BUDGET.enemies` dari 16 ke 10, lalu perbesar `CLUSTER` di
-      `tools/build_kaykit.py` supaya model LOD jauh lebih ringan.
+- [x] **Dua tingkat karakter, satu sumber, tanpa desimasi.** Dekat: karakter
+      pack ber-tulang 5,8k–8,9k tris dengan mixer penuh. Jauh (web): karakter
+      yang **sama persis**, pose siaga dihitung sekali lalu skeleton-nya tidak
+      pernah maju lagi — nol biaya animasi, geometri dan tekstur utuh. Jauh
+      (Godot): masih kapsul MultiMesh. Model LOD hasil desimasi sudah tidak
+      ada lagi di repo: ia merusak wajah dan menyeberangi batas petak atlas.
+- [ ] **Risiko terbuka nomor satu: segitiga, bukan draw call.** Terukur
+      **652k segitiga** pada gelombang terpadat (74 musuh digambar sebagai
+      karakter penuh di web). Shader-nya tetap Lambert satu tekstur tanpa
+      normal map, tapi 652k × 60 fps = 39 juta segitiga per detik, dan itu
+      belum pernah diuji di Snapdragon 660. Kalau meleset, tuas pertama:
+      kembalikan pita terjauh ke kapsul (jalur yang sudah dipakai Godot),
+      lalu turunkan `SKIN.enemies` dari 24.
 - [ ] Occlusion culling ON untuk obstacle besar (pilar), OFF untuk crowd (semuanya terlihat).
 - [ ] Frustum culling manual di `RenderCrowd` — musuh di luar frustum tidak masuk batch.
 - [ ] `Camera.farClipPlane = 60` (arena hanya 40 unit).

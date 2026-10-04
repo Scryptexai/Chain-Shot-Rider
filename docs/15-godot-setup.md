@@ -86,9 +86,9 @@ Kalau semua mirror tidak terjangkau, skrip keluar dengan kode 3 dan menjelaskan 
 ### Aset: satu sumber, dua target
 
 `godot/assets` adalah **symlink** ke `../assets`. Web dan Godot memuat berkas
-GLB yang sama persis — termasuk delapan karakter ber-tulang di
-`assets/models/rigged/` (lihat [docs 16](16-characters.md)). Tanpa symlink dua
-salinan akan hidup di repo dan cepat atau lambat berbeda.
+GLB yang sama persis — termasuk pack karakter di `assets/models/kaykit/`
+(lihat [docs 16](16-characters.md)). Tanpa symlink dua salinan akan hidup di
+repo dan cepat atau lambat berbeda.
 
 Konsekuensinya: sekali per mesin, cache impor harus dibangun sebelum `load()`
 bisa menemukan modelnya. Tanpa langkah ini Godot menjawab

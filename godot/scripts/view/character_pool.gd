@@ -13,9 +13,14 @@ extends Node3D
 ##     Animations/gltf/Rig_Medium/*.glb  klip, dipakai bersama seluruh cast
 ##     Assets/gltf/sword_1handed.gltf    senjata, digantung di tulang handslot
 ##
-## Tiga berkas itu baru bertemu di sini, di runtime. Ongkosnya jujur:
-## sembilan draw call per aktor, bukan satu. Versi sebelumnya membayar ongkos
-## itu dengan membongkar pack-nya, dan yang hilang adalah karakternya sendiri.
+## Tiga berkas itu baru bertemu di sini, di runtime.
+##
+## Satu-satunya perlakuan terhadap geometrinya adalah penyatuan di memori:
+## kesembilan potongan tubuh dipakai memakai skin dan material yang sama, jadi
+## atributnya disambung berturut-turut menjadi satu ArrayMesh (lihat
+## _merge_body). Hasilnya identik verteks-per-verteks — UV, normal, bobot
+## tulang, dan tekstur dibawa apa adanya — tapi GPU dipanggil sekali per aktor,
+## bukan sembilan kali. Berkas pack-nya sendiri tidak pernah ditulis ulang.
 ##
 ## Kenapa kolam, bukan instantiate per musuh: satu karakter berarti satu
 ## Skeleton3D dan satu AnimationPlayer yang dihitung ulang tiap frame. Pada
@@ -157,6 +162,7 @@ var _scenes: Dictionary = {}  ## nama karakter -> PackedScene pack
 var _items: Dictionary = {}  ## nama senjata -> PackedScene pack
 var _clips: Dictionary = {}  ## nama klip KayKit -> Animation
 var _heights: Dictionary = {}  ## nama karakter -> tinggi aslinya
+var _merged: Dictionary = {}  ## nama karakter -> ArrayMesh gabungan (satu draw call)
 var _rigs: Dictionary = {}  ## peran -> resep siap pakai
 var _pools: Dictionary = {}
 var _used: Dictionary = {}
@@ -365,6 +371,7 @@ func _spawn(kind: String) -> Actor:
 		return null
 	var root := packed.instantiate() as Node3D
 	root.scale = Vector3.ONE * float(rig["scale"])
+	_merge_body(root, String(rig["model"]))
 
 	var player := _build_player(rig)
 	root.add_child(player)
@@ -432,6 +439,135 @@ func _attach_items(root: Node3D, rig: Dictionary) -> Node3D:
 		if item != null:
 			attachment.add_child(item.instantiate())
 	return right_socket
+
+
+## Menyatukan potongan tubuh menjadi satu MeshInstance3D — di memori, sekali
+## per karakter, hasilnya dipakai semua aktor peran itu.
+##
+## KayKit mengirim tubuh sebagai 7-9 mesh terpisah (lengan, kepala, helm,
+## jubah, ...). Kesembilannya memakai skin yang sama dan material yang sama,
+## jadi menyambung array permukaannya menghasilkan mesh yang identik
+## verteks-per-verteks dengan aslinya. Yang hilang hanya delapan draw call.
+##
+## Kalau syaratnya tidak terpenuhi (material berbeda, skin berbeda, format
+## verteks berbeda), fungsi ini tidak melakukan apa-apa dan karakter digambar
+## sebagai sembilan mesh seperti di berkasnya.
+func _merge_body(root: Node3D, model: String) -> void:
+	var parts: Array = _body_parts(root)
+	if parts.size() < 2 or not _parts_uniform(parts):
+		return
+
+	var first: MeshInstance3D = parts[0]
+	var parent := first.get_parent()
+	var merged: ArrayMesh = _merged.get(model)
+	if merged == null:
+		merged = _join_surfaces(
+			parts, first.mesh.surface_get_format(0), first.mesh.surface_get_material(0)
+		)
+		if merged == null:
+			return
+		_merged[model] = merged
+
+	var body := MeshInstance3D.new()
+	body.name = model + "_merged"
+	body.mesh = merged
+	body.skin = first.skin
+	body.skeleton = first.skeleton
+	body.transform = first.transform
+	for part in parts:
+		var mi: MeshInstance3D = part
+		parent.remove_child(mi)
+		mi.queue_free()
+	parent.add_child(body)
+
+
+## Potongan tubuh: mesh ber-skin dengan satu permukaan. Senjata (tanpa skin)
+## dan node lain tidak ikut.
+func _body_parts(root: Node3D) -> Array:
+	var parts: Array = []
+	for mesh in _all_meshes(root):
+		var mi := mesh as MeshInstance3D
+		if mi.skin != null and mi.mesh != null and mi.mesh.get_surface_count() == 1:
+			parts.append(mi)
+	return parts
+
+
+## Syarat penyatuan: satu induk, satu transform, satu format verteks, satu
+## material, satu skin. Kalau salah satu meleset, menyambungnya akan mengubah
+## tampilan karakter — dan itu justru yang harus dihindari.
+func _parts_uniform(parts: Array) -> bool:
+	var first: MeshInstance3D = parts[0]
+	var parent := first.get_parent()
+	var fmt: int = first.mesh.surface_get_format(0)
+	var material: Material = first.mesh.surface_get_material(0)
+	var ok := true
+	for part in parts:
+		var mi: MeshInstance3D = part
+		if (
+			mi.get_parent() != parent
+			or not mi.transform.is_equal_approx(first.transform)
+			or mi.mesh.surface_get_format(0) != fmt
+			or mi.mesh.surface_get_material(0) != material
+			or not _same_skin(mi.skin, first.skin)
+		):
+			ok = false
+			break
+	return ok
+
+
+## Dua skin dianggap sama kalau jumlah, nama, dan bind pose tulangnya sama.
+## Kalau tidak, indeks tulang di ARRAY_BONES menunjuk tulang yang berbeda dan
+## karakternya akan terpelintir — lebih baik batal menyatukan.
+func _same_skin(a: Skin, b: Skin) -> bool:
+	if a == null or b == null:
+		return false
+	if a == b:
+		return true
+	var ok := a.get_bind_count() == b.get_bind_count()
+	var i := 0
+	while ok and i < a.get_bind_count():
+		if (
+			a.get_bind_name(i) != b.get_bind_name(i)
+			or a.get_bind_bone(i) != b.get_bind_bone(i)
+			or not a.get_bind_pose(i).is_equal_approx(b.get_bind_pose(i))
+		):
+			ok = false
+		i += 1
+	return ok
+
+
+## Menyambung array permukaan beberapa mesh menjadi satu ArrayMesh.
+func _join_surfaces(parts: Array, fmt: int, material: Material) -> ArrayMesh:
+	var out: Array = []
+	out.resize(Mesh.ARRAY_MAX)
+	var offset := 0
+	for part in parts:
+		var mi: MeshInstance3D = part
+		var src: Array = mi.mesh.surface_get_arrays(0)
+		var count: int = (src[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+		for slot in range(Mesh.ARRAY_MAX):
+			if src[slot] == null:
+				continue
+			if slot == Mesh.ARRAY_INDEX:
+				var shifted := PackedInt32Array()
+				for index in src[slot] as PackedInt32Array:
+					shifted.append(index + offset)
+				if out[slot] == null:
+					out[slot] = shifted
+				else:
+					out[slot] = (out[slot] as PackedInt32Array) + shifted
+			elif out[slot] == null:
+				out[slot] = src[slot]
+			else:
+				out[slot] = out[slot] + src[slot]
+		offset += count
+	if out[Mesh.ARRAY_VERTEX] == null or out[Mesh.ARRAY_INDEX] == null:
+		return null
+
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, out, [], {}, fmt)
+	mesh.surface_set_material(0, material)
+	return mesh
 
 
 ## Semua MeshInstance3D di bawah satu node, termasuk senjata.

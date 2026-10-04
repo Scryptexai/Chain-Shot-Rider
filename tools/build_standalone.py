@@ -60,11 +60,17 @@ def main() -> None:
     # jalur JSON kalau tidak cocok, jadi data URI JSON ini dimuat apa adanya.
     weapons = ROOT / "assets/models/kaykit/Assets/gltf"
     used = set()
-    for name in re.findall(r"(?:right|left): '([a-z0-9_]+)'", read("js/render3d.js")):
+    # Nama senjata KayKit ber-camelCase ("bow_withString"), jadi kelas
+    # karakternya harus menyertakan huruf besar. Versi pertama regex ini hanya
+    # huruf kecil: busur Ranger diam-diam tidak ikut ditanam dan baru ketahuan
+    # dari error CORS saat berkas tunggal dibuka dari file://.
+    for name in re.findall(r"(?:right|left): '([A-Za-z0-9_]+)'", read("js/render3d.js")):
         used.add(name)
+    embedded = set()
     for gltf_path in sorted(weapons.glob("*.gltf")):
         if gltf_path.stem not in used:
             continue              # pack berisi 30 senjata; hanya yang dipakai
+        embedded.add(gltf_path.stem)
         doc = json.loads(gltf_path.read_text(encoding="utf-8"))
         for buf in doc.get("buffers", []):
             uri = buf.get("uri")
@@ -83,7 +89,18 @@ def main() -> None:
         key = f"assets/models/kaykit/Assets/gltf/{gltf_path.name}"
         models[key] = f"data:application/json;base64,{packed}"
 
-    print(f"  {len(models)} aset ditanam")
+    # Senjata yang disebut resep tapi tidak ketemu berkasnya = berkas tunggal
+    # yang pincang. Lebih baik build berhenti di sini daripada pemain membuka
+    # HTML-nya dan melihat tangan kosong.
+    missing = {n for n in used if (weapons / f"{n}.gltf").exists()} - embedded
+    unknown = {n for n in used if not (weapons / f"{n}.gltf").exists()
+               and n not in ("handslotr", "handslotl")}
+    if missing:
+        raise SystemExit(f"senjata dipakai tapi tidak ditanam: {sorted(missing)}")
+    if unknown:
+        raise SystemExit(f"resep menyebut senjata yang tidak ada di pack: {sorted(unknown)}")
+
+    print(f"  {len(models)} aset ditanam ({len(embedded)} senjata)")
 
     # --- 2. Three.js, GLTFLoader, renderer --------------------------------
     three = read("js/vendor/three.min.js")

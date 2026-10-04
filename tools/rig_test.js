@@ -151,10 +151,26 @@ async function main() {
     // rignya salah, klip dari berkas animasi akan mengikat ke tulang yang
     // keliru dan karakternya terpelintir.
     if (u.bones !== 23) fail(`${u.name}: ${u.bones} tulang, harusnya 23`);
-    // Sembilan mesh adalah ciri karakter KayKit yang utuh (lengan, kepala,
-    // helm, jubah, ...). Kalau tinggal satu, berarti ada yang menggabungkannya
-    // lagi di belakang layar.
-    if (u.meshes < 5) fail(`${u.name}: cuma ${u.meshes} mesh — karakter tidak utuh`);
+    // Karakter KayKit dikirim sebagai 7-9 potongan (lengan, kepala, helm,
+    // jubah, ...) yang disatukan renderer menjadi satu SkinnedMesh saat
+    // dimuat, semata supaya GPU dipanggil sekali per aktor dan bukan sembilan
+    // kali. Penyatuan itu HARUS lossless, jadi yang diperiksa di sini bukan
+    // jumlah mesh melainkan jumlah verteksnya: angka ini dibaca langsung dari
+    // berkas pack (jumlah POSITION seluruh primitif). Satu potongan hilang =
+    // angkanya tidak cocok = tes merah.
+    const WANT_VERTS = {
+      trooper: 5328, shielder: 5328, boss: 5328,   // Knight
+      grunt: 6422,                                 // Rogue
+      runner: 7734,                                // Ranger
+      brute: 6050,                                 // Barbarian
+      splitter: 5421,                              // Mage
+      bomber: 5909,                                // Rogue_Hooded
+    };
+    if (u.meshes !== 1) fail(`${u.name}: ${u.meshes} mesh tubuh, harusnya 1 hasil penyatuan`);
+    if (WANT_VERTS[u.name] && u.verts !== WANT_VERTS[u.name]) {
+      fail(`${u.name}: ${u.verts} vertex, berkas pack punya ${WANT_VERTS[u.name]}`
+        + ' — ada potongan tubuh yang hilang saat penyatuan');
+    }
     if (!u.hasColor) fail(`${u.name}: tanpa tekstur maupun COLOR_0, modelnya akan putih polos`);
     if (u.verts < 300) fail(`${u.name}: cuma ${u.verts} vertex`);
     const names = u.clips.map((c) => c.name);

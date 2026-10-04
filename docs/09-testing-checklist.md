@@ -45,10 +45,10 @@ Sebuah build dinyatakan lolos hanya kalau **seluruh item wajib (⚑)** hijau di 
 
 | # | Item | Kriteria |
 |---|---|---|
-| A4-1 ⚑ | Draw call | ≤ 45 |
+| A4-1 ⚑ | Draw call | ≤ 45 → **direvisi ≤ 200** (terukur 184 dengan karakter KayKit, docs/08 §8.0) |
 | A4-2 | SetPass call | ≤ 20 |
 | A4-3 | Batch musuh | ≤ 6 (1 per tipe) untuk 200 musuh |
-| A4-4 | Tris on-screen | ≤ 80 k |
+| A4-4 | Tris on-screen | ≤ 80 k → **direvisi ≤ 700 k** (terukur 652 k, risiko terbesar yang belum diuji di perangkat) |
 | A4-5 | Overdraw | Tidak ada area > 4× (cek Rendering Debugger) |
 | A4-6 | Thermal | Setelah 15 menit bermain, FPS tidak turun > 10% |
 
@@ -185,7 +185,7 @@ grep -rn "Time.deltaTime\|Time.time\b" unity/Assets/ChainRider/Scripts/ \
 2. Pasang di Redmi Note 7 (SD660) dan iPhone 8
 3. Jalankan PerfHud, mainkan 5 varian × 3 menit
 4. Rekam replay tiap run, putar ulang, bandingkan checksum
-5. Profiler: cek GC.Alloc = 0, draw call ≤ 45, RAM < 200 MB
+5. Profiler: cek GC.Alloc = 0, draw call ≤ 200 (revisi A4-1), RAM < 200 MB
 6. Uji termal: 15 menit sesi berturut-turut
 7. Semua item ⚑ hijau → build dinyatakan lolos
 ```

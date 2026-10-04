@@ -158,27 +158,33 @@ mengosongkannya.
 
 ### Pipeline aset 3D
 
-**Karakter (v2.0): KayKit Adventurers 2.0 FREE** — Kay Lousberg, lisensi
-**CC0** (bebas komersial, kredit opsional; salinan lisensi ikut di
-`assets/models/kaykit/License.txt`). Pack aslinya disimpan utuh di
-`KayKit_Adventurers_2.0_FREE.zip`, dan satu skrip mengubahnya jadi delapan
-peran game:
+**Karakter (v2.1): KayKit Adventurers 2.0 FREE, dipakai apa adanya** — Kay
+Lousberg, lisensi **CC0** (bebas komersial, kredit opsional; salinan lisensi
+ikut di `assets/models/kaykit/License.txt`). Pack aslinya disimpan utuh di
+`KayKit_Adventurers_2.0_FREE.zip`, dan berkas yang dipakai diekstrak
+berdampingan di `assets/models/kaykit/`.
 
-```bash
-python3 tools/build_kaykit.py             # -> assets/models/rigged/*.glb (dekat)
-                                          #    assets/models/*.glb        (LOD jauh)
-```
+**Tidak ada langkah build untuk karakter.** Yang tampil di layar adalah berkas
+pack itu sendiri, dirakit saat runtime dari tiga sumber:
 
-Skrip itu menggabungkan 7–9 mesh node tiap karakter jadi **satu primitif**
-(208 → 26 draw call untuk kerumunan penuh), memanggang atlas tekstur jadi
-vertex color, menempelkan pedang/busur/perisai sebagai verteks ter-skin di
-tulang `handslot_r`, menyalin lima klip animasi dari rig terpisah, lalu
-memanggang versi statis LOD jauh dari pose siaga yang sama. Tanpa dependensi
-pip — hanya pustaka standar Python (`tools/gltfkit.py`).
+| Berkas pack | Perannya |
+| --- | --- |
+| `Characters/gltf/<nama>.glb` | tubuh + rig 23 tulang |
+| `Animations/gltf/Rig_Medium/*.glb` | lima klip, dipakai bersama seluruh cast |
+| `Assets/gltf/<senjata>.gltf` | digantung di tulang `handslot.r` / `handslot.l` |
 
-Detail lengkap — peta peran, jebakan sumbu V atlas, anggaran LOD, dan hal-hal
-khas three.js r128 maupun importer Godot — ada di
-[`docs/16-characters.md`](docs/16-characters.md).
+Satu-satunya perlakuan terhadap geometrinya adalah **penyatuan di memori**:
+KayKit memecah tiap tubuh jadi 7–9 mesh bermaterial sama, dan renderer
+menyambungnya jadi satu mesh saat dimuat (694 → 184 draw call terukur, jumlah
+segitiga tidak berubah sedikit pun). Versi sebelumnya melakukan hal yang sama
+dengan **menulis ulang GLB-nya** plus memanggang tekstur jadi vertex color dan
+mendesimasi LOD jauh; itu dibuang, berikut skrip-skripnya, karena yang ikut
+berubah adalah karakternya.
+
+Detail lengkap — peta peran, rig, anggaran LOD, dan hal-hal khas three.js r128
+maupun importer Godot — ada di
+[`docs/16-characters.md`](docs/16-characters.md); angka draw call terukurnya di
+[`docs/08`](docs/08-optimization-checklist.md) §8.0.
 
 **Props arena: tetap dihasilkan kode.** Tong mesiu, batu rune, dan palisade
 dibangun prosedural:
@@ -204,9 +210,9 @@ engine yang diekspor.
 | Kanvas | `<canvas id="webgl-canvas">` dengan `THREE.WebGLRenderer` |
 | Kamera | `PerspectiveCamera` FOV 41, tinggi 51, miring 33,7 derajat ke arena 20x40 |
 | Cahaya | `HemisphereLight` + matahari `DirectionalLight` + fill — tanpa shadow map demi HP kentang |
-| Model | **GLB sungguhan**: 11 statis di `assets/models/` + 8 karakter KayKit ber-tulang di `assets/models/rigged/`, dimuat `THREE.GLTFLoader` |
-| Karakter | 10 prajurit + 16 musuh terdekat + bos digambar sebagai SkinnedMesh ber-animasi; sisanya mesh statis (lihat docs 16) |
-| Pembuat model | `tools/build_kaykit.py` (karakter, stdlib saja) + `tools/build_assets.py` (props, `trimesh`) — **tanpa Blender dan tanpa Godot** |
+| Model | **GLB sungguhan**: 3 props di `assets/models/` + pack KayKit di `assets/models/kaykit/`, dimuat `THREE.GLTFLoader` |
+| Karakter | 10 prajurit + 24 musuh terdekat + bos digambar sebagai SkinnedMesh ber-animasi; musuh lain memakai karakter yang sama dengan pose beku (lihat docs 16) |
+| Pembuat model | hanya props: `tools/build_assets.py` (`trimesh`). Karakter tidak dibuat, melainkan dimuat dari pack — **tanpa Blender dan tanpa Godot** |
 | Fallback | kalau GLB belum selesai dimuat, primitif Three.js dipakai lebih dulu supaya tidak ada layar kosong |
 | Build step | tidak ada |
 
@@ -395,7 +401,7 @@ Detail lengkap + alasannya ada di [`docs/04-script-skeleton.md`](docs/04-script-
 | RAM | < 200 MB |
 | Build | < 100 MB (Android AAB) |
 | GC | **0 B/frame** selama gameplay |
-| Draw call | ≤ 45 |
+| Draw call | ≤ 45 — **tidak tercapai sejak karakter KayKit masuk**; terukur 184, lihat docs/08 §8.0 |
 | Determinisme | seed + input stream → run identik lintas device & frame rate |
 
 ---
