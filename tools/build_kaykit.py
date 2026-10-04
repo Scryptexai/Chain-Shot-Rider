@@ -41,6 +41,7 @@ Empat hal yang dikerjakan skrip ini, dan kenapa:
 """
 
 import json
+import math
 import os
 import shutil
 import struct
@@ -125,6 +126,26 @@ RECIPES = {
         "shoot": "Throw", "tint": (0.62, 0.66, 0.80),
     },
 }
+
+# Peran -> berkas model statis LOD jauh. Jalur MultiMesh menggambar puluhan
+# musuh yang jauh dengan satu panggilan; model itu harus bergaya sama dengan
+# aktor ber-tulang di dekat kamera, kalau tidak gaya visualnya patah persis di
+# garis pergantian LOD.
+STATIC = {
+    "trooper": "soldier.glb",
+    "grunt": "enemy_grunt.glb",
+    "runner": "enemy_runner.glb",
+    "brute": "enemy_brute.glb",
+    "splitter": "enemy_splitter.glb",
+    "bomber": "enemy_bomber.glb",
+    "shielder": "enemy_shielder.glb",
+    "boss": "boss.glb",
+}
+
+# Ukuran sel pengelompokan verteks untuk model statis, sebagai pecahan tinggi
+# karakter. Semakin besar semakin sedikit segitiga dan semakin kasar bentuknya;
+# 1/15 menahan siluet (kepala, perisai, senjata masih terbaca) di ±1.500 segitiga.
+CLUSTER = 1.0 / 15.0
 
 # Nama klip di pack -> nama klip yang dipakai kode game. `shoot` berbeda per
 # peran (tier gratis tidak punya animasi serang, `Throw` dan `Use_Item` adalah
@@ -278,6 +299,155 @@ def take_weapon(path, mesh, bind, joint, tint, extra=None):
     return top
 
 
+# --------------------------------------------------------- pose & desimasi ---
+
+def sample_pose(src, clip_name, t, rest, scale):
+    """TRS tiap tulang pada detik `t` dari satu klip, hasil interpolasi linier."""
+    anim = None
+    for candidate in src.gltf.get("animations", []):
+        if candidate.get("name") == clip_name:
+            anim = candidate
+            break
+    pose = {n: {"translation": list(v["translation"]),
+                "rotation": list(v["rotation"]),
+                "scale": list(v["scale"])} for n, v in rest.items()}
+    if anim is None:
+        return pose
+    for ch in anim["channels"]:
+        target = ch["target"]
+        name = src.gltf["nodes"][target["node"]].get("name", "").replace(".", "_")
+        if name not in pose:
+            continue
+        sampler = anim["samplers"][ch["sampler"]]
+        times = src.accessor(sampler["input"])
+        values = src.accessor(sampler["output"])
+        i = 0
+        while i + 1 < len(times) and times[i + 1] < t:
+            i += 1
+        j = min(i + 1, len(times) - 1)
+        span = times[j] - times[i]
+        f = 0.0 if span <= 0 else max(min((t - times[i]) / span, 1.0), 0.0)
+        a, b = values[i], values[j]
+        mix = [a[k] + (b[k] - a[k]) * f for k in range(len(a))]
+        if target["path"] == "rotation":
+            n = math.sqrt(sum(v * v for v in mix)) or 1.0
+            pose[name]["rotation"] = [v / n for v in mix]
+        elif target["path"] == "translation":
+            # Klip memakai satuan pack; tulang keluaran sudah dikecilkan, jadi
+            # translasinya ikut dikecilkan di sini.
+            pose[name]["translation"] = [v * scale for v in mix]
+        else:
+            pose[name]["scale"] = mix
+    return pose
+
+
+def skin_to_static(nodes, parent_of, ibms, pose, mesh, positions):
+    """Membekukan satu pose: skinning dihitung sekali di sini, bukan tiap frame."""
+    name_index = {n["name"]: i for i, n in enumerate(nodes) if "name" in n}
+    local = []
+    for i, node in enumerate(nodes):
+        p = pose.get(node.get("name"))
+        if p is None:
+            local.append(mat_from_trs(node.get("translation", [0, 0, 0]),
+                                      node.get("rotation", [0, 0, 0, 1]),
+                                      node.get("scale", [1, 1, 1])))
+        else:
+            local.append(mat_from_trs(p["translation"], p["rotation"], p["scale"]))
+    globals_ = [None] * len(nodes)
+
+    def resolve(i):
+        if globals_[i] is None:
+            parent = parent_of.get(i)
+            globals_[i] = local[i] if parent is None else mat_mul(resolve(parent), local[i])
+        return globals_[i]
+
+    skin = [mat_mul(resolve(i), ibms[i]) for i in range(len(ibms))]
+    out_pos, out_nrm = [], []
+    for v in range(len(positions)):
+        px, py, pz = positions[v]
+        nx, ny, nz = mesh.nrm[v]
+        ax = ay = az = 0.0
+        bx = by = bz = 0.0
+        for k in range(4):
+            w = mesh.wgt[v][k]
+            if w <= 0.0:
+                continue
+            m = skin[mesh.jnt[v][k]]
+            qx, qy, qz = xform_point(m, (px, py, pz))
+            rx, ry, rz = xform_dir(m, (nx, ny, nz))
+            ax += qx * w
+            ay += qy * w
+            az += qz * w
+            bx += rx * w
+            by += ry * w
+            bz += rz * w
+        out_pos.append((ax, ay, az))
+        out_nrm.append(normalized((bx, by, bz)))
+    return out_pos, out_nrm
+
+
+def decimate(pos, nrm, col, tris, cell, color_steps=5):
+    """Pengelompokan verteks berbasis kisi: cepat, tanpa pustaka, dan cukup.
+
+    Verteks yang jatuh di sel kubus yang sama dilebur jadi satu titik rata-rata;
+    segitiga yang kehilangan dua sudutnya dibuang.
+
+    Satu tambahan penting: warna ikut masuk ke kunci sel. Tanpa itu, sel sebesar
+    sepersembilan tinggi badan melumatkan kepala ke bahu dan wajah ke tudung —
+    hasilnya gumpalan berwarna lumpur. Dengan warna sebagai pemisah, batas
+    antar bagian (kulit, baju, logam) tetap jadi tepi geometri, jadi siluet dan
+    warnanya tetap terbaca meski jumlah segitiganya tinggal sepersepuluh.
+    """
+    bucket, remap = {}, []
+    for i, p in enumerate(pos):
+        tone = tuple(int(c * color_steps) for c in col[i][:3])
+        key = (round(p[0] / cell), round(p[1] / cell), round(p[2] / cell), tone)
+        if key not in bucket:
+            bucket[key] = [len(bucket), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+                           [0.0, 0.0, 0.0], 0]
+        slot = bucket[key]
+        for k in range(3):
+            slot[1][k] += p[k]
+            slot[2][k] += nrm[i][k]
+            slot[3][k] += col[i][k]
+        slot[4] += 1
+        remap.append(slot[0])
+    merged = sorted(bucket.values(), key=lambda s: s[0])
+    out_pos = [tuple(v / s[4] for v in s[1]) for s in merged]
+    out_nrm = [normalized(tuple(v / s[4] for v in s[2])) for s in merged]
+    out_col = [tuple([min(v / s[4], 1.0) for v in s[3]] + [1.0]) for s in merged]
+    out_tris = []
+    for t in range(0, len(tris), 3):
+        a, b, c = (remap[tris[t]], remap[tris[t + 1]], remap[tris[t + 2]])
+        if a != b and b != c and a != c:
+            out_tris.extend((a, b, c))
+    return out_pos, out_nrm, out_col, out_tris
+
+
+def write_static(path, name, pos, nrm, col, tris):
+    writer = Writer()
+    acc_pos = writer.add(pos, "VEC3", FLOAT, ARRAY_BUFFER, minmax=True)
+    acc_nrm = writer.add(nrm, "VEC3", FLOAT, ARRAY_BUFFER)
+    acc_col = writer.add(col, "VEC4", FLOAT, ARRAY_BUFFER)
+    comp = USHORT if len(pos) <= 65535 else UINT
+    acc_idx = writer.add(tris, "SCALAR", comp, ELEMENT_ARRAY_BUFFER)
+    gltf = {
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": name, "mesh": 0}],
+        "meshes": [{"name": name, "primitives": [{
+            "attributes": {"POSITION": acc_pos, "NORMAL": acc_nrm,
+                           "COLOR_0": acc_col},
+            "indices": acc_idx, "material": 0,
+        }]}],
+        "materials": [{"name": "character", "pbrMetallicRoughness": {
+            "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0,
+            "roughnessFactor": 0.85}}],
+    }
+    with open(path, "wb") as f:
+        f.write(writer.build(gltf))
+
+
 # ------------------------------------------------------------------- animasi ---
 
 def constant(values, rest, eps=1e-4):
@@ -419,6 +589,18 @@ def build(role, spec):
             parent_of[child] = i
     ibms = [mat_invert(global_of(i)) for i in range(len(nodes))]
 
+    # --- model statis LOD jauh ---------------------------------------------
+    # Dipanggang pada pose siaga, bukan bind pose: kerumunan jauh yang berdiri
+    # dengan tangan terentang seperti orang-orangan sawah langsung terlihat.
+    pose = sample_pose(ANIM["general"], "Idle_A", 0.0, rest, scale)
+    static_pos, static_nrm = skin_to_static(nodes, parent_of, ibms, pose, mesh, pos)
+    ground = min(p[1] for p in static_pos)
+    static_pos = [(p[0], p[1] - ground, p[2]) for p in static_pos]
+    far_pos, far_nrm, far_col, far_tris = decimate(
+        static_pos, static_nrm, mesh.col, mesh.idx, spec["height"] * CLUSTER)
+    write_static(os.path.join(ROOT, "assets", "models", STATIC[role]), role,
+                 far_pos, far_nrm, far_col, far_tris)
+
     # --- tulis -------------------------------------------------------------
     writer = Writer()
     acc_pos = writer.add(pos, "VEC3", FLOAT, ARRAY_BUFFER, minmax=True)
@@ -482,9 +664,11 @@ def build(role, spec):
     out_path = os.path.join(OUT, role + ".glb")
     with open(out_path, "wb") as f:
         f.write(blob)
-    print("  %-9s %-13s tris %5d  verts %5d  klip %d  %6.1f KB  tinggi %.3f"
-          % (role, spec["char"], len(mesh.idx) // 3, len(pos), len(animations),
-             len(blob) / 1024.0, max(p[1] for p in pos)))
+    print("  %-9s %-13s tris %5d  klip %d  %6.1f KB  tinggi %.3f   LOD jauh "
+          "%4d tris (%s)"
+          % (role, spec["char"], len(mesh.idx) // 3, len(animations),
+             len(blob) / 1024.0, max(p[1] for p in pos), len(far_tris) // 3,
+             STATIC[role]))
 
 
 ANIM = {}

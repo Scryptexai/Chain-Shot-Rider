@@ -24,16 +24,15 @@ const OUT=process.argv[3]||'screenshots/kaykit-cast.png';
     const CLIP=OPT.clip;const clipFor=new Proxy({},{get:(t,k)=>CLIP||({trooper:'shoot',grunt:'run',runner:'run',brute:'shoot',splitter:'shoot',bomber:'idle',shielder:'idle',boss:'run'})[k]});
     const SPACING=OPT.spacing, ROWY=[0,-2.6];
     for(let i=0;i<names.length;i++){
-      const g=await new Promise((res,rej)=>loader.load('assets/models/rigged/'+names[i]+'.glb',res,undefined,rej));
+      const g=await new Promise((res,rej)=>loader.load(names[i].indexOf('/')>=0?names[i]:'assets/models/rigged/'+names[i]+'.glb',res,undefined,rej));
       g.scene.traverse(c=>{if(c.isMesh||c.isSkinnedMesh){c.material=new THREE.MeshLambertMaterial({vertexColors:true,skinning:!!c.isSkinnedMesh});c.frustumCulled=false;}});
       const perRow=OPT.perRow;const col=i%perRow,row=Math.floor(i/perRow);
       g.scene.position.set((col-(perRow-1)/2)*SPACING, ROWY[row], 0);
       g.scene.rotation.y=OPT.yrot+i*(OPT.spin||0);
       sc.add(g.scene);
       const m=new THREE.AnimationMixer(g.scene);
-      const clip=g.animations.find(a=>a.name===clipFor[names[i]])||g.animations[0];
-      m.clipAction(clip).play();m.setTime(clip.duration*0.4);
-      m.update(0);
+      const clip=g.animations.length?(g.animations.find(a=>a.name===clipFor[names[i]])||g.animations[0]):null;
+      if(clip){m.clipAction(clip).play();m.setTime(clip.duration*0.4);m.update(0);}
     }
     const aspect=W/H, half=OPT.half;
     const cam=new THREE.OrthographicCamera(-half*aspect,half*aspect,half,-half,0.1,100);
