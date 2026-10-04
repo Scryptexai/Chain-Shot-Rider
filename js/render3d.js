@@ -170,12 +170,24 @@
    * Memuat semua GLB. Game tetap jalan sebelum selesai memuat: primitif dipakai
    * sampai modelnya siap, jadi tidak ada layar kosong menunggu aset.
    */
+  /**
+   * Alamat satu aset. Build satu-berkas (tools/build_standalone.py) menanam
+   * seluruh GLB sebagai data URI dan menaruh petanya di `window.INLINE_MODELS`;
+   * di situ path biasa tidak bisa dipakai karena protokol file:// memblokir
+   * fetch. Semua pemuatan aset lewat fungsi ini supaya kedua mode (server dan
+   * berkas tunggal) memakai jalur yang sama.
+   */
+  function assetURL(path) {
+    var table = global.INLINE_MODELS;
+    return (table && table[path]) ? table[path] : path;
+  }
+
   function loadModels(onDone) {
     if (!THREE.GLTFLoader) { if (onDone) onDone(0); return; }
     var loader = new THREE.GLTFLoader();
     var names = Object.keys(MODELS), pending = names.length;
     names.forEach(function (name) {
-      loader.load(MODELS[name], function (gltf) {
+      loader.load(assetURL(MODELS[name]), function (gltf) {
         var root = gltf.scene;
         root.traverse(function (c) {
           if (!c.isMesh) return;
@@ -236,14 +248,14 @@
     }
 
     ANIM_FILES.forEach(function (url) {
-      loader.load(url, function (gltf) {
+      loader.load(assetURL(url), function (gltf) {
         gltf.animations.forEach(function (clip) { clipLib[clip.name] = clip; });
         done();
       }, undefined, done);
     });
 
     Object.keys(charFiles).forEach(function (name) {
-      loader.load(KIT + 'Characters/gltf/' + name + '.glb', function (gltf) {
+      loader.load(assetURL(KIT + 'Characters/gltf/' + name + '.glb'), function (gltf) {
         gltf.scene.traverse(function (c) {
           if (c.isMesh || c.isSkinnedMesh) c.frustumCulled = false;
         });
@@ -253,7 +265,7 @@
     });
 
     Object.keys(itemFiles).forEach(function (name) {
-      loader.load(KIT + 'Assets/gltf/' + name + '.gltf', function (gltf) {
+      loader.load(assetURL(KIT + 'Assets/gltf/' + name + '.gltf'), function (gltf) {
         gltf.scene.traverse(function (c) { if (c.isMesh) c.frustumCulled = false; });
         items[name] = gltf.scene;
         done();

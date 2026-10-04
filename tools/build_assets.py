@@ -7,11 +7,11 @@ dimuat di web oleh Three.js GLTFLoader. Tidak perlu Godot, tidak perlu Blender,
 dan GLB yang sama bisa dipakai build Godot maupun build web, jadi keduanya
 tidak menyimpang.
 
-KARAKTER TIDAK LAGI DIBUAT DI SINI. Sejak pack KayKit Adventurers (CC0) masuk,
-prajurit, tujuh tipe musuh, dan boss — baik versi ber-tulang di
-assets/models/rigged/ maupun versi statis LOD jauh di assets/models/ — semuanya
-dihasilkan tools/build_kaykit.py. Menjalankan skrip ini tidak boleh menimpa
-mereka; yang tersisa di sini hanya perabot arena.
+KARAKTER TIDAK DIBUAT DI SINI, DAN TIDAK DIBUAT DI MANA PUN. Sejak pack KayKit
+Adventurers (CC0) masuk, prajurit, tujuh tipe musuh, dan boss adalah berkas
+pack itu sendiri, dimuat apa adanya saat runtime (lihat docs/16). Tidak ada
+langkah build untuk karakter — yang tersisa di skrip ini hanya perabot arena:
+tong, bumper, dan dinding perisai.
 
 Warna dipanggang sebagai vertex color memakai palet resmi project. Material di
 Three.js mengalikan warna itu, jadi tema tiap arena masih bisa menimpanya saat

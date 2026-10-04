@@ -38,16 +38,52 @@ def read(rel: str) -> str:
 def main() -> None:
     html = read("index.html")
 
-    # --- 1. Model GLB -> data URI -----------------------------------------
-    models = {}
-    # Dua folder: model statis (LOD jauh) dan karakter ber-tulang (LOD dekat).
-    # Keduanya wajib ikut; berkas tunggal yang kehilangan rig akan jalan tanpa
-    # error dan tanpa satu pun karakter bergerak.
-    for rel in ("assets/models", "assets/models/rigged"):
+    # --- 1. Aset -> data URI ----------------------------------------------
+    models: dict[str, str] = {}
+
+    # Props arena: GLB mandiri, cukup di-base64.
+    for glb in sorted((ROOT / "assets/models").glob("*.glb")):
+        b64 = base64.b64encode(glb.read_bytes()).decode("ascii")
+        models[f"assets/models/{glb.name}"] = f"data:model/gltf-binary;base64,{b64}"
+
+    # Karakter dan animasi KayKit: juga GLB mandiri (tekstur sudah di dalam).
+    for rel in ("assets/models/kaykit/Characters/gltf",
+                "assets/models/kaykit/Animations/gltf/Rig_Medium"):
         for glb in sorted((ROOT / rel).glob("*.glb")):
             b64 = base64.b64encode(glb.read_bytes()).decode("ascii")
             models[f"{rel}/{glb.name}"] = f"data:model/gltf-binary;base64,{b64}"
-    print(f"  {len(models)} model GLB ditanam")
+
+    # Senjata: .gltf + .bin + .png terpisah, jadi dua berkas pendampingnya
+    # ikut ditanam KE DALAM JSON-nya sebagai data URI, lalu JSON-nya sendiri
+    # jadi data URI. Berkas aslinya tidak diubah; yang dibentuk hanya salinan
+    # di dalam HTML. GLTFLoader memeriksa magic "glTF" lebih dulu dan jatuh ke
+    # jalur JSON kalau tidak cocok, jadi data URI JSON ini dimuat apa adanya.
+    weapons = ROOT / "assets/models/kaykit/Assets/gltf"
+    used = set()
+    for name in re.findall(r"(?:right|left): '([a-z0-9_]+)'", read("js/render3d.js")):
+        used.add(name)
+    for gltf_path in sorted(weapons.glob("*.gltf")):
+        if gltf_path.stem not in used:
+            continue              # pack berisi 30 senjata; hanya yang dipakai
+        doc = json.loads(gltf_path.read_text(encoding="utf-8"))
+        for buf in doc.get("buffers", []):
+            uri = buf.get("uri")
+            if uri and not uri.startswith("data:"):
+                raw = (weapons / uri).read_bytes()
+                buf["uri"] = ("data:application/octet-stream;base64,"
+                              + base64.b64encode(raw).decode("ascii"))
+        for img in doc.get("images", []):
+            uri = img.get("uri")
+            if uri and not uri.startswith("data:"):
+                raw = (weapons / uri).read_bytes()
+                img["uri"] = ("data:image/png;base64,"
+                              + base64.b64encode(raw).decode("ascii"))
+        packed = base64.b64encode(
+            json.dumps(doc, separators=(",", ":")).encode("utf-8")).decode("ascii")
+        key = f"assets/models/kaykit/Assets/gltf/{gltf_path.name}"
+        models[key] = f"data:application/json;base64,{packed}"
+
+    print(f"  {len(models)} aset ditanam")
 
     # --- 2. Three.js, GLTFLoader, renderer --------------------------------
     three = read("js/vendor/three.min.js")
@@ -59,20 +95,11 @@ def main() -> None:
     # diletakkan di tengah (setelah MODELS, sebelum RIGGED) dan hasilnya
     # halaman mati dengan "Cannot convert undefined or null to object" —
     # error yang tidak pernah muncul di versi multi-berkas.
-    anchor = "  var rigs = {};"
-    assert anchor in render3d, "titik sisip INLINE_MODELS tidak ditemukan di render3d.js"
-    render3d = render3d.replace(
-        anchor,
-        "  // Build satu berkas: path diganti data URI yang ditanam di halaman.\n"
-        "  if (typeof INLINE_MODELS !== 'undefined') {\n"
-        "    [MODELS, RIGGED].forEach(function (table) {\n"
-        "      Object.keys(table).forEach(function (k) {\n"
-        "        if (INLINE_MODELS[table[k]]) table[k] = INLINE_MODELS[table[k]];\n"
-        "      });\n"
-        "    });\n"
-        "  }\n" + anchor,
-        1,
-    )
+    # Tidak ada lagi tabel path yang perlu ditambal: semua pemuatan aset di
+    # render3d.js lewat assetURL(), yang otomatis membaca window.INLINE_MODELS
+    # kalau ada. Dulu bagian ini menulis ulang dua tabel dengan string replace
+    # dan selalu rapuh terhadap perubahan nama variabel.
+    assert "function assetURL(" in render3d, "render3d.js tidak punya assetURL()"
 
     inline_scripts = (
         "<script>window.INLINE_MODELS = "

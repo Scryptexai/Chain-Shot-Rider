@@ -113,7 +113,7 @@ def check_runtime_resources(problems: list[str]) -> int:
         text = gd.read_text()
         for rel in set(RES_LOAD.findall(text)) | set(RES_CONST.findall(text)):
             checked += 1
-            # Template seperti "res://assets/models/rigged/%s.glb" diisi saat
+            # Template seperti "res://assets/models/kaykit/.../%s.glb" diisi saat
             # runtime. Yang bisa diperiksa di sini adalah foldernya ada dan
             # berisi setidaknya satu berkas dengan akhiran yang sama.
             if "%" in rel:

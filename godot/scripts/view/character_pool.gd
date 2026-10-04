@@ -1,19 +1,27 @@
 class_name CharacterPool
 extends Node3D
-## Kolam karakter ber-tulang, dipinjam per frame.
+## Kolam karakter KayKit, dipinjam per frame.
 ##
-## Satu-satunya tempat di proyek Godot yang tahu cara memasang GLB ber-rig,
-## memutar klipnya, dan mendaur ulang nodenya. ArenaView hanya meminta "beri
-## aku seorang grunt di sini, sedang berlari" dan tidak perlu tahu apa pun
-## tentang Skeleton3D, AnimationPlayer, atau BoneAttachment3D.
+## Satu-satunya tempat di proyek Godot yang tahu cara merakit karakter dari
+## berkas pack, memutar klipnya, dan mendaur ulang nodenya. ArenaView hanya
+## meminta "beri aku seorang grunt di sini, sedang berlari".
 ##
-## Kenapa kolam, bukan instantiate per musuh: satu GLB ber-skin berarti satu
-## Skeleton3D, satu AnimationPlayer, dan pose yang dihitung ulang tiap frame.
-## Pada gelombang 200 musuh itu ratusan skeleton — anggaran frame ponsel habis
-## hanya untuk tulang yang lebarnya dua piksel di layar. Jadi hanya sejumlah
-## kecil unit TERDEKAT yang mendapat tubuh ber-tulang; sisanya tetap digambar
-## ArenaView lewat MultiMesh seperti sebelumnya. Batasnya sama persis dengan
-## versi web (js/render3d.js), supaya kedua target terlihat sama.
+## Yang dimuat adalah berkas KayKit APA ADANYA — tidak ada GLB turunan, tidak
+## ada mesh yang digabung, tidak ada tekstur yang dipanggang ulang:
+##
+##     Characters/gltf/Knight.glb        tubuh (9 mesh, 23 tulang)
+##     Animations/gltf/Rig_Medium/*.glb  klip, dipakai bersama seluruh cast
+##     Assets/gltf/sword_1handed.gltf    senjata, digantung di tulang handslot
+##
+## Tiga berkas itu baru bertemu di sini, di runtime. Ongkosnya jujur:
+## sembilan draw call per aktor, bukan satu. Versi sebelumnya membayar ongkos
+## itu dengan membongkar pack-nya, dan yang hilang adalah karakternya sendiri.
+##
+## Kenapa kolam, bukan instantiate per musuh: satu karakter berarti satu
+## Skeleton3D dan satu AnimationPlayer yang dihitung ulang tiap frame. Pada
+## gelombang 200 musuh itu ratusan skeleton. Jadi hanya unit TERDEKAT yang
+## mendapat tubuh sungguhan; sisanya tetap MultiMesh di ArenaView. Batasnya
+## kembar dengan versi web (js/render3d.js).
 ##
 ## Pemakaian per frame:
 ##     pool.begin()
@@ -22,20 +30,56 @@ extends Node3D
 ##     pool.end(delta)
 
 ## Anggaran LOD — kembar dari SKIN di js/render3d.js.
-const BUDGET := {"troops": 10, "enemies": 16, "corpses": 8}
+const BUDGET := {"troops": 10, "enemies": 24, "corpses": 8}
 
-## Tinggi manusia 0,96 unit di lorong selebar 20 unit itu benar secara skala,
-## tapi di layar ponsel jadi dua puluhan piksel. Semua unit dibesarkan dengan
-## faktor yang sama — termasuk MultiMesh di ArenaView — supaya tidak ada
-## lompatan ukuran saat unit berpindah antara jalur ber-tulang dan jalur
-## statis. Simulasi tidak ikut diubah: radius tabrakan tetap apa adanya.
+## Tinggi semua karakter di dunia game, dalam unit arena. Karakter KayKit
+## lahir setinggi 2,17–2,66 unit dan tingginya berbeda-beda; satu-satunya
+## penyesuaian yang dilakukan di sini adalah skala node supaya semuanya
+## sepakat di angka ini. Nilainya sama dengan versi lama (0,96 x 2,0), jadi
+## kamera, formasi, dan kotak tabrakan tidak perlu disetel ulang.
+const CHAR_HEIGHT := 1.92
+
+## Skala untuk jalur MultiMesh (kapsul musuh jauh) yang bukan karakter.
+## Dipisah dari skala karakter karena kapsulnya memang bukan model KayKit.
 const CHAR_SCALE := 2.0
 
 ## Berapa lama mayat tergeletak sebelum memudar, dan lama memudarnya.
 const CORPSE_SECONDS := 1.5
 const CORPSE_FADE := 0.5
 
-const MODEL_DIR := "res://assets/models/rigged/%s.glb"
+const KIT := "res://assets/models/kaykit/"
+const ANIM_FILES := [
+	"Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+	"Animations/gltf/Rig_Medium/Rig_Medium_MovementBasic.glb",
+]
+
+## Peran -> karakter, senjata, klip tembak, ukuran. Hanya PEMILIHAN; tidak ada
+## satu pun angka di sini yang mengubah isi berkasnya. Kembar dari CAST di
+## js/render3d.js — kalau yang satu berubah, yang lain harus ikut.
+const CAST := {
+	"trooper": {"model": "Knight", "right": "sword_1handed", "left": "shield_round_color"},
+	"grunt": {"model": "Rogue", "right": "dagger"},
+	"runner": {"model": "Ranger", "right": "bow_withString"},
+	"brute": {"model": "Barbarian", "right": "axe_2handed"},
+	"splitter":
+	{"model": "Mage", "right": "staff", "left": "spellbook_closed", "shoot": "Use_Item"},
+	"bomber": {"model": "Rogue_Hooded", "right": "smokebomb"},
+	"shielder": {"model": "Knight", "right": "sword_1handed", "left": "shield_square_color"},
+	"boss": {"model": "Knight", "right": "sword_2handed_color", "size": 2.0},
+}
+
+## Nama klip di pack -> nama yang dipakai state machine game. Klip tidak
+## di-rename di dalam berkas; pemetaan hidup di sini saja.
+const CLIP_SOURCE := {
+	"idle": "Idle_A",
+	"run": "Running_A",
+	"shoot": "Throw",
+	"hit": "Hit_A",
+	"die": "Death_A",
+}
+
+## Tulang tempat senjata digantung, disediakan rig KayKit khusus untuk ini.
+const SOCKET := {"right": "handslot.r", "left": "handslot.l"}
 
 ## Klip yang tidak boleh berulang: aksi sesaat yang harus berhenti di frame
 ## terakhirnya (roboh harus tetap roboh).
@@ -51,7 +95,10 @@ class Actor:
 	var root: Node3D
 	var anim: AnimationPlayer
 	var muzzle: Node3D
-	var mesh: MeshInstance3D
+	## Semua mesh milik satu karakter. KayKit memecah tubuh jadi sembilan
+	## bagian, jadi efek yang menyentuh "model"-nya (memudar saat jadi mayat)
+	## harus menyentuh kesembilannya.
+	var meshes: Array
 	var current := ""
 	## Sisa detik sebelum klip sesaat boleh diganti klip lain.
 	var lock := 0.0
@@ -61,17 +108,13 @@ class Actor:
 	var rate := 1.0
 
 	func _init(
-		unit: String,
-		node: Node3D,
-		player: AnimationPlayer,
-		socket: Node3D,
-		skin: MeshInstance3D
+		unit: String, node: Node3D, player: AnimationPlayer, socket: Node3D, skins: Array
 	) -> void:
 		kind = unit
 		root = node
 		anim = player
 		muzzle = socket
-		mesh = skin
+		meshes = skins
 		phase = randf()
 		rate = 0.92 + randf() * 0.16
 
@@ -110,7 +153,11 @@ class Actor:
 		lock = maxf(lock - delta, 0.0)
 
 
-var _scenes: Dictionary = {}
+var _scenes: Dictionary = {}  ## nama karakter -> PackedScene pack
+var _items: Dictionary = {}  ## nama senjata -> PackedScene pack
+var _clips: Dictionary = {}  ## nama klip KayKit -> Animation
+var _heights: Dictionary = {}  ## nama karakter -> tinggi aslinya
+var _rigs: Dictionary = {}  ## peran -> resep siap pakai
 var _pools: Dictionary = {}
 var _used: Dictionary = {}
 var _corpses: Array = []
@@ -118,20 +165,89 @@ var _corpse_life := PackedFloat32Array()
 var _loaded := 0
 
 
-## Memuat GLB yang disebut namanya. Dipanggil sekali sebelum run pertama:
-## memuat saat musuh pertama muncul berarti hitch tepat di detik paling ramai.
+## Memuat berkas pack untuk peran yang disebut. Dipanggil sekali sebelum run
+## pertama: memuat saat musuh pertama muncul berarti hitch tepat di detik
+## paling ramai.
+##
+## Tiga jenis berkas dimuat di sini dan masing-masing sekali saja. Knight
+## dipakai tiga peran; memuatnya per peran berarti membaca berkas yang sama
+## tiga kali dan menyimpan tiga salinan di memori.
 func warm(kinds: Array) -> int:
+	_load_clips()
 	for entry in kinds:
 		var kind := String(entry)
-		if _scenes.has(kind):
+		if _rigs.has(kind):
 			continue
-		var packed := load(MODEL_DIR % kind)
-		if packed == null:
-			push_warning("CharacterPool: model %s tidak ada, memakai MultiMesh" % kind)
+		var recipe: Dictionary = CAST.get(kind, {})
+		if recipe.is_empty():
+			push_warning("CharacterPool: peran %s tidak ada di CAST" % kind)
 			continue
-		_scenes[kind] = packed
+		var model := String(recipe["model"])
+		if not _scenes.has(model):
+			var packed := load(KIT + "Characters/gltf/%s.glb" % model)
+			if packed == null:
+				push_warning("CharacterPool: karakter %s tidak ada" % model)
+				continue
+			_scenes[model] = packed
+			_heights[model] = _measure_height(packed)
+		for hand in ["right", "left"]:
+			if not recipe.has(hand):
+				continue
+			var item := String(recipe[hand])
+			if not _items.has(item):
+				var weapon := load(KIT + "Assets/gltf/%s.gltf" % item)
+				if weapon != null:
+					_items[item] = weapon
+		var height: float = _heights.get(model, CHAR_HEIGHT)
+		_rigs[kind] = {
+			"model": model,
+			"scale": (CHAR_HEIGHT / maxf(height, 0.001)) * float(recipe.get("size", 1.0)),
+			"shoot": String(recipe.get("shoot", CLIP_SOURCE["shoot"])),
+			"right": recipe.get("right", ""),
+			"left": recipe.get("left", ""),
+		}
 		_loaded += 1
 	return _loaded
+
+
+## Mengumpulkan klip dari dua berkas animasi pack.
+##
+## Berkas animasi KayKit adalah scene terpisah berisi manekin + AnimationPlayer.
+## Yang diambil hanya Animation-nya; manekinnya langsung dibuang. Karena jalur
+## track-nya (`Rig_Medium/Skeleton3D:hips`) sama persis dengan struktur node di
+## berkas karakter, klip itu langsung cocok tanpa retarget apa pun.
+func _load_clips() -> void:
+	if not _clips.is_empty():
+		return
+	for rel in ANIM_FILES:
+		var packed := load(KIT + rel)
+		if packed == null:
+			push_warning("CharacterPool: berkas animasi %s tidak ada" % rel)
+			continue
+		var scene: Node = packed.instantiate()
+		var player: AnimationPlayer = scene.find_child("AnimationPlayer", true, false)
+		if player != null:
+			for name in player.get_animation_list():
+				var clip := player.get_animation(name)
+				if clip != null:
+					_clips[name] = clip.duplicate()
+		scene.free()
+
+
+## Tinggi karakter dalam berkasnya sendiri, dipakai untuk menghitung skala.
+func _measure_height(packed: PackedScene) -> float:
+	var scene: Node = packed.instantiate()
+	var box := AABB()
+	var first := true
+	for mesh in _all_meshes(scene):
+		var mesh_box: AABB = mesh.get_aabb()
+		if first:
+			box = mesh_box
+			first = false
+		else:
+			box = box.merge(mesh_box)
+	scene.free()
+	return box.size.y
 
 
 func loaded_count() -> int:
@@ -139,7 +255,7 @@ func loaded_count() -> int:
 
 
 func has_kind(kind: String) -> bool:
-	return _scenes.has(kind)
+	return _rigs.has(kind)
 
 
 ## Menandai awal frame: semua aktor dianggap bebas sampai ada yang meminjam.
@@ -152,7 +268,7 @@ func begin() -> void:
 ## jalur cadangan (MultiMesh), karena karakter hilang lebih buruk daripada
 ## karakter sederhana.
 func take(kind: String) -> Actor:
-	if not _scenes.has(kind):
+	if not _rigs.has(kind):
 		return null
 	if not _pools.has(kind):
 		_pools[kind] = []
@@ -190,7 +306,7 @@ func end(delta: float) -> void:
 ## Merobohkan satu tubuh di tempat musuh mati. Mayat bukan aktor pinjaman:
 ## ia harus tetap ada setelah musuhnya hilang dari simulasi.
 func drop_corpse(kind: String, x: float, z: float) -> void:
-	if not _scenes.has(kind):
+	if not _rigs.has(kind):
 		return
 	var slot := -1
 	for i in range(_corpses.size()):
@@ -241,62 +357,91 @@ func active_count() -> int:
 
 
 func _spawn(kind: String) -> Actor:
-	var packed: PackedScene = _scenes.get(kind)
+	var rig: Dictionary = _rigs.get(kind, {})
+	if rig.is_empty():
+		return null
+	var packed: PackedScene = _scenes.get(rig["model"])
 	if packed == null:
 		return null
 	var root := packed.instantiate() as Node3D
-	root.scale = Vector3.ONE * CHAR_SCALE
-	var player: AnimationPlayer = root.find_child("AnimationPlayer", true, false)
-	if player == null:
-		root.queue_free()
-		return null
-	_prepare_clips(player)
-	var socket := _attach_muzzle(root)
+	root.scale = Vector3.ONE * float(rig["scale"])
+
+	var player := _build_player(rig)
+	root.add_child(player)
+
+	var socket := _attach_items(root, rig)
 	add_child(root)
-	return Actor.new(kind, root, player, socket, _find_mesh(root))
+	return Actor.new(kind, root, player, socket, _all_meshes(root))
 
 
-## glTF tidak menyimpan "klip ini berulang", jadi importer Godot menandai
-## semuanya sekali-jalan. Tanpa perbaikan ini musuh melangkah satu langkah
-## lalu membeku di udara.
-func _prepare_clips(player: AnimationPlayer) -> void:
-	for name in player.get_animation_list():
-		var clip := player.get_animation(name)
+## Merakit AnimationPlayer berisi lima klip yang dipakai game.
+##
+## Berkas karakter KayKit tidak membawa animasi sama sekali — ia hanya tubuh
+## dan rig. Jadi playernya dibuat di sini, diisi salinan klip dari berkas
+## animasi, lalu dinamai ulang ke nama peran (`idle`, `run`, ...). Yang
+## di-rename adalah salinan di memori; berkas pack tidak disentuh.
+##
+## `root_node` dibiarkan pada default (induk player, yaitu akar karakter),
+## karena jalur track di berkas animasi memang relatif terhadap titik itu:
+## `Rig_Medium/Skeleton3D:hips`.
+func _build_player(rig: Dictionary) -> AnimationPlayer:
+	var player := AnimationPlayer.new()
+	player.name = "AnimationPlayer"
+	var library := AnimationLibrary.new()
+	for role in CLIP_SOURCE:
+		var source: String = rig["shoot"] if role == "shoot" else String(CLIP_SOURCE[role])
+		var clip: Animation = _clips.get(source)
 		if clip == null:
 			continue
-		if name in ONCE_CLIPS:
-			clip.loop_mode = Animation.LOOP_NONE
-		else:
-			clip.loop_mode = Animation.LOOP_LINEAR
+		var copy: Animation = clip.duplicate()
+		# glTF tidak menyimpan "klip ini berulang", jadi importer menandai
+		# semuanya sekali-jalan. Tanpa perbaikan ini musuh melangkah satu
+		# langkah lalu membeku di udara.
+		copy.loop_mode = Animation.LOOP_NONE if role in ONCE_CLIPS else Animation.LOOP_LINEAR
+		library.add_animation(role, copy)
+	player.add_animation_library("", library)
+	return player
 
 
-## Soket moncong diekspor sebagai tulang bernama "muzzle", jadi di Godot ia
-## diambil lewat BoneAttachment3D, bukan dicari sebagai node biasa.
-func _attach_muzzle(root: Node3D) -> Node3D:
+## Menggantung senjata di tulang tangan dan mengembalikan soket tangan kanan
+## (dipakai sebagai titik lahir peluru dan kilatan tembakan).
+##
+## BoneAttachment3D adalah cara Godot mengikuti satu tulang; senjata KayKit
+## diekspor pada titik asal supaya cukup di-parent ke situ tanpa offset.
+func _attach_items(root: Node3D, rig: Dictionary) -> Node3D:
 	var skeleton: Skeleton3D = root.find_child("Skeleton3D", true, false)
 	if skeleton == null:
 		return null
-	var bone := skeleton.find_bone("muzzle")
-	if bone < 0:
-		return null
-	var attachment := BoneAttachment3D.new()
-	attachment.name = "MuzzleSocket"
-	attachment.bone_name = "muzzle"
-	attachment.bone_idx = bone
-	skeleton.add_child(attachment)
-	return attachment
+	var right_socket: Node3D = null
+	for hand in ["right", "left"]:
+		var bone_name: String = SOCKET[hand]
+		var bone := skeleton.find_bone(bone_name)
+		if bone < 0:
+			continue
+		var attachment := BoneAttachment3D.new()
+		attachment.name = "Socket_" + hand
+		attachment.bone_name = bone_name
+		attachment.bone_idx = bone
+		skeleton.add_child(attachment)
+		if hand == "right":
+			right_socket = attachment
+		var item_name := String(rig.get(hand, ""))
+		if item_name == "":
+			continue
+		var item: PackedScene = _items.get(item_name)
+		if item != null:
+			attachment.add_child(item.instantiate())
+	return right_socket
 
 
-## Mesh ber-skin dicari sekali saat tubuh dibuat, bukan tiap frame: pencarian
-## node dengan pola sama mahalnya dengan menggambar unitnya.
-func _find_mesh(node: Node) -> MeshInstance3D:
+## Semua MeshInstance3D di bawah satu node, termasuk senjata.
+func _all_meshes(node: Node) -> Array:
+	var out: Array = []
 	if node is MeshInstance3D:
-		return node as MeshInstance3D
+		out.append(node)
 	for child in node.get_children():
-		var found := _find_mesh(child)
-		if found != null:
-			return found
-	return null
+		out.append_array(_all_meshes(child))
+	return out
 
 
 func _age_corpses(delta: float) -> void:
@@ -310,5 +455,5 @@ func _age_corpses(delta: float) -> void:
 			continue
 		# Memudar di setengah detik terakhir, bukan hilang mendadak.
 		var alpha := minf(_corpse_life[i] / CORPSE_FADE, 1.0)
-		if corpse.mesh != null:
-			corpse.mesh.transparency = 1.0 - alpha
+		for mesh in corpse.meshes:
+			(mesh as MeshInstance3D).transparency = 1.0 - alpha
