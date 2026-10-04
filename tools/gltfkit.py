@@ -300,14 +300,21 @@ def decode_png(data):
 
 
 class Atlas:
-    """Atlas warna datar; dibaca sebagai sampler nearest dengan clamp."""
+    """Atlas palet; dibaca sebagai sampler nearest dengan clamp.
+
+    Catatan penting soal sumbu V: di glTF, v = 0 adalah BARIS ATAS gambar
+    (berlawanan dengan OpenGL klasik). Atlas KayKit berisi petak gradien
+    terang-ke-gelap, jadi membalik V tidak menghasilkan warna yang salah
+    sedikit — ia menukar ujung terang dengan ujung gelap, dan seluruh karakter
+    tampil pucat seperti patung gips.
+    """
 
     def __init__(self, png_bytes):
         self.w, self.h, self.px = decode_png(png_bytes)
 
     def sample(self, u, v):
         x = min(max(int(u * self.w), 0), self.w - 1)
-        y = min(max(int((1.0 - v) * self.h), 0), self.h - 1)
+        y = min(max(int(v * self.h), 0), self.h - 1)
         i = (y * self.w + x) * 3
         return (self.px[i] / 255.0, self.px[i + 1] / 255.0, self.px[i + 2] / 255.0)
 

@@ -85,43 +85,44 @@ WANTED_DIRS = ["Assets/gltf"]
 RECIPES = {
     "trooper": {
         "char": "Knight", "height": 0.96,
-        "right": "sword_1handed", "left": "shield_round",
-        "shoot": "Throw", "tint": (1.00, 1.04, 1.12),
+        "right": "sword_1handed", "left": "shield_round_color",
+        "shoot": "Throw", "tint": (1.00, 1.03, 1.10),
     },
     "grunt": {
         "char": "Rogue", "height": 0.96,
         "right": "dagger", "left": None,
-        "shoot": "Throw", "tint": (1.08, 0.80, 0.76),
+        "shoot": "Throw", "tint": (1.08, 0.90, 0.86),
     },
     "runner": {
-        "char": "Rogue_Hooded", "height": 0.883,
-        "right": "dagger", "left": None,
-        "shoot": "Throw", "tint": (1.00, 0.78, 0.92),
+        "char": "Ranger", "height": 0.883,
+        "right": "bow_withString", "left": None,
+        "right_rot": (0.70710678, 0.0, 0.0, 0.70710678),
+        "shoot": "Throw", "tint": (1.02, 0.96, 0.90),
     },
     "brute": {
         "char": "Barbarian", "height": 1.392,
         "right": "axe_2handed", "left": None,
-        "shoot": "Throw", "tint": (1.06, 0.84, 0.72),
+        "shoot": "Throw", "tint": (1.05, 0.95, 0.88),
     },
     "splitter": {
         "char": "Mage", "height": 0.96,
         "right": "staff", "left": "spellbook_closed",
-        "shoot": "Use_Item", "tint": (0.86, 0.84, 1.14),
+        "shoot": "Use_Item", "tint": (0.94, 0.94, 1.08),
     },
     "bomber": {
-        "char": "Rogue", "height": 0.941,
+        "char": "Rogue_Hooded", "height": 0.941,
         "right": "smokebomb", "left": None,
-        "shoot": "Throw", "tint": (0.92, 1.02, 0.76),
+        "shoot": "Throw", "tint": (0.88, 1.06, 0.86),
     },
     "shielder": {
         "char": "Knight", "height": 1.008,
-        "right": "sword_1handed", "left": "shield_square",
-        "shoot": "Throw", "tint": (0.82, 0.86, 1.04),
+        "right": "sword_1handed", "left": "shield_square_color",
+        "shoot": "Throw", "tint": (0.80, 0.86, 1.04),
     },
     "boss": {
-        "char": "Barbarian", "height": 2.016,
-        "right": "axe_2handed", "left": "shield_round_barbarian",
-        "shoot": "Throw", "tint": (1.14, 0.68, 0.62),
+        "char": "Knight", "height": 2.016,
+        "right": "sword_2handed_color", "left": None,
+        "shoot": "Throw", "tint": (0.62, 0.66, 0.80),
     },
 }
 
@@ -188,21 +189,25 @@ class Mesh:
         return lo, hi
 
 
-def face_colors(atlas, uvs, tris, count, tint):
-    """Warna per verteks, diambil dari titik tengah UV tiap segitiga.
+# Seberapa jauh titik sampel ditarik dari verteks ke titik tengah segitiga.
+# Nol berarti mengambil persis di UV verteks: rawan meleset ke petak sebelah
+# karena verteks duduk di tepi petak. Satu berarti satu warna rata per
+# segitiga: aman, tapi gradien halus khas KayKit hilang. Seperempat menjaga
+# gradiennya sambil tetap berada di dalam petak.
+UV_BIAS = 0.25
 
-    Mengambil tepat di UV verteks rawan meleset ke petak sebelah karena verteks
-    duduk persis di tepi petak warna. Titik tengah segitiga selalu di dalam
-    petak, dan karena KayKit sudah memecah verteks di tiap batas UV, rata-rata
-    per verteks tidak pernah mencampur dua warna.
-    """
+
+def face_colors(atlas, uvs, tris, count, tint):
+    """Warna per verteks, dipanggang dari atlas lewat UV tiap segitiga."""
     acc = [[0.0, 0.0, 0.0, 0] for _ in range(count)]
     for t in range(0, len(tris), 3):
         a, b, c = tris[t], tris[t + 1], tris[t + 2]
-        u = (uvs[a][0] + uvs[b][0] + uvs[c][0]) / 3.0
-        v = (uvs[a][1] + uvs[b][1] + uvs[c][1]) / 3.0
-        r, g, bl = atlas.sample(u, v)
+        cu = (uvs[a][0] + uvs[b][0] + uvs[c][0]) / 3.0
+        cv = (uvs[a][1] + uvs[b][1] + uvs[c][1]) / 3.0
         for i in (a, b, c):
+            u = uvs[i][0] + (cu - uvs[i][0]) * UV_BIAS
+            v = uvs[i][1] + (cv - uvs[i][1]) * UV_BIAS
+            r, g, bl = atlas.sample(u, v)
             acc[i][0] += r
             acc[i][1] += g
             acc[i][2] += bl
@@ -237,7 +242,7 @@ def take_character(doc, mesh, joint_remap, tint):
             mesh.add(pos, nrm, col, jnt, [tuple(w) for w in wgt], tris)
 
 
-def take_weapon(path, mesh, bind, joint, tint):
+def take_weapon(path, mesh, bind, joint, tint, extra=None):
     """Menempel satu aset senjata ke tulang `joint` (bobot penuh, satu tulang).
 
     `bind` adalah matriks bind global tulang itu: verteks senjata dipindahkan
@@ -247,11 +252,15 @@ def take_weapon(path, mesh, bind, joint, tint):
     doc = Doc.load(path)
     g = doc.gltf
     atlas = Atlas(doc.image_bytes(0))
+    # Beberapa aset tidak berdiri di sumbu yang sama dengan pegangan tangan
+    # (busur membentang di sumbu Z, bukan Y), jadi resep boleh memutarnya.
+    adjust = mat_from_trs((0.0, 0.0, 0.0), extra or (0.0, 0.0, 0.0, 1.0),
+                          (1.0, 1.0, 1.0))
     top = 0.0
     for i, node in enumerate(g["nodes"]):
         if "mesh" not in node:
             continue
-        local = doc.global_matrix(i)
+        local = mat_mul(adjust, doc.global_matrix(i))
         world = mat_mul(bind, local)
         for prim in g["meshes"][node["mesh"]]["primitives"]:
             attrs = prim["attributes"]
@@ -356,7 +365,8 @@ def build(role, spec):
         if not asset:
             continue
         path = os.path.join(PACK, "Assets", "gltf", asset + ".gltf")
-        reach = take_weapon(path, mesh, bind[bone], by_name[bone], spec["tint"])
+        reach = take_weapon(path, mesh, bind[bone], by_name[bone], spec["tint"],
+                            spec.get(slot + "_rot"))
         if slot == "right":
             tip = reach
 
