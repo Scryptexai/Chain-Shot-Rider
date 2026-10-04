@@ -54,3 +54,6 @@ package-lock.json
 image-search/
 screenshots/wip/
 .tmpwork/
+
+# Hasil ekspor Godot (regenerasi lewat tools/export_web.sh)
+/build/

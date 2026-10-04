@@ -22,11 +22,16 @@ Empat hal yang dikerjakan skrip ini, dan kenapa:
    anggaran 45 di docs/08. Semua bagian memakai satu material, jadi aman
    digabung jadi satu primitif: 26 aktor = 26 draw call.
 
-2. PANGGANG TEKSTUR JADI VERTEX COLOR. Atlas KayKit berisi petak warna datar,
-   jadi warna tiap segitiga bisa diambil dari titik tengah UV-nya lalu
-   disimpan sebagai COLOR_0. Hasilnya identik di layar tapi tanpa satu pun
-   pengikatan tekstur — jalur render kedua build tidak berubah, dan model
-   tetap puluhan KB, bukan ratusan.
+2. TEKSTUR ASLI IKUT, TIDAK DIGANTI APA PUN. UV dan atlas PNG milik KayKit
+   disalin apa adanya ke dalam GLB keluaran, jadi wajah, mata, emblem, dan
+   gradien bayangan buatan pembuat aslinya tetap utuh piksel demi piksel.
+
+   Percobaan sebelumnya memanggang atlas jadi vertex color demi menghemat
+   pengikatan tekstur. Itu memang menghemat, tapi detail halus (garis mata,
+   tepi emblem, gradien pada satu permukaan) hilang karena satu verteks hanya
+   bisa menyimpan satu warna. Atlasnya cuma 12–15 KB dan lima karakter berbagi
+   lima atlas; harga teksturnya jauh lebih murah daripada harga detail yang
+   hilang.
 
 3. TEMPEL SENJATA SEBAGAI VERTEX TER-SKIN. Rig KayKit punya tulang khusus
    `handslot.l`/`handslot.r` tempat senjata duduk pada transform identitas.
@@ -51,7 +56,7 @@ import zipfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gltfkit import (  # noqa: E402
-    Atlas, Doc, Writer, mat_invert, mat_mul, mat_from_trs, normalized,
+    Doc, Writer, mat_invert, mat_mul, mat_from_trs, normalized,
     xform_dir, xform_point,
 )
 
@@ -87,43 +92,43 @@ RECIPES = {
     "trooper": {
         "char": "Knight", "height": 0.96,
         "right": "sword_1handed", "left": "shield_round_color",
-        "shoot": "Throw", "tint": (1.00, 1.03, 1.10),
+        "shoot": "Throw",
     },
     "grunt": {
         "char": "Rogue", "height": 0.96,
         "right": "dagger", "left": None,
-        "shoot": "Throw", "tint": (1.08, 0.90, 0.86),
+        "shoot": "Throw",
     },
     "runner": {
         "char": "Ranger", "height": 0.883,
         "right": "bow_withString", "left": None,
         "right_rot": (0.70710678, 0.0, 0.0, 0.70710678),
-        "shoot": "Throw", "tint": (1.02, 0.96, 0.90),
+        "shoot": "Throw",
     },
     "brute": {
         "char": "Barbarian", "height": 1.392,
         "right": "axe_2handed", "left": None,
-        "shoot": "Throw", "tint": (1.05, 0.95, 0.88),
+        "shoot": "Throw",
     },
     "splitter": {
         "char": "Mage", "height": 0.96,
         "right": "staff", "left": "spellbook_closed",
-        "shoot": "Use_Item", "tint": (0.94, 0.94, 1.08),
+        "shoot": "Use_Item",
     },
     "bomber": {
         "char": "Rogue_Hooded", "height": 0.941,
         "right": "smokebomb", "left": None,
-        "shoot": "Throw", "tint": (0.88, 1.06, 0.86),
+        "shoot": "Throw",
     },
     "shielder": {
         "char": "Knight", "height": 1.008,
         "right": "sword_1handed", "left": "shield_square_color",
-        "shoot": "Throw", "tint": (0.80, 0.86, 1.04),
+        "shoot": "Throw",
     },
     "boss": {
         "char": "Knight", "height": 2.016,
         "right": "sword_2handed_color", "left": None,
-        "shoot": "Throw", "tint": (0.62, 0.66, 0.80),
+        "shoot": "Throw",
     },
 }
 
@@ -144,8 +149,8 @@ STATIC = {
 
 # Ukuran sel pengelompokan verteks untuk model statis, sebagai pecahan tinggi
 # karakter. Semakin besar semakin sedikit segitiga dan semakin kasar bentuknya;
-# 1/15 menahan siluet (kepala, perisai, senjata masih terbaca) di ±1.500 segitiga.
-CLUSTER = 1.0 / 15.0
+# 1/26 menahan siluet (kepala, perisai, senjata masih terbaca) di ±3.000 segitiga — cukup ringan untuk kerumunan jauh tanpa mencincang bentuknya.
+CLUSTER = 1.0 / 26.0
 
 # Nama klip di pack -> nama klip yang dipakai kode game. `shoot` berbeda per
 # peran (tier gratis tidak punya animasi serang, `Throw` dan `Use_Item` adalah
@@ -192,14 +197,14 @@ class Mesh:
     """Kantong atribut yang terus ditumpuk sampai jadi satu primitif."""
 
     def __init__(self):
-        self.pos, self.nrm, self.col = [], [], []
+        self.pos, self.nrm, self.uv = [], [], []
         self.jnt, self.wgt, self.idx = [], [], []
 
-    def add(self, pos, nrm, col, jnt, wgt, tris):
+    def add(self, pos, nrm, uv, jnt, wgt, tris):
         base = len(self.pos)
         self.pos.extend(pos)
         self.nrm.extend(nrm)
-        self.col.extend(col)
+        self.uv.extend(uv)
         self.jnt.extend(jnt)
         self.wgt.extend(wgt)
         self.idx.extend(i + base for i in tris)
@@ -210,43 +215,9 @@ class Mesh:
         return lo, hi
 
 
-# Seberapa jauh titik sampel ditarik dari verteks ke titik tengah segitiga.
-# Nol berarti mengambil persis di UV verteks: rawan meleset ke petak sebelah
-# karena verteks duduk di tepi petak. Satu berarti satu warna rata per
-# segitiga: aman, tapi gradien halus khas KayKit hilang. Seperempat menjaga
-# gradiennya sambil tetap berada di dalam petak.
-UV_BIAS = 0.25
-
-
-def face_colors(atlas, uvs, tris, count, tint):
-    """Warna per verteks, dipanggang dari atlas lewat UV tiap segitiga."""
-    acc = [[0.0, 0.0, 0.0, 0] for _ in range(count)]
-    for t in range(0, len(tris), 3):
-        a, b, c = tris[t], tris[t + 1], tris[t + 2]
-        cu = (uvs[a][0] + uvs[b][0] + uvs[c][0]) / 3.0
-        cv = (uvs[a][1] + uvs[b][1] + uvs[c][1]) / 3.0
-        for i in (a, b, c):
-            u = uvs[i][0] + (cu - uvs[i][0]) * UV_BIAS
-            v = uvs[i][1] + (cv - uvs[i][1]) * UV_BIAS
-            r, g, bl = atlas.sample(u, v)
-            acc[i][0] += r
-            acc[i][1] += g
-            acc[i][2] += bl
-            acc[i][3] += 1
-    out = []
-    for r, g, b, n in acc:
-        if n == 0:
-            out.append((1.0, 1.0, 1.0, 1.0))
-            continue
-        out.append((min(r / n * tint[0], 1.0), min(g / n * tint[1], 1.0),
-                    min(b / n * tint[2], 1.0), 1.0))
-    return out
-
-
-def take_character(doc, mesh, joint_remap, tint):
+def take_character(doc, mesh, joint_remap):
     """Menumpuk semua bagian tubuh ke satu mesh, lengkap dengan bobot kulit."""
     g = doc.gltf
-    atlas = Atlas(doc.image_bytes(0))
     for node in g["nodes"]:
         if "mesh" not in node:
             continue
@@ -258,12 +229,11 @@ def take_character(doc, mesh, joint_remap, tint):
             jnt = doc.accessor(attrs["JOINTS_0"])
             wgt = doc.accessor(attrs["WEIGHTS_0"])
             tris = doc.accessor(prim["indices"])
-            col = face_colors(atlas, uvs, tris, len(pos), tint)
             jnt = [tuple(joint_remap[j] for j in quad) for quad in jnt]
-            mesh.add(pos, nrm, col, jnt, [tuple(w) for w in wgt], tris)
+            mesh.add(pos, nrm, uvs, jnt, [tuple(w) for w in wgt], tris)
 
 
-def take_weapon(path, mesh, bind, joint, tint, extra=None):
+def take_weapon(path, mesh, bind, joint, atlas_png, extra=None):
     """Menempel satu aset senjata ke tulang `joint` (bobot penuh, satu tulang).
 
     `bind` adalah matriks bind global tulang itu: verteks senjata dipindahkan
@@ -272,7 +242,12 @@ def take_weapon(path, mesh, bind, joint, tint, extra=None):
     """
     doc = Doc.load(path)
     g = doc.gltf
-    atlas = Atlas(doc.image_bytes(0))
+    # Satu aktor = satu material = satu draw call. Itu hanya benar kalau
+    # senjatanya memakai atlas yang sama dengan karakternya, jadi resep yang
+    # memasangkan knight dengan kapak barbarian harus gagal di sini, bukan
+    # diam-diam menambah material kedua.
+    if doc.image_bytes(0) != atlas_png:
+        raise SystemExit("atlas senjata != atlas karakter: %s" % path)
     # Beberapa aset tidak berdiri di sumbu yang sama dengan pegangan tangan
     # (busur membentang di sumbu Z, bukan Y), jadi resep boleh memutarnya.
     adjust = mat_from_trs((0.0, 0.0, 0.0), extra or (0.0, 0.0, 0.0, 1.0),
@@ -291,10 +266,9 @@ def take_weapon(path, mesh, bind, joint, tint, extra=None):
             tris = doc.accessor(prim["indices"])
             pos = [xform_point(world, p) for p in raw_pos]
             nrm = [normalized(xform_dir(world, n)) for n in raw_nrm]
-            col = face_colors(atlas, uvs, tris, len(pos), tint)
             jnt = [(joint, 0, 0, 0)] * len(pos)
             wgt = [(1.0, 0.0, 0.0, 0.0)] * len(pos)
-            mesh.add(pos, nrm, col, jnt, wgt, tris)
+            mesh.add(pos, nrm, uvs, jnt, wgt, tris)
             top = max(top, max(xform_point(local, p)[1] for p in raw_pos))
     return top
 
@@ -386,49 +360,66 @@ def skin_to_static(nodes, parent_of, ibms, pose, mesh, positions):
     return out_pos, out_nrm
 
 
-def decimate(pos, nrm, col, tris, cell, color_steps=5):
+def decimate(pos, nrm, uv, tris, cell, uv_steps=24):
     """Pengelompokan verteks berbasis kisi: cepat, tanpa pustaka, dan cukup.
 
     Verteks yang jatuh di sel kubus yang sama dilebur jadi satu titik rata-rata;
     segitiga yang kehilangan dua sudutnya dibuang.
 
-    Satu tambahan penting: warna ikut masuk ke kunci sel. Tanpa itu, sel sebesar
-    sepersembilan tinggi badan melumatkan kepala ke bahu dan wajah ke tudung —
-    hasilnya gumpalan berwarna lumpur. Dengan warna sebagai pemisah, batas
-    antar bagian (kulit, baju, logam) tetap jadi tepi geometri, jadi siluet dan
-    warnanya tetap terbaca meski jumlah segitiganya tinggal sepersepuluh.
+    Satu tambahan penting: petak UV ikut masuk ke kunci sel. Tanpa itu dua
+    bagian yang bersebelahan tapi mengambil warna dari petak atlas berbeda
+    (kulit dan tudung, baja dan kulit sarung) dilebur jadi satu verteks, dan
+    UV rata-ratanya mendarat di petak ketiga yang warnanya tidak ada
+    hubungannya. Dengan UV sebagai pemisah, batas antar bahan tetap jadi tepi
+    geometri dan warnanya tidak pernah meleset.
     """
     bucket, remap = {}, []
     for i, p in enumerate(pos):
-        tone = tuple(int(c * color_steps) for c in col[i][:3])
-        key = (round(p[0] / cell), round(p[1] / cell), round(p[2] / cell), tone)
+        patch = (int(uv[i][0] * uv_steps), int(uv[i][1] * uv_steps))
+        key = (round(p[0] / cell), round(p[1] / cell), round(p[2] / cell), patch)
         if key not in bucket:
             bucket[key] = [len(bucket), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
-                           [0.0, 0.0, 0.0], 0]
+                           [0.0, 0.0], 0]
         slot = bucket[key]
         for k in range(3):
             slot[1][k] += p[k]
             slot[2][k] += nrm[i][k]
-            slot[3][k] += col[i][k]
+        slot[3][0] += uv[i][0]
+        slot[3][1] += uv[i][1]
         slot[4] += 1
         remap.append(slot[0])
     merged = sorted(bucket.values(), key=lambda s: s[0])
     out_pos = [tuple(v / s[4] for v in s[1]) for s in merged]
     out_nrm = [normalized(tuple(v / s[4] for v in s[2])) for s in merged]
-    out_col = [tuple([min(v / s[4], 1.0) for v in s[3]] + [1.0]) for s in merged]
+    out_uv = [(s[3][0] / s[4], s[3][1] / s[4]) for s in merged]
     out_tris = []
     for t in range(0, len(tris), 3):
         a, b, c = (remap[tris[t]], remap[tris[t + 1]], remap[tris[t + 2]])
         if a != b and b != c and a != c:
             out_tris.extend((a, b, c))
-    return out_pos, out_nrm, out_col, out_tris
+    return out_pos, out_nrm, out_uv, out_tris
 
 
-def write_static(path, name, pos, nrm, col, tris):
+def texture_block(writer, png, name):
+    """Menanam PNG atlas ke dalam GLB dan merakit material yang memakainya."""
+    view = writer.raw_view(png)
+    return {
+        "images": [{"name": name, "mimeType": "image/png", "bufferView": view}],
+        "samplers": [{"magFilter": 9729, "minFilter": 9987,
+                      "wrapS": 33071, "wrapT": 33071}],
+        "textures": [{"sampler": 0, "source": 0}],
+        "materials": [{"name": name, "pbrMetallicRoughness": {
+            "baseColorTexture": {"index": 0},
+            "baseColorFactor": [1, 1, 1, 1],
+            "metallicFactor": 0.0, "roughnessFactor": 0.85}}],
+    }
+
+
+def write_static(path, name, pos, nrm, uv, tris, png):
     writer = Writer()
     acc_pos = writer.add(pos, "VEC3", FLOAT, ARRAY_BUFFER, minmax=True)
     acc_nrm = writer.add(nrm, "VEC3", FLOAT, ARRAY_BUFFER)
-    acc_col = writer.add(col, "VEC4", FLOAT, ARRAY_BUFFER)
+    acc_uv = writer.add(uv, "VEC2", FLOAT, ARRAY_BUFFER)
     comp = USHORT if len(pos) <= 65535 else UINT
     acc_idx = writer.add(tris, "SCALAR", comp, ELEMENT_ARRAY_BUFFER)
     gltf = {
@@ -437,13 +428,11 @@ def write_static(path, name, pos, nrm, col, tris):
         "nodes": [{"name": name, "mesh": 0}],
         "meshes": [{"name": name, "primitives": [{
             "attributes": {"POSITION": acc_pos, "NORMAL": acc_nrm,
-                           "COLOR_0": acc_col},
+                           "TEXCOORD_0": acc_uv},
             "indices": acc_idx, "material": 0,
         }]}],
-        "materials": [{"name": "character", "pbrMetallicRoughness": {
-            "baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0,
-            "roughnessFactor": 0.85}}],
     }
+    gltf.update(texture_block(writer, png, name))
     with open(path, "wb") as f:
         f.write(writer.build(gltf))
 
@@ -523,8 +512,9 @@ def build(role, spec):
     # eksportir yang menulis keduanya konsisten.
     bind = {n: doc.global_matrix(joints[i]) for n, i in by_name.items()}
 
+    atlas_png = doc.image_bytes(0)
     mesh = Mesh()
-    take_character(doc, mesh, joint_remap, spec["tint"])
+    take_character(doc, mesh, joint_remap)
     lo, hi = mesh.bounds()
     body_height = hi[1] - lo[1]
     scale = spec["height"] / body_height
@@ -535,7 +525,7 @@ def build(role, spec):
         if not asset:
             continue
         path = os.path.join(PACK, "Assets", "gltf", asset + ".gltf")
-        reach = take_weapon(path, mesh, bind[bone], by_name[bone], spec["tint"],
+        reach = take_weapon(path, mesh, bind[bone], by_name[bone], atlas_png,
                             spec.get(slot + "_rot"))
         if slot == "right":
             tip = reach
@@ -596,16 +586,16 @@ def build(role, spec):
     static_pos, static_nrm = skin_to_static(nodes, parent_of, ibms, pose, mesh, pos)
     ground = min(p[1] for p in static_pos)
     static_pos = [(p[0], p[1] - ground, p[2]) for p in static_pos]
-    far_pos, far_nrm, far_col, far_tris = decimate(
-        static_pos, static_nrm, mesh.col, mesh.idx, spec["height"] * CLUSTER)
+    far_pos, far_nrm, far_uv, far_tris = decimate(
+        static_pos, static_nrm, mesh.uv, mesh.idx, spec["height"] * CLUSTER)
     write_static(os.path.join(ROOT, "assets", "models", STATIC[role]), role,
-                 far_pos, far_nrm, far_col, far_tris)
+                 far_pos, far_nrm, far_uv, far_tris, atlas_png)
 
     # --- tulis -------------------------------------------------------------
     writer = Writer()
     acc_pos = writer.add(pos, "VEC3", FLOAT, ARRAY_BUFFER, minmax=True)
     acc_nrm = writer.add(mesh.nrm, "VEC3", FLOAT, ARRAY_BUFFER)
-    acc_col = writer.add(mesh.col, "VEC4", FLOAT, ARRAY_BUFFER)
+    acc_uv = writer.add(mesh.uv, "VEC2", FLOAT, ARRAY_BUFFER)
     acc_jnt = writer.add(mesh.jnt, "VEC4", UBYTE, ARRAY_BUFFER)
     acc_wgt = writer.add(mesh.wgt, "VEC4", FLOAT, ARRAY_BUFFER)
     comp = USHORT if len(pos) <= 65535 else UINT
@@ -638,20 +628,12 @@ def build(role, spec):
             "name": role,
             "primitives": [{
                 "attributes": {
-                    "POSITION": acc_pos, "NORMAL": acc_nrm, "COLOR_0": acc_col,
+                    "POSITION": acc_pos, "NORMAL": acc_nrm, "TEXCOORD_0": acc_uv,
                     "JOINTS_0": acc_jnt, "WEIGHTS_0": acc_wgt,
                 },
                 "indices": acc_idx,
                 "material": 0,
             }],
-        }],
-        "materials": [{
-            "name": "character",
-            "pbrMetallicRoughness": {
-                "baseColorFactor": [1, 1, 1, 1],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.85,
-            },
         }],
         "skins": [{
             "inverseBindMatrices": acc_ibm,
@@ -660,6 +642,7 @@ def build(role, spec):
         }],
         "animations": animations,
     }
+    gltf.update(texture_block(writer, atlas_png, spec["char"].lower()))
     blob = writer.build(gltf)
     out_path = os.path.join(OUT, role + ".glb")
     with open(out_path, "wb") as f:

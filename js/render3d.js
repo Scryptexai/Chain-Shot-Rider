@@ -155,7 +155,9 @@
           if (!c.geometry.attributes.normal) c.geometry.computeVertexNormals();
           // MeshStandardMaterial butuh environment map agar enak dilihat;
           // Lambert lebih murah dan cocok dengan tiga lampu yang sudah ada.
-          c.material = new THREE.MeshLambertMaterial({ vertexColors: true });
+          // Props memakai vertex color, karakter LOD jauh memakai atlas KayKit;
+          // satu fungsi menangani keduanya.
+          c.material = characterMaterial(c);
         });
         loaded[name] = root;
         loadCount++;
@@ -182,15 +184,43 @@
       loader.load(RIGGED[name], function (gltf) {
         gltf.scene.traverse(function (c) {
           if (!c.isMesh && !c.isSkinnedMesh) return;
-          c.material = new THREE.MeshLambertMaterial({
-            vertexColors: true, skinning: !!c.isSkinnedMesh,
-          });
+          c.material = characterMaterial(c);
           c.frustumCulled = false;
         });
         rigs[name] = gltf;
         rigCount++;
         if (--pending === 0 && onDone) onDone(rigCount);
       }, undefined, function () { if (--pending === 0 && onDone) onDone(rigCount); });
+    });
+  }
+
+  /**
+   * Material karakter: Lambert murah, tapi memakai TEKSTUR ASLI dari GLB.
+   *
+   * Dua hal yang gampang salah di three.js r128 dan keduanya gagal tanpa
+   * pesan error:
+   *
+   *   · `skinning: true` wajib untuk SkinnedMesh. Tanpa itu pose dihitung
+   *     nol dan karakter membeku di bind pose.
+   *   · GLTFLoader menandai tekstur baseColor sebagai sRGB, sementara
+   *     `renderer.outputEncoding` di sini Linear. Kombinasi itu menggelapkan
+   *     atlas KayKit sampai baju zirahnya jadi abu lumpur. Atlas pack ini
+   *     sudah berupa warna jadi, bukan data linear, jadi ia dibaca apa adanya
+   *     (LinearEncoding) dan tampil persis seperti render resmi pembuatnya.
+   */
+  function characterMaterial(mesh) {
+    var src = mesh.material || {};
+    var map = src.map || null;
+    if (map) {
+      map.encoding = THREE.LinearEncoding;
+      map.flipY = false;
+      map.needsUpdate = true;
+    }
+    return new THREE.MeshLambertMaterial({
+      map: map,
+      color: 0xffffff,
+      vertexColors: !!(mesh.geometry && mesh.geometry.attributes.color),
+      skinning: !!mesh.isSkinnedMesh,
     });
   }
 

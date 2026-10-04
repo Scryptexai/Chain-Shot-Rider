@@ -68,7 +68,12 @@ async function main() {
         isSkinned: !!skinned,
         bones: skinned ? skinned.skeleton.bones.length : 0,
         verts: skinned ? skinned.geometry.attributes.position.count : 0,
-        hasColor: !!(skinned && skinned.geometry.attributes.color),
+        // Warna boleh datang dari dua sumber: atlas KayKit (yang dipakai
+        // sekarang) atau vertex color (model prosedural lama). Yang tidak
+        // boleh adalah tidak punya keduanya — itu berarti karakter putih polos.
+        hasColor: !!(skinned && (skinned.geometry.attributes.color
+          || (skinned.material && skinned.material.map))),
+        textured: !!(skinned && skinned.material && skinned.material.map),
         clips: gltf.animations.map((a) => ({ name: a.name, dur: +a.duration.toFixed(3) })),
         height: +(box.max.y - box.min.y).toFixed(3),
         width: +(box.max.x - box.min.x).toFixed(3),
@@ -121,7 +126,7 @@ async function main() {
   for (const u of report) {
     if (!u.isSkinned) { fail(`${u.name}: bukan SkinnedMesh`); continue; }
     if (u.bones !== 24) fail(`${u.name}: ${u.bones} tulang, harusnya 24`);
-    if (!u.hasColor) fail(`${u.name}: tanpa COLOR_0, modelnya akan putih polos`);
+    if (!u.hasColor) fail(`${u.name}: tanpa tekstur maupun COLOR_0, modelnya akan putih polos`);
     if (u.verts < 300) fail(`${u.name}: cuma ${u.verts} vertex`);
     const names = u.clips.map((c) => c.name);
     for (const want of CLIPS) {
@@ -146,6 +151,7 @@ async function main() {
     if ((m.idle.head || 0) <= 0.0) fail(`${u.name}: idle benar-benar diam seperti patung`);
     ok(
       `${u.name.padEnd(9)} ${u.bones} tulang, ${String(u.verts).padStart(4)} vert, ` +
+      `${u.textured ? 'atlas' : 'vcol'}, ` +
       `${u.clips.length} klip, tinggi ${u.height.toFixed(2)}, ` +
       `langkah ${m.run.foot_l.toFixed(2)} / roboh ${m.die.head.toFixed(2)} / recoil ${m.shoot.hand_r.toFixed(3)}`
     );

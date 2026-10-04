@@ -25,7 +25,17 @@ const OUT=process.argv[3]||'screenshots/kaykit-cast.png';
     const SPACING=OPT.spacing, ROWY=[0,-2.6];
     for(let i=0;i<names.length;i++){
       const g=await new Promise((res,rej)=>loader.load(names[i].indexOf('/')>=0?names[i]:'assets/models/rigged/'+names[i]+'.glb',res,undefined,rej));
-      g.scene.traverse(c=>{if(c.isMesh||c.isSkinnedMesh){c.material=new THREE.MeshLambertMaterial({vertexColors:true,skinning:!!c.isSkinnedMesh});c.frustumCulled=false;}});
+      // Material disalin ulang persis seperti di render3d.js: tekstur atlas
+      // KayKit dipertahankan dan dibaca Linear (outputEncoding renderer juga
+      // Linear), kalau tidak modelnya menggelap. Dulu baris ini memaksa
+      // vertexColors dan hasilnya siluet hitam karena GLB sudah tak punya
+      // COLOR_0 lagi.
+      g.scene.traverse(c=>{if(c.isMesh||c.isSkinnedMesh){
+        const m=c.material||{};
+        if(m.map){m.map.encoding=THREE.LinearEncoding;m.map.flipY=false;m.map.needsUpdate=true;}
+        c.material=new THREE.MeshLambertMaterial({map:m.map||null,color:0xffffff,
+          vertexColors:!!(c.geometry&&c.geometry.attributes.color),skinning:!!c.isSkinnedMesh});
+        c.frustumCulled=false;}});
       const perRow=OPT.perRow;const col=i%perRow,row=Math.floor(i/perRow);
       g.scene.position.set((col-(perRow-1)/2)*SPACING, ROWY[row], 0);
       g.scene.rotation.y=OPT.yrot+i*(OPT.spin||0);
