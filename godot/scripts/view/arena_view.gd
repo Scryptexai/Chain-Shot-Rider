@@ -40,6 +40,9 @@ const ENEMY_COLORS := [
 ]
 
 const FLOOR_SHADER := "res://shaders/floor_grid.gdshader"
+## Batu dinding. Satu-satunya warna arena yang bukan dari palet varian: batu
+## tetap batu di kelima tema, dan pendar rune-lah yang ikut berganti warna.
+const WALL_STONE := Color("#4A4336")
 
 ## Nama unit ber-tulang dalam urutan enemyTypes config, plus prajurit dan bos.
 ## Urutannya mengikat indeks tipe simulasi ke sebuah berkas GLB; kalau config
@@ -179,6 +182,12 @@ func _build_floor() -> void:
 	material.set_shader_parameter("bg_top", _pal["bg_top"])
 	material.set_shader_parameter("bg_bottom", _pal["bg_bottom"])
 	material.set_shader_parameter("grid_color", _pal["grid"])
+	# Warna tanah diturunkan dari warna lumut palet, bukan konstanta baru:
+	# kelima arena punya "grid" sendiri, dan tanahnya harus ikut pindah tema
+	# bersamanya. Angka 0,58/0,78 menyamakan hasilnya dengan PAL.floor dan
+	# PAL.floorFar di js/render3d.js untuk Lembah Batu.
+	material.set_shader_parameter("ground_near", _pal["grid"].darkened(0.58))
+	material.set_shader_parameter("ground_far", _pal["grid"].darkened(0.78))
 	material.set_shader_parameter("arena_length", length)
 	material.set_shader_parameter("defense_line_z", GameConfig.num("arena.defenseLineZ"))
 	material.set_shader_parameter("defense_color", _pal["primary"])
@@ -194,15 +203,25 @@ func _build_floor() -> void:
 
 
 func _build_side_walls(width: float, length: float) -> void:
-	# Thin emissive strips, not solid walls: the player has to read where the
-	# bounce surface is without the geometry eating the playfield.
+	# Dinding batu rendah dengan pendar rune tipis, bukan pita neon. Ukuran dan
+	# warnanya mengikuti js/render3d.js (balok 0,5 × 1,4, batu PAL.wall dengan
+	# emisi lumut 0,18) supaya kedua target membaca sebagai tempat yang sama.
+	# Tetap rendah dengan sengaja: pemain harus bisa membaca permukaan pantul
+	# tanpa geometrinya memakan lapangan.
 	for side in [-1.0, 1.0]:
 		var strip := MeshInstance3D.new()
 		var box := BoxMesh.new()
-		box.size = Vector3(0.12, 0.5, length + APRON)
+		box.size = Vector3(0.5, 1.4, length + APRON)
 		strip.mesh = box
-		strip.position = Vector3(side * width * 0.5, 0.25, -length * 0.5 + APRON * 0.5)
-		strip.material_override = _emissive(_pal["bumper"], 1.4)
+		strip.position = Vector3(side * (width * 0.5 + 0.25), 0.7, -length * 0.5 + APRON * 0.5)
+		var stone := StandardMaterial3D.new()
+		stone.albedo_color = WALL_STONE
+		stone.roughness = 0.95
+		stone.metallic = 0.0
+		stone.emission_enabled = true
+		stone.emission = _pal["grid"]
+		stone.emission_energy_multiplier = 0.18
+		strip.material_override = stone
 		add_child(strip)
 
 
@@ -219,8 +238,12 @@ func _build_actors() -> void:
 	_chars.warm(roster)
 
 	var scale: float = CharacterPool.CHAR_SCALE
-	_enemy_mm = _make_multimesh(_capsule(0.35 * scale, 1.0 * scale), Color.WHITE, SimWorld.MAX_ENEMIES)
-	_troop_mm = _make_multimesh(_capsule(0.22 * scale, 0.8 * scale), _pal["primary"], MAX_TROOPS_DRAWN)
+	_enemy_mm = _make_multimesh(
+		_capsule(0.35 * scale, 1.0 * scale), Color.WHITE, SimWorld.MAX_ENEMIES
+	)
+	_troop_mm = _make_multimesh(
+		_capsule(0.22 * scale, 0.8 * scale), _pal["primary"], MAX_TROOPS_DRAWN
+	)
 	_auto_mm = _make_multimesh(_sphere(0.12), Color("#FFF1D0"), SimWorld.MAX_AUTO_BULLETS)
 	_chain = MeshInstance3D.new()
 	_chain.mesh = _sphere(0.26)
@@ -523,9 +546,7 @@ func _render_auto() -> void:
 	mm.visible_instance_count = _sim.auto_count
 	for i in range(_sim.auto_count):
 		var pos := Vector3(
-			_ip(_sim.pose.auto_x[i], _sim.auto_x[i]),
-			0.5,
-			-_ip(_sim.pose.auto_z[i], _sim.auto_z[i])
+			_ip(_sim.pose.auto_x[i], _sim.auto_x[i]), 0.5, -_ip(_sim.pose.auto_z[i], _sim.auto_z[i])
 		)
 		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
 		mm.set_instance_color(i, Color("#FFF1D0"))
