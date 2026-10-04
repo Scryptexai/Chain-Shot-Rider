@@ -110,9 +110,7 @@ const MUSIC_DUCK_RELEASE := 0.4
 const CROWD_DUCK_DB := -5.0
 const CROWD_DUCK_TIME := 0.3
 const SLOWMO_ENTER_THRESHOLD := 0.9
-const HEARTBEAT_BAND := 0.5
 const STEER_WARN_SECONDS := 0.5
-const KILL_MILESTONES := [50, 100, 200]
 
 ## Cue name -> number of times it has played. Read by the smoke test; a cue
 ## that never fires is indistinguishable from a cue that does not exist.
@@ -128,16 +126,13 @@ var _rng := RandomNumberGenerator.new()
 var _music_duck: float = 0.0
 var _crowd_duck_remaining: float = 0.0
 var _was_slow: bool = false
-var _kills: int = 0
-var _milestones_fired: int = 0
-var _defense_line_z: float = 5.0
 var _muted: bool = false
 
 
-func _init(config: Dictionary = {}) -> void:
+## Config masih diterima walau isinya tidak lagi dibaca: ambang near-miss
+## sekarang milik simulasi, yang mengirim event "near_miss" sendiri.
+func _init(_config: Dictionary = {}) -> void:
 	_rng.seed = 987654321
-	var arena: Dictionary = config.get("arena", {})
-	_defense_line_z = Cfg.num(arena, "defenseLineZ", 5.0)
 
 
 func _ready() -> void:
@@ -200,7 +195,15 @@ func react_to(event: Dictionary) -> void:
 		"obstacle_hit":
 			_play_bounce()
 		"kill":
-			_on_kill()
+			play("kill")
+		"kill_milestone":
+			play("kill_milestone")
+		"bounce_milestone":
+			play("chain_spark")
+		"near_miss":
+			play("heartbeat")
+		"perfect_clear":
+			play("perfect_clear")
 		"explosion":
 			play("explosion")
 			_crowd_duck_remaining = CROWD_DUCK_TIME
@@ -217,8 +220,6 @@ func react_to(event: Dictionary) -> void:
 			play("breach")
 		"boss_start":
 			play("boss_roar")
-		"wave_start":
-			_on_wave_start(event)
 		"victory":
 			play("perfect_clear")
 
@@ -249,22 +250,6 @@ func _play_bounce() -> void:
 	play("bounce", pow(SEMITONE, float(bounce_ladder)))
 
 
-func _on_kill() -> void:
-	play("kill")
-	_kills += 1
-	if _milestones_fired < KILL_MILESTONES.size():
-		if _kills >= int(KILL_MILESTONES[_milestones_fired]):
-			_milestones_fired += 1
-			play("kill_milestone")
-
-
-func _on_wave_start(event: Dictionary) -> void:
-	# A wave that begins with the previous one fully cleared is the "perfect
-	# clear" the sheet asks for; the sim reports leaks separately.
-	if int(event.get("index", 0)) > 0 and int(event.get("leaked", 0)) == 0:
-		play("perfect_clear")
-
-
 func _update_slowmo(feel: GameFeel) -> void:
 	if feel == null:
 		return
@@ -282,13 +267,6 @@ func _update_proximity(sim: SimWorld) -> void:
 	if sim.chain_active and sim.chain_steer_meter > 0.0:
 		if sim.chain_steer_meter < STEER_WARN_SECONDS:
 			play("steer_warn")
-	var nearest := 999.0
-	for i in range(sim.enemy_count):
-		var gap: float = sim.enemy_z[i] - _defense_line_z
-		if gap < nearest:
-			nearest = gap
-	if nearest <= HEARTBEAT_BAND:
-		play("heartbeat")
 
 
 func _update_ducking(delta: float) -> void:

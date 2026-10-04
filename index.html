@@ -608,6 +608,9 @@ const S = {
   waveIndex:-1, waveTimer:1.5, waveActive:false, leaked:0,
   ammo:5, reload:0,
   timeScale:1, targetTimeScale:1, holdSlow:0, enemySeq:0,
+  // Dua waktu pinjaman milik lapisan rasa: denyut pendek tiap lima pantulan,
+  // dan potongan sinematik saat peluru terakhir menutup sebuah gelombang.
+  pulse:0, cine:0, confetti:[], lastHeartbeat:-9,
   shake:0, shakeAmp:0, fov:1, targetFov:1,
   enemies:[], bullets:[], obstacles:[], fx:[], floats:[],
   bounceLadder:0, lastBounce:0,
@@ -710,6 +713,12 @@ const SFX = {
   slow(){ beep(420,0.3,'sine',0.35,0.45); },
   breach(){ beep(120,0.35,'sawtooth',0.6,0.7); },
   expire(){ beep(300,0.2,'triangle',0.25,0.4); },
+  // Tangga pantulan tiap kelipatan lima: percikan pendek yang duduk di atas
+  // bunyi bounce biasa, bukan menggantikannya.
+  milestone(){ beep(1180,0.10,'triangle',0.42); beep(1770,0.14,'sine',0.3,0.4); },
+  // Near miss: dua detak rendah. Sengaja tanpa nada supaya tidak terdengar
+  // seperti hadiah — ini peringatan.
+  heartbeat(){ beep(74,0.14,'sine',0.55,0.5); setTimeout(()=>beep(62,0.18,'sine',0.45,0.6),150); },
 };
 
 // =============================================================================
@@ -898,6 +907,7 @@ function resetRun(){
   S.waveIndex=-1; S.waveTimer=1.2; S.waveActive=false; S.leaked=0;
   S.ammo=CFG.bullet.magazine; S.reload=0;
   S.timeScale=1; S.targetTimeScale=1; S.holdSlow=0; S.shake=0; S.fov=1; S.targetFov=1;
+  S.pulse=0; S.cine=0; S.confetti=[]; S.lastHeartbeat=-9;
   S.enemies=[]; S.bullets=[]; S.fx=[]; S.floats=[]; S.bounceLadder=0; S.enemySeq=0;
   S.aimAngle=0; S.aimDir=1; S.aimInput=0; S.boss=null; S.invul=0;
   const SQ=CFG.squad;
@@ -1291,10 +1301,14 @@ function resolveBounce(b, hit){
   addFx(b.x,b.z,'bounce');
   S.shake = Math.max(S.shake, b.bounceCount>8?0.22:0.08);
 
-  // Milestone tiap 5 bounce
+  // Milestone tiap 5 bounce: kilat, bunyi, dan denyut slow motion pendek.
+  // Denyutnya bukan slow-mo penuh — kelipatan lima terlalu sering untuk itu,
+  // dan dunia yang berhenti tiap dua detik berhenti terasa istimewa.
   if(b.bounceCount % CFG.scoring.bounceMilestoneEvery === 0){
     S.shake = Math.max(S.shake, 0.18);
     flashPopup('BOUNCE x'+b.bounceCount);
+    SFX.milestone();
+    S.pulse = CFG.slowMo.bouncePulseDuration;
   }
   // 3 pantulan terakhir → slow-mo ekstra
   if(b.bounces <= CFG.slowMo.finalBounceThreshold && b.bounces>0)
@@ -1324,7 +1338,20 @@ function damageEnemy(e, dmg){
     jx:((Math.round((e.x+e.z)*97)%11)-5)*0.16});
 
   if(CFG.scoring.comboMilestones.includes(S.combo)){ SFX.combo(); flashPopup('x'+S.combo); S.shake=Math.max(S.shake,.18); }
-  if(CFG.scoring.killMilestones.includes(S.kills)){ S.score+=500; flashPopup(S.kills+' KILLS'); }
+  if(CFG.scoring.killMilestones.includes(S.kills)){
+    S.score += CFG.scoring.killMilestoneBonus;
+    flashPopup(S.kills+' KILLS');
+    burstConfetti();
+  }
+
+  // Peluru terakhir di wave: gelombang habis sementara chain shot masih
+  // terbang. Hanya peluru yang boleh memicunya — kalau gelombang habis oleh
+  // auto-fire sementara layar kosong, tidak ada apa pun untuk ditonton.
+  const bossStanding = S.boss && S.boss.parts.some(p=>p.alive);
+  if(S.waveActive && !bossStanding && !S.enemies.some(x=>x.hp>0) && S.bullets.some(x=>x.alive)){
+    S.cine = CFG.scoring.lastBulletZoomDuration;
+    SFX.slow();
+  }
 
   if(e.split){
     for(let i=0;i<3;i++){ const a=i*Math.PI*2/3; const st=typeStats('grunt');
@@ -1579,7 +1606,13 @@ function simulate(dt){
     e.vx=vx; e.vz=vz; e.x+=vx*dt; e.z+=vz*dt;
     e.x = Math.max(-halfW+e.r, Math.min(halfW-e.r, e.x));
 
-    if(!e.near && e.z <= defZ+CFG.arena.nearMissBandZ){ e.near=true; }
+    // Near miss: sekali per musuh, dan tidak lebih sering dari 0,9 detik —
+    // satu baris musuh yang menyeberang bersamaan tidak boleh berbunyi
+    // seperti senapan mesin.
+    if(!e.near && e.z <= defZ+CFG.arena.nearMissBandZ){
+      e.near = true;
+      if(simTime - S.lastHeartbeat > 0.9){ S.lastHeartbeat = simTime; SFX.heartbeat(); }
+    }
     if(e.z <= defZ){
       S.enemies.splice(i,1); S.leaked++;
       // Invulnerability 1 detik: satu gelombang kebocoran = 1 HP, bukan 20 HP.
@@ -1618,7 +1651,10 @@ function simulate(dt){
   const bossDown = !S.boss || S.boss.parts.every(p=>!p.alive);
   if(S.waveActive && S.enemies.length===0 && bossDown){
     S.waveActive=false;
-    if(S.leaked===0){ S.coins+=CFG.scoring.perfectClearBonusCoins; banner('PERFECT CLEAR','#7CFF4D'); }
+    if(S.leaked===0){
+      S.coins += CFG.scoring.perfectClearBonusCoins;
+      banner('PERFECT CLEAR +'+CFG.scoring.perfectClearBonusCoins, '#7CFF4D');
+    }
     S.leaked=0;
     if(S.waveIndex >= CFG.spawn.waveCount-1){ endRun(true); return; }
     S.waveTimer = Math.min(S.waveTimer, 1.6);
@@ -2398,6 +2434,19 @@ function draw(){
     }
   }
 
+  // ---- confetti (layar, bukan arena) ----
+  for(const c of S.confetti){
+    const a = Math.max(0, Math.min(1, c.t/c.max));
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(c.x*W, c.y*H);
+    ctx.rotate(c.rot);
+    ctx.fillStyle = c.color;
+    ctx.fillRect(-W*0.012, -W*0.005, W*0.024, W*0.010);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+
   // ---- floating text ----
   ctx.font='700 15px system-ui'; ctx.textAlign='center';
   for(const f of S.floats){
@@ -2444,6 +2493,59 @@ function hexA(hex,a){ const h=hex.replace('#',''); const n=parseInt(h,16);
 function shade(hex,amt){ const h=hex.replace('#',''); const n=parseInt(h,16);
   const c=[(n>>16)&255,(n>>8)&255,n&255].map(v=>Math.max(0,Math.min(255,v+amt)));
   return `rgb(${c[0]},${c[1]},${c[2]})`; }
+/**
+ * Confetti layar penuh untuk ambang kill (50/100/200).
+ *
+ * Koordinatnya dinormalkan (0..1 dari lebar/tinggi kanvas), bukan piksel:
+ * satu letusan karena itu terlihat sama di layar 360 px maupun 1080 px, dan
+ * tidak perlu tahu ukuran kanvas saat dipanggil dari dalam simulasi. Acaknya
+ * memakai Math.random dan BUKAN S.rng — menarik satu angka dari RNG simulasi
+ * akan menggeser setiap undian setelahnya dan merusak replay.
+ */
+function burstConfetti(){
+  const th = CFG.variants[S.variant].theme;
+  const palette = [th.primary, '#FFD54F', th.bumper];
+  for(let i=0;i<36;i++){
+    S.confetti.push({
+      x: Math.random(), y: -0.06 + Math.random()*0.08,
+      vx: (Math.random()*2-1)*0.18, vy: 0.10 + Math.random()*0.45,
+      rot: Math.random()*6.283, spin: (Math.random()*2-1)*9,
+      color: palette[i%palette.length], t: 1.6, max: 1.6,
+    });
+  }
+}
+
+/** Kosmetik murni: dijalankan dengan waktu nyata, bukan waktu simulasi. */
+function tickConfetti(dt){
+  for(let i=S.confetti.length-1;i>=0;i--){
+    const c=S.confetti[i];
+    c.t -= dt;
+    if(c.t<=0){ S.confetti.splice(i,1); continue; }
+    c.vy += 1.1*dt; c.x += c.vx*dt; c.y += c.vy*dt; c.rot += c.spin*dt;
+  }
+}
+
+/**
+ * Target slow motion dan FOV untuk satu frame.
+ *
+ * Dipisah dari frame() supaya dua keadaan pinjaman di atas bisa diuji tanpa
+ * requestAnimationFrame. Keduanya hanya boleh MEMPERDALAM apa yang sudah
+ * diminta simulasi: potongan sinematik tidak pernah mempercepat dunia yang
+ * sedang melambat karena tiga pantulan terakhir.
+ */
+function slowMoStep(realDt){
+  let scale = S.targetTimeScale, fov = S.targetFov;
+  if(S.cine > 0){
+    S.cine -= realDt;
+    scale = Math.min(scale, CFG.slowMo.finalBounceTimeScale);
+    fov = Math.min(fov, CFG.slowMo.fovLastBullet / CFG.slowMo.fovNormal);
+  } else if(S.pulse > 0){
+    S.pulse -= realDt;
+    scale = Math.min(scale, CFG.slowMo.bouncePulseTimeScale);
+  }
+  return { scale, fov };
+}
+
 function addFx(x,z,kind,color){ if(S.fx.length>200) return;
   const dur = kind==='boom'?0.45:(kind==='kill'?0.3:0.22);
   S.fx.push({x,z,kind,color,t:dur,max:dur}); }
@@ -2662,9 +2764,11 @@ function frame(now){
   if(CFG){
     // --- SlowMoSystem ---
     if(S.holdSlow>0){ S.holdSlow-=realDt; if(S.holdSlow<=0) S.targetTimeScale=1; }
+    const want = slowMoStep(realDt);
     const k = 1-Math.exp(-(3/CFG.slowMo.transitionDuration)*realDt);
-    S.timeScale += (S.targetTimeScale-S.timeScale)*k;
-    S.fov += (S.targetFov-S.fov)*k;
+    S.timeScale += (want.scale-S.timeScale)*k;
+    S.fov += (want.fov-S.fov)*k;
+    tickConfetti(realDt);
     el.vig.style.opacity = String((1-S.timeScale)*1.2);
     tickScoreView(realDt);        // kosmetik: tidak pernah masuk langkah sim
 

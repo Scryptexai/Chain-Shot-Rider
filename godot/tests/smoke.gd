@@ -31,82 +31,13 @@ func _ready() -> void:
 	var stages := GameConfig.list("meta.variantCycle").size()
 	for stage in range(maxi(stages, 1)):
 		_run_stage(packed, stage)
-	_run_music_states(packed)
 	await _run_result_screen(packed)
 	await _run_card_draft(packed)
 	await _run_stage_map(packed)
 	await _run_hud_layout(packed)
 	await _run_home_suite(packed)
+	await _run_juice_suite(packed)
 	_finish()
-
-
-## Musik dinamis docs/07 7.3: dua keadaan yang mengubah arti lagu.
-##
-## Keduanya nyaris mustahil tertangkap oleh smoke biasa — slow motion hanya
-## bertahan sepersekian detik, dan nyawa terakhir butuh bot yang kebetulan
-## hampir kalah. Jadi keadaannya dipasang langsung, lalu yang diperiksa adalah
-## reaksi mixer-nya: filter yang bergerak dan denyut yang benar-benar berbunyi.
-func _run_music_states(packed: PackedScene) -> void:
-	SaveGame.reset_progress()
-	var root := packed.instantiate()
-	add_child(root)
-	root.call("_on_stage_chosen", 0)
-	var music: Object = root.get("_music")
-	var sim: Object = root.get("_sim")
-	var feel: Object = root.get("_feel")
-	if music == null or sim == null or feel == null:
-		_fail("musik: run tidak terbentuk")
-		root.queue_free()
-		return
-
-	# 1. Slow motion: low-pass menutup ke 1200 Hz dan bus Music turun -6 dB.
-	# Ducking-nya milik AudioDirector, filternya milik MusicDirector, jadi
-	# keduanya harus ikut berjalan supaya baris spec ini benar-benar teruji.
-	var audio: Object = root.get("_audio")
-	feel.set("time_scale", 0.3)
-	for i in range(240):
-		music.call("update", sim, feel, 1.0 / 60.0)
-		if audio != null:
-			audio.call("update", sim, feel, 1.0 / 60.0)
-	var lpf := _music_filter(music, "AudioEffectLowPassFilter")
-	if lpf == null:
-		_fail("musik: low-pass tidak terpasang di bus Music")
-	elif lpf.cutoff_hz > 2000.0:
-		_fail("musik: slow-mo tidak menutup filter (%.0f Hz)" % lpf.cutoff_hz)
-	var music_bus := AudioServer.get_bus_index("Music")
-	var ducked := AudioServer.get_bus_volume_db(music_bus) if music_bus >= 0 else 0.0
-	if ducked > -3.0:
-		_fail("musik: slow-mo tidak menurunkan bus Music (%.1f dB)" % ducked)
-
-	# 2. Nyawa terakhir: high-pass menyapu naik dan sub pulse berdetak.
-	feel.set("time_scale", 1.0)
-	sim.set("lives", 1)
-	var before := int(music.get("sub_pulses"))
-	for i in range(240):
-		music.call("update", sim, feel, 1.0 / 60.0)
-	var hpf := _music_filter(music, "AudioEffectHighPassFilter")
-	if hpf == null:
-		_fail("musik: high-pass tidak terpasang di bus Music")
-	elif hpf.cutoff_hz < 300.0:
-		_fail("musik: nyawa terakhir tidak menyapu high-pass (%.0f Hz)" % hpf.cutoff_hz)
-	var pulses := int(music.get("sub_pulses")) - before
-	# 240 frame = 4 detik wall-clock = 8 beat pada 120 BPM.
-	if pulses < 6:
-		_fail("musik: hanya %d sub pulse dalam 4 detik, diharapkan ~8" % pulses)
-	print("  musik: slow-mo menutup filter, nyawa terakhir berdenyut %d kali" % pulses)
-	root.queue_free()
-
-
-## Efek di bus Music menurut nama kelasnya.
-func _music_filter(_music: Object, class_wanted: String) -> Object:
-	var bus := AudioServer.get_bus_index("Music")
-	if bus < 0:
-		return null
-	for i in range(AudioServer.get_bus_effect_count(bus)):
-		var effect := AudioServer.get_bus_effect(bus, i)
-		if effect.get_class() == class_wanted:
-			return effect
-	return null
 
 
 ## Layar hasil: angkanya harus berlari naik, bukan muncul jadi.
@@ -409,6 +340,15 @@ func _run_stage_map(packed: PackedScene) -> void:
 			)
 		)
 	root.queue_free()
+
+
+## Musik dinamis, milestone, dan reaksi rasa atasnya diuji di juice_suite.gd.
+func _run_juice_suite(packed: PackedScene) -> void:
+	var suite := JuiceSuite.new()
+	add_child(suite)
+	suite.failed.connect(_fail)
+	await suite.run(packed)
+	suite.queue_free()
 
 
 ## Pemilih medan + setup diuji di home_screens_suite.gd (smoke.gd sudah mentok

@@ -40,6 +40,83 @@ const FLOAT_RISE := 90.0
 const FLOAT_LIFE := 0.8
 
 
+## Hujan confetti. Dipakai sekali per ambang kill (50/100/200) — langka, dan
+## karena itu boleh berlebihan. Digambar sendiri, bukan GPUParticles2D: tiga
+## puluh persegi yang jatuh tidak butuh sistem partikel, dan versi gambar
+## berperilaku sama di web export tanpa perlu shader.
+class Confetti:
+	extends Control
+
+	const PIECES := 36
+	const LIFE := 1.6
+	const GRAVITY := 900.0
+
+	var _pos: PackedVector2Array = PackedVector2Array()
+	var _vel: PackedVector2Array = PackedVector2Array()
+	var _spin: PackedFloat32Array = PackedFloat32Array()
+	var _tint: PackedColorArray = PackedColorArray()
+	var _life := 0.0
+	var _rng := RandomNumberGenerator.new()
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	## Satu letusan dari atas layar. Warnanya diambil dari palet varian supaya
+	## perayaan tetap terasa milik arena ini, bukan tempelan generik.
+	func burst(width: float, palette: Array[Color]) -> void:
+		_pos.clear()
+		_vel.clear()
+		_spin.clear()
+		_tint.clear()
+		for i in range(PIECES):
+			_pos.append(Vector2(_rng.randf() * width, _rng.randf_range(-120.0, 40.0)))
+			_vel.append(Vector2(_rng.randf_range(-160.0, 160.0), _rng.randf_range(80.0, 420.0)))
+			_spin.append(_rng.randf_range(-9.0, 9.0))
+			_tint.append(palette[i % palette.size()])
+		_life = LIFE
+		visible = true
+		queue_redraw()
+
+	func advance(delta: float) -> void:
+		if _life <= 0.0:
+			return
+		_life -= delta
+		if _life <= 0.0:
+			visible = false
+			return
+		for i in range(_pos.size()):
+			var velocity := _vel[i] + Vector2(0.0, GRAVITY * delta)
+			_vel[i] = velocity
+			_pos[i] = _pos[i] + velocity * delta
+		queue_redraw()
+
+	func is_falling() -> bool:
+		return _life > 0.0
+
+	func _draw() -> void:
+		if _life <= 0.0:
+			return
+		var fade := clampf(_life / LIFE, 0.0, 1.0)
+		for i in range(_pos.size()):
+			var tint := _tint[i]
+			tint.a = fade
+			var angle := _spin[i] * (LIFE - _life)
+			var axis := Vector2(cos(angle), sin(angle)) * 13.0
+			var side := Vector2(-axis.y, axis.x) * 0.45
+			draw_colored_polygon(
+				PackedVector2Array(
+					[
+						_pos[i] - axis - side,
+						_pos[i] + axis - side,
+						_pos[i] + axis + side,
+						_pos[i] - axis + side,
+					]
+				),
+				tint
+			)
+
+
 ## Cincin progres chain shot. Digambar, bukan disusun dari node: busur yang
 ## tumbuh adalah satu-satunya cara membaca "berapa lama lagi" tanpa angka.
 class ChargeRing:
@@ -98,6 +175,7 @@ var _fire_caption: Label
 var _pause_button: Button
 var _flash: ColorRect
 var _vignette: ColorRect
+var _confetti: Confetti
 var _banner: Label
 var _popup: Label
 var _hint: PanelContainer
@@ -170,6 +248,8 @@ func render_frame() -> void:
 	_update_hearts()
 	_update_floats(delta)
 	_update_overlays(delta)
+	if _confetti != null:
+		_confetti.advance(delta)
 
 
 func _drain_events() -> void:
@@ -190,6 +270,13 @@ func _drain_events() -> void:
 				)
 			"combo_milestone":
 				_show_popup("x%d COMBO" % int(event.get("combo", 0)))
+			"bounce_milestone":
+				_show_popup("BOUNCE x%d" % int(event.get("count", 0)))
+			"kill_milestone":
+				_show_popup("%d KILLS" % int(event.get("kills", 0)))
+				_burst_confetti()
+			"perfect_clear":
+				_show_banner("PERFECT CLEAR +%d" % int(event.get("coins", 0)), UiTheme.GOLD)
 			"life_lost":
 				_flash_time = 0.4
 			"boss_hit":
@@ -388,6 +475,15 @@ func _spawn_float(world_xz: Vector2, text: String, tint: Color) -> void:
 	# Pool exhausted: aggregate instead of allocating. One readable number
 	# beats thirty overlapping ones, and it costs nothing extra.
 	_show_popup(text)
+
+
+## Confetti memakai tiga warna palet arena, jadi letusannya ikut berganti
+## rupa antar varian tanpa aset tambahan.
+func _burst_confetti() -> void:
+	if _confetti == null:
+		return
+	var palette: Array[Color] = [_pal["primary"], UiTheme.GOLD, _pal["bumper"]]
+	_confetti.burst(maxf(_confetti.size.x, REF_W), palette)
 
 
 func _show_popup(text: String) -> void:
@@ -662,6 +758,10 @@ func _build_overlays() -> void:
 	_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(_vignette)
+
+	_confetti = Confetti.new()
+	_confetti.visible = false
+	add_child(_confetti)
 
 	_flash = ColorRect.new()
 	_flash.color = Color(UiTheme.DANGER.r, UiTheme.DANGER.g, UiTheme.DANGER.b, 0.0)

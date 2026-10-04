@@ -96,7 +96,10 @@
     "chromaticAberrationMax": 0.45,
     "vignetteMax": 0.42,
     "audioDuckDb": -6.0,
-    "minFixedDeltaScale": 0.15
+    "minFixedDeltaScale": 0.15,
+    "bouncePulseTimeScale": 0.45,
+    "bouncePulseDuration": 0.18,
+    "fovLastBullet": 32.0
   },
   "camera": {
     "pitchDegrees": 40.0,
@@ -288,7 +291,8 @@
     ],
     "bounceMilestoneEvery": 5,
     "perfectClearBonusCoins": 50,
-    "lastBulletZoomDuration": 1.2
+    "lastBulletZoomDuration": 1.2,
+    "killMilestoneBonus": 500
   },
   "player": {
     "lives": 3,

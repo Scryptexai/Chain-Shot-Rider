@@ -53,3 +53,4 @@ package-lock.json
 # `node tools/shot.js` / image search, tidak perlu ikut repo.
 image-search/
 screenshots/wip/
+.tmpwork/

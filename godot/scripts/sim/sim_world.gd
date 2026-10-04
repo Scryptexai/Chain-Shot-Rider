@@ -38,6 +38,13 @@ var elapsed: float = 0.0
 var tick_index: int = 0
 var score: int = 0
 var combo: int = 0
+
+## Pencacah prestasi (lihat milestones.gd). Dipakai milestone kill, perfect
+## clear, dan tangga pantulan; HUD hanya membacanya.
+var kills: int = 0
+var coins: int = 0
+var leaked: int = 0
+var bounce_total: int = 0
 var lives: int = 3
 var troops: int = 5
 var wave_index: int = 0
@@ -66,6 +73,10 @@ var enemy_x := PackedFloat32Array()
 var enemy_z := PackedFloat32Array()
 var enemy_hp := PackedFloat32Array()
 var enemy_type := PackedInt32Array()
+
+## 1 begitu musuh pernah masuk pita near-miss, supaya heartbeat berbunyi
+## sekali per musuh dan bukan enam puluh kali sedetik selama ia di sana.
+var enemy_near := PackedInt32Array()
 
 # --- auto-fire projectiles --------------------------------------------------
 var auto_count: int = 0
@@ -146,21 +157,8 @@ var _chain_steer_per_swipe := 15.0
 var _chain_steer_max_rate := 90.0
 var _chain_steer_duration := 3.0
 
-var _gate_enabled := true
-var _gate_spawn_z := 38.0
-var _gate_speed := 2.4
-var _gate_half_width := 4.7
-var _gate_center_gap := 0.6
-var _gate_height := 0.9
+var _gate: GateOps = null
 var _gate_next_at := 6.0
-var _gate_interval := 11.0
-var _gate_jitter := 2.0
-var _gate_negative_chance := 0.45
-var _gate_ops: Array = []
-var _gate_bounce_cap := 50
-var _gate_damage_cap := 4.0
-var _gate_sub_loss := 4
-var _gate_div_damage := 0.6
 
 var _boss_chip_factor := 0.35
 var _boss_hp_scale := 1.0
@@ -184,7 +182,7 @@ var _spawn_timer := 0.0
 var _wave_remaining := 0
 var _wave_cooldown := 0.0
 var _difficulty := 1.0
-var _combo_milestones: Array = []
+var _milestones: Milestones = null
 
 var _input_pointer_x := 0.0
 var _input_pointer_down := false
@@ -321,8 +319,7 @@ func _read_config() -> void:
 	field = ObstacleField.new(_cfg, variant_index)
 	_difficulty = 1.0 + Cfg.num(meta, "difficultyPerStage", 0.12) * float(stage_index)
 
-	var scoring: Dictionary = _cfg.get("scoring", {})
-	_combo_milestones = scoring.get("comboMilestones", [10, 20, 50, 100])
+	_milestones = Milestones.new(_cfg)
 
 	var player: Dictionary = _cfg.get("player", {})
 	lives = int(player.get("lives", 3))
@@ -369,24 +366,8 @@ func _apply_blast(center: Vector2, radius: float, damage: float) -> void:
 
 
 func _read_gate_config() -> void:
-	var gate_cfg: Dictionary = _cfg.get("gates", {})
-	_gate_enabled = bool(gate_cfg.get("enabled", true))
-	_gate_spawn_z = Cfg.num(gate_cfg, "spawnZ", 38.0)
-	_gate_speed = Cfg.num(gate_cfg, "descendSpeed", 2.4)
-	_gate_half_width = Cfg.num(gate_cfg, "halfWidth", 4.7)
-	_gate_center_gap = Cfg.num(gate_cfg, "centerGapX", 0.6)
-	_gate_height = Cfg.num(gate_cfg, "height", 0.9)
-	_gate_next_at = Cfg.num(gate_cfg, "firstAtSeconds", 6.0)
-	_gate_interval = Cfg.num(gate_cfg, "intervalSeconds", 11.0)
-	_gate_jitter = Cfg.num(gate_cfg, "intervalJitter", 2.0)
-	_gate_negative_chance = Cfg.num(gate_cfg, "negativeSideChance", 0.45)
-	_gate_negative_chance *= _upgrade_mul("negativeSideChance")
-	_gate_ops = gate_cfg.get("squadOps", [])
-	var effects: Dictionary = gate_cfg.get("bulletEffects", {})
-	_gate_bounce_cap = int(effects.get("bounceBudgetCap", 50))
-	_gate_damage_cap = Cfg.num(effects, "damageMulCap", 4.0)
-	_gate_sub_loss = int(effects.get("subBounceLoss", 4))
-	_gate_div_damage = Cfg.num(effects, "divDamageMul", 0.6)
+	_gate = GateOps.new(_cfg, _upgrade_mul("negativeSideChance"))
+	_gate_next_at = _gate.next_at
 
 
 func _reserve_arrays() -> void:
@@ -394,6 +375,7 @@ func _reserve_arrays() -> void:
 	enemy_z.resize(MAX_ENEMIES)
 	enemy_hp.resize(MAX_ENEMIES)
 	enemy_type.resize(MAX_ENEMIES)
+	enemy_near.resize(MAX_ENEMIES)
 	auto_x.resize(MAX_AUTO_BULLETS)
 	auto_z.resize(MAX_AUTO_BULLETS)
 	auto_vx.resize(MAX_AUTO_BULLETS)
@@ -652,6 +634,8 @@ func _bounce_chain(normal: Vector2) -> void:
 	chain_pos += chain_dir * 0.02
 	chain_speed = minf(chain_speed * _chain_speed_per_bounce, _chain_base_speed * _chain_speed_cap)
 	events.append({"type": "bounce", "x": chain_pos.x, "z": chain_pos.y})
+	bounce_total += 1
+	_milestones.on_bounce(bounce_total, chain_pos, events)
 	if chain_bounces_left <= 0:
 		_end_chain("exhausted")
 
@@ -669,21 +653,21 @@ func _end_chain(reason: String) -> void:
 
 
 func _tick_gates() -> void:
-	if not _gate_enabled:
+	if not _gate.enabled:
 		return
 	if elapsed >= _gate_next_at:
 		_spawn_gate()
-		_gate_next_at = elapsed + _gate_interval + _rng.range_float(-_gate_jitter, _gate_jitter)
+		_gate_next_at = elapsed + _gate.interval + _rng.range_float(-_gate.jitter, _gate.jitter)
 	var i := 0
 	while i < gates.size():
 		var gate: Dictionary = gates[i]
-		gate["z"] = float(gate["z"]) - _gate_speed * _difficulty * FIXED_DELTA
+		gate["z"] = float(gate["z"]) - _gate.speed * _difficulty * FIXED_DELTA
 		var z := float(gate["z"])
-		if not bool(gate["squad_done"]) and z <= SQUAD_Z + _gate_height:
+		if not bool(gate["squad_done"]) and z <= SQUAD_Z + _gate.height:
 			_apply_gate_to_squad(gate)
 			gate["squad_done"] = true
 		if chain_active and not bool(gate["bullet_done"]):
-			if absf(chain_pos.y - z) <= _gate_height:
+			if absf(chain_pos.y - z) <= _gate.height:
 				_apply_gate_to_bullet(gate)
 				gate["bullet_done"] = true
 		if z < -2.0:
@@ -693,15 +677,15 @@ func _tick_gates() -> void:
 
 
 func _spawn_gate() -> void:
-	var left := _pick_gate_op(_rng.chance(_gate_negative_chance))
+	var left := _gate.pick(_rng, _rng.chance(_gate.negative_chance))
 	# The right side takes the opposite polarity of the left: a gate where both
 	# doors punish is not a decision, it is a toll.
-	var right := _pick_gate_op(bool(left["positive"]))
+	var right := _gate.pick(_rng, bool(left["positive"]))
 	(
 		gates
 		. append(
 			{
-				"z": _gate_spawn_z,
+				"z": _gate.spawn_z,
 				"left": left,
 				"right": right,
 				"squad_done": false,
@@ -711,24 +695,10 @@ func _spawn_gate() -> void:
 	)
 
 
-func _pick_gate_op(want_negative: bool) -> Dictionary:
-	var pool: Array = []
-	var weights := PackedFloat32Array()
-	for op in _gate_ops:
-		var entry: Dictionary = op
-		if bool(entry.get("positive", true)) != want_negative:
-			pool.append(entry)
-			weights.append(float(entry.get("weight", 1.0)))
-	if pool.is_empty():
-		return {"op": "add", "value": 1.0, "positive": true}
-	return pool[_rng.weighted_index(weights)]
-
-
 func _apply_gate_to_squad(gate: Dictionary) -> void:
 	var side: Dictionary = gate["right"] if squad_x >= 0.0 else gate["left"]
 	var before := troops
-	troops = _apply_op(troops, side)
-	troops = clampi(troops, 0, _max_troops)
+	troops = _gate.apply_to_troops(troops, side, _max_troops)
 	(
 		events
 		. append(
@@ -745,33 +715,10 @@ func _apply_gate_to_squad(gate: Dictionary) -> void:
 
 func _apply_gate_to_bullet(gate: Dictionary) -> void:
 	var side: Dictionary = gate["right"] if chain_pos.x >= 0.0 else gate["left"]
-	var op := String(side.get("op", "add"))
-	var value := float(side.get("value", 1.0))
-	match op:
-		"mul":
-			chain_bounces_left = mini(int(float(chain_bounces_left) * value), _gate_bounce_cap)
-			chain_damage_mul = minf(chain_damage_mul * 1.1, _gate_damage_cap)
-		"add":
-			chain_bounces_left = mini(chain_bounces_left + int(value * 0.5), _gate_bounce_cap)
-		"sub":
-			chain_bounces_left = maxi(chain_bounces_left - _gate_sub_loss, 1)
-		"div":
-			chain_damage_mul = maxf(chain_damage_mul * _gate_div_damage, 0.25)
-	events.append({"type": "gate_bullet", "op": op})
-
-
-func _apply_op(value: int, side: Dictionary) -> int:
-	var amount := float(side.get("value", 1.0))
-	match String(side.get("op", "add")):
-		"mul":
-			return int(float(value) * amount)
-		"add":
-			return value + int(amount)
-		"sub":
-			return value - int(amount)
-		"div":
-			return int(float(value) / maxf(amount, 1.0))
-	return value
+	var result := _gate.apply_to_bullet(side, chain_bounces_left, chain_damage_mul)
+	chain_bounces_left = int(result["bounces"])
+	chain_damage_mul = float(result["damage_mul"])
+	events.append({"type": "gate_bullet", "op": result["op"]})
 
 
 func _tick_crowd() -> void:
@@ -783,6 +730,9 @@ func _tick_crowd() -> void:
 		# A platform holds the crowd back; that delay is the whole point of
 		# the moving maze, and it is what makes that variant play differently.
 		enemy_z[i] = field.block_enemy(enemy_x[i], enemy_z[i])
+		if enemy_near[i] == 0 and enemy_z[i] <= _defense_z + _milestones.near_miss_band:
+			enemy_near[i] = 1
+			events.append({"type": "near_miss", "x": enemy_x[i], "z": enemy_z[i]})
 		if enemy_z[i] <= _defense_z:
 			_leak_enemy(i)
 		else:
@@ -791,6 +741,7 @@ func _tick_crowd() -> void:
 
 func _leak_enemy(index: int) -> void:
 	troops -= _troop_loss_per_leak
+	leaked += 1
 	events.append({"type": "leak"})
 	_swap_remove_enemy(index)
 	if troops <= 0:
@@ -823,10 +774,15 @@ func _damage_enemy(index: int, amount: float, source: String = "auto") -> void:
 			}
 		)
 	)
-	for milestone in _combo_milestones:
-		if combo == int(milestone):
-			events.append({"type": "combo_milestone", "combo": combo})
+	_milestones.on_combo(combo, events)
+	kills += 1
+	score += _milestones.on_kill(kills, events)
 	_swap_remove_enemy(index)
+	# Peluru terakhir di wave: gelombang habis sementara chain shot masih
+	# terbang. Itulah momen sinematiknya — dan hanya berlaku kalau yang
+	# menutup gelombang memang peluru, bukan timer yang kebetulan habis.
+	if chain_active and enemy_count == 0 and _wave_remaining <= 0 and not boss_active:
+		events.append({"type": "last_bullet"})
 
 
 func _swap_remove_enemy(index: int) -> void:
@@ -835,6 +791,7 @@ func _swap_remove_enemy(index: int) -> void:
 	enemy_z[index] = enemy_z[last]
 	enemy_hp[index] = enemy_hp[last]
 	enemy_type[index] = enemy_type[last]
+	enemy_near[index] = enemy_near[last]
 	pose.swap_enemy(index, last)
 	enemy_count -= 1
 
@@ -870,6 +827,8 @@ func _tick_waves() -> void:
 		_wave_timer = minf(_wave_timer, 1.6)
 	if _wave_timer > 0.0:
 		return
+	coins += _milestones.on_wave_cleared(wave_index + 1, leaked, events)
+	leaked = 0
 	wave_index += 1
 	if wave_index >= _wave_sizes.size():
 		_start_boss()
@@ -902,6 +861,7 @@ func _spawn_enemy() -> void:
 	enemy_z[enemy_count] = _z_max + slot.y
 	enemy_hp[enemy_count] = EnemyStats.hp(_enemy_types, type_index) * _difficulty
 	enemy_type[enemy_count] = type_index
+	enemy_near[enemy_count] = 0
 	pose.born_enemy(enemy_count, enemy_x[enemy_count], enemy_z[enemy_count])
 	enemy_count += 1
 	_wave_remaining -= 1

@@ -88,7 +88,9 @@ function loadGame() {
   code += `
     CFG = JSON.parse(require('fs').readFileSync(${JSON.stringify(path.join(ROOT, 'Config/arena_config.json'))}, 'utf8'));
     module.exports = { get S(){return S;}, CFG, loadVariant, resetRun, simulate,
-                       fire, queueSteer, queueAim, draw, predictAimPath };
+                       fire, queueSteer, queueAim, draw, predictAimPath,
+                       // Lapisan rasa (juice_test.js): milestone, denyut, confetti.
+                       damageEnemy, resolveBounce, slowMoStep, burstConfetti, tickConfetti, SFX };
   `;
   makeEnv();
   const mod = { exports: {} };
