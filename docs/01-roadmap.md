@@ -35,8 +35,9 @@ Sudah berdiri dan terverifikasi:
 
 Jarak yang tersisa ke key art, diurutkan dari yang paling terlihat:
 
-1. Pemain masih memakai rig KayKit fantasi yang diperbesar — bukan zirah
-   sci-fi. **Ini perbedaan nomor satu.**
+1. Bentuk dasar badan pemain masih rig ksatria KayKit (mesh ter-merge, helm
+   berjambul tidak bisa dilepas sebagian). Cat, proporsi, dan senjatanya
+   sudah diganti; sisanya menunggu model sci-fi CC0.
 2. Musuh yang mati karena ledakan tidak terlempar; mereka hanya jatuh.
 3. Prototipe web belum punya latar kota, kerumunan jauh, maupun hujan tracer,
    jadi ujung lorongnya kosong.

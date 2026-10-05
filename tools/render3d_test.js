@@ -66,16 +66,29 @@ console.log(`arena : lebar ${R3D.ARENA.halfWidth * 2}  dalam ${R3D.ARENA.depth} 
 const HW = R3D.ARENA.halfWidth;
 const D = R3D.ARENA.depth;
 
-console.log('[1] Seluruh lantai arena masuk layar');
+console.log('[1] Lorong terbaca penuh dari z=2 ke belakang');
+// Tepi lantai TEPAT DI KAKI KAMERA sengaja terpotong. Framing diturunkan dari
+// key art (pemain pada 87% tinggi layar, horizon pada 14%), dan pada framing
+// itu baris z=0 memang jatuh di luar bawah layar. Yang penting bukan "semua
+// terlihat", melainkan: seluruh LORONG YANG BISA DIMAINKAN terbaca, termasuk
+// kedua dinding, sejak sedikit di depan pemain.
 const corners = {
   'sudut dekat kiri': project(-HW, 0),
   'sudut dekat kanan': project(HW, 0),
   'sudut jauh kiri': project(-HW, D),
   'sudut jauh kanan': project(HW, D),
 };
-for (const [name, p] of Object.entries(corners)) {
-  check(name + ' terlihat', inside(p), fmt(p));
-}
+check('sudut jauh kiri terlihat', inside(corners['sudut jauh kiri']), fmt(corners['sudut jauh kiri']));
+check('sudut jauh kanan terlihat', inside(corners['sudut jauh kanan']), fmt(corners['sudut jauh kanan']));
+check('tepi z=0 memang di luar frame (disengaja)',
+  !inside(corners['sudut dekat kiri']), fmt(corners['sudut dekat kiri']));
+// z=2,4 adalah ambang terukur: di situ kedua dinding masuk frame (pada z=2,3
+// tepat menyentuh tepi). Pemain berdiri di z=2, jadi hanya 0,4 unit pertama
+// di depannya yang tidak terlihat — lebih dekat dari jarak pantul mana pun.
+const WALL_Z = 2.4;
+const wallNear = { kiri: project(-HW, WALL_Z), kanan: project(HW, WALL_Z) };
+check('dinding kiri terbaca sejak z=2,4', inside(wallNear.kiri), fmt(wallNear.kiri));
+check('dinding kanan terbaca sejak z=2,4', inside(wallNear.kanan), fmt(wallNear.kanan));
 
 console.log('\n[2] Elemen gameplay berada di tempat yang benar');
 const squad = project(0, 2);
@@ -91,23 +104,36 @@ check('zona spawn terlihat', inside(spawn), fmt(spawn));
 check('zona spawn ada di paruh atas layar', spawn.y > 0, `y=${spawn.y.toFixed(2)}`);
 check('gate muncul di dalam layar (z=38)', inside(gate), fmt(gate));
 
-console.log('\n[3] Lebar arena terpakai, tidak kesempitan dan tidak terpotong');
-const nearW = Math.abs(corners['sudut dekat kanan'].x - corners['sudut dekat kiri'].x) / 2;
+console.log('\n[3] Lebar arena terpakai, tidak kesempitan');
+const nearW = Math.abs(project(HW, WALL_Z).x - project(-HW, WALL_Z).x) / 2;
 const farW = Math.abs(corners['sudut jauh kanan'].x - corners['sudut jauh kiri'].x) / 2;
-check('baris dekat mengisi >=70% lebar layar', nearW >= 0.7,
-  `${(nearW * 100).toFixed(0)}%`);
-check('baris dekat tidak terpotong', nearW <= 1.0, `${(nearW * 100).toFixed(0)}%`);
+// Diukur di z=2,4 dan bukan z=0: itulah baris pertama yang benar-benar
+// dilihat pemain, dan di situlah lorong harus mengisi layar.
+check('lorong mengisi >=80% lebar layar di z=2,4', nearW >= 0.8, `${(nearW * 100).toFixed(0)}%`);
+check('lorong tidak terpotong di z=2,4', nearW <= 1.001, `${(nearW * 100).toFixed(0)}%`);
 check('perspektif terasa: baris jauh lebih sempit', farW < nearW,
   `jauh ${(farW * 100).toFixed(0)}% < dekat ${(nearW * 100).toFixed(0)}%`);
 
-console.log('\n[4] Kedalaman terpakai sepanjang layar');
+console.log('\n[4] Kedalaman dan jangkar pemain sesuai key art');
 const depthSpan = project(0, D).y - project(0, 0).y;
-// Sisa tinggi layar sengaja dibiarkan kosong di depan squad: tanpa ruang itu
-// squad menempel di tepi bawah dan tertimpa HUD.
 check('arena membentang >=60% tinggi layar', depthSpan >= 1.2,
   `${(depthSpan / 2 * 100).toFixed(0)}% tinggi`);
-check('ada ruang di bawah squad', squad.y > -0.62 && squad.y < -0.25,
-  `squadY=${squad.y.toFixed(2)}`);
+
+// Tiga angka ini DIUKUR dari key art dan menjadi definisi framing yang benar
+// (docs/00-art-bible.md §1). Kamera diselesaikan dari ketiganya, jadi di
+// sinilah solusinya dibuktikan — bukan di "apakah ada ruang kosong".
+const PLAYER_H = 4.86;                       // = CHAR_HEIGHT 1,92 x PLAYER_SCALE 2,53
+const head = project(0, 2, PLAYER_H);
+const feet = project(0, 2, 0);
+const centerScreen = (1 - (head.y + feet.y) / 2) / 2;   // NDC -> 0 di atas, 1 di bawah
+const heightScreen = Math.abs(head.y - feet.y) / 2;
+const horizonScreen = (1 - project(0, 4000).y) / 2;
+check('pemain berjangkar di ~87% tinggi layar',
+  Math.abs(centerScreen - 0.87) <= 0.05, `${(centerScreen * 100).toFixed(1)}%`);
+check('pemain mengisi ~18,5% tinggi layar',
+  Math.abs(heightScreen - 0.185) <= 0.04, `${(heightScreen * 100).toFixed(1)}%`);
+check('horizon di ~14% dari atas',
+  Math.abs(horizonScreen - 0.14) <= 0.05, `${(horizonScreen * 100).toFixed(1)}%`);
 
 console.log('\n[5] Squad bergerak kiri-kanan tetap di dalam layar');
 for (const x of [-HW + 0.5, 0, HW - 0.5]) {
@@ -154,7 +180,10 @@ check('render dipanggil sekali per sync', renderCalls === 1);
 const scene = R3D._scene();
 const grp = (name) => scene.getObjectByName(name);
 const visible = (name) => grp(name).children.filter((c) => c.visible);
-check('jumlah prajurit = S.troops', visible('troops').length === 7,
+// Satu badan, berapa pun nilai troops: squad 100 prajurit dihapus, dan
+// `troops` sekarang dibaca sebagai POWER senjata (keputusan D1). Simulasi
+// tidak berubah sedikit pun — hanya tampilannya.
+check('pemain digambar sebagai satu badan', visible('troops').length === 1,
   `terlihat ${visible('troops').length}`);
 check('jumlah musuh = S.enemies', visible('enemies').length === 2);
 check('peluru = auto + chain', visible('bullets').length === 3);

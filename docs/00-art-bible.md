@@ -29,6 +29,11 @@ Tiga hal diukur dari gambar:
 | Tinggi pemain | **18,5%** tinggi layar |
 | Garis horizon | **14%** tinggi layar |
 
+Ketiganya diuji otomatis di `tools/render3d_test.js` §4 — terukur 87,0% /
+18,5% / 14,5% pada kamera yang dipakai game, bukan pada salinannya. Tinggi
+pemain di dunia harus **4,86 unit** (CHAR_HEIGHT 1,92 x PLAYER_SCALE 2,53);
+kalau pengali itu berubah, framing-nya bohong.
+
 Tiga ukuran, tiga variabel (tinggi kamera, kedalaman kamera, pitch) — jadi
 framing-nya **tertentu**. `tools/solve_framing.py` menyelesaikannya:
 
@@ -165,7 +170,33 @@ beauty.*
 
 ---
 
-## 6. Yang sengaja TIDAK diambil dari gambar
+## 6. Aturan anti-plastik
+
+Dunia ini pernah terbaca seperti mainan blok. Penyebabnya bukan jumlah
+poligon dan bukan gaya rendah-poli — melainkan enam hal yang bisa ditulis,
+diuji, dan karena itu tidak boleh kembali:
+
+| # | Aturan | Kenapa |
+|---|---|---|
+| A1 | **Tidak ada warna rata pada benda besar.** Setiap permukaan punya sambungan, gradien, atau garis. | Warna rata tidak punya permukaan. Dinding magenta polos adalah pita plastik; dinding berpanel adalah bangunan. |
+| A2 | **Logam butuh pantulan.** Material metalness tinggi tanpa environment map menjadi siluet hitam. | Logam hanyalah permukaan yang memantulkan sekitarnya. Tanpa sekitar, ia tidak punya apa-apa untuk ditampilkan. Web memakai env map prosedural; Godot memakai sky-nya sendiri. |
+| A3 | **Proporsi dewasa, bukan chibi.** Kepala rig diskalakan 0,74. | Rasio 4-kepala adalah bahasa bentuk mainan konstruksi, dan tidak ada material yang bisa menyelamatkannya. Key art memakai ~7 kepala. |
+| A4 | **Siluet tinggi-ramping untuk benda teknis.** Kubah dan bentuk gemuk dilarang di lantai arena. | Pylon rasio 5:1 terbaca sebagai alat; kubah pendek terbaca sebagai jamur, berapa pun cahayanya. |
+| A5 | **Satu bahasa warna untuk kerumunan.** Merah-oranye, dibedakan hanya oleh siluet dan nilai. | Delapan skema warna fantasi melebur jadi bubur cokelat-hijau di kejauhan. Satu bahasa warna terbaca sebagai pasukan. |
+| A6 | **Pengulangan tekstur tidak boleh menjadi motif.** Panel dinding satu per 7 unit, bukan per 2,5. | Pengulangan rapat selalu berubah jadi pola; pola terbaca sebagai permukaan cetakan, bukan arsitektur. |
+
+Berlaku juga untuk HUD: nyawa adalah segmen perisai neon, bukan hati merah
+mengkilap. Satu elemen antarmuka bergaya permen cukup untuk menarik seluruh
+adegan kembali ke wilayah mainan.
+
+**Batas yang jujur:** badan pemain masih rig ksatria KayKit, dan mesh-nya
+ter-*merge* jadi satu objek, jadi helm berjambul tidak bisa disembunyikan
+sebagian. Cat, proporsi, dan senjata sudah diganti; bentuk dasarnya baru bisa
+diperbaiki oleh model sci-fi sungguhan (roadmap M1).
+
+---
+
+## 7. Yang sengaja TIDAK diambil dari gambar
 
 1. **Vortex sebagai gameplay.** Ia dekorasi latar. Gravity well yang
    sesungguhnya adalah rintangan kecil di lantai; memberi dua benda arti

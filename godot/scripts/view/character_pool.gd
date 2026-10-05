@@ -92,6 +92,17 @@ const SOCKET := {"right": "handslot.r", "left": "handslot.l"}
 ## Cat zirah sci-fi pemain. Lihat berkasnya untuk alasan tiap keputusannya.
 const ARMOR_SHADER := "res://shaders/player_armor.gdshader"
 
+## Nilai terang-gelap per peran. Hue TIDAK pernah berpindah.
+const THREAT_SHADE := {
+	"grunt": 0.0,
+	"runner": 0.18,
+	"brute": -0.12,
+	"splitter": 0.26,
+	"bomber": -0.2,
+	"shielder": 0.08,
+	"boss": -0.06,
+}
+
 ## Klip yang tidak boleh berulang: aksi sesaat yang harus berhenti di frame
 ## terakhirnya (roboh harus tetap roboh).
 const ONCE_CLIPS := ["shoot", "hit", "die"]
@@ -424,6 +435,9 @@ func _spawn(kind: String) -> Actor:
 	var socket := _attach_items(root, rig)
 	if String(rig.get("skin", "")) == "armor":
 		_wear_armor(root, socket)
+	else:
+		_wear_threat(root, kind)
+	_fix_proportions(root)
 	add_child(root)
 	return Actor.new(kind, root, player, socket, _all_meshes(root))
 
@@ -444,6 +458,48 @@ func _paint(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("steel_color", _armor_steel)
 	material.set_shader_parameter("deep_color", _armor_deep)
 	material.set_shader_parameter("rim_color", _armor_rim)
+
+
+## Mengecat musuh sebagai ANCAMAN, bukan sebagai cast fantasi.
+##
+## Rig yang tersedia adalah rogue hijau, ranger cokelat, penyihir berjubah
+## biru. Delapan skema warna yang bertabrakan, dan di ujung lorong semuanya
+## melebur jadi bubur cokelat-hijau. Key art melakukan kebalikannya: ratusan
+## unit dengan SATU bahasa warna, dibedakan hanya oleh siluet — itulah yang
+## membuat kerumunan terbaca sebagai satu pasukan alih-alih sekumpulan
+## boneka. Kembar dari wearThreat() di js/render3d.js.
+func _wear_threat(root: Node3D, kind: String) -> void:
+	var shade: float = float(THREAT_SHADE.get(kind, 0.0))
+	var material := StandardMaterial3D.new()
+	var body := Color("#6E1A14")
+	material.albedo_color = body.lightened(shade) if shade > 0.0 else body.darkened(-shade)
+	material.metallic = 0.55
+	material.roughness = 0.55
+	material.emission_enabled = true
+	material.emission = Color("#FF9A2E")
+	# Sangat rendah: musuh memungut cahaya lorong, tidak memancarkannya.
+	# Yang menyala di dunia ini hanya dinding, peluru, dan pemain.
+	material.emission_energy_multiplier = 0.12
+	for mesh in _all_meshes(root):
+		(mesh as MeshInstance3D).material_override = material
+
+
+## Mengecilkan kepala rig.
+##
+## Karakter KayKit digambar chibi — kepalanya seperempat tinggi badan (rasio
+## 4 kepala), bahasa bentuk mainan konstruksi. Key art memakai proporsi
+## dewasa, sekitar 7 kepala. Satu skala pose tulang mengubah siluetnya dari
+## boneka jadi prajurit, dan karena dikerjakan pada pose dan bukan pada mesh,
+## seluruh animasi tetap berjalan. 0,74 adalah batas sebelum helm mulai
+## menembus bahu.
+func _fix_proportions(root: Node3D) -> void:
+	var skeleton: Skeleton3D = root.find_child("Skeleton3D", true, false)
+	if skeleton == null:
+		return
+	var bone := skeleton.find_bone("head")
+	if bone < 0:
+		return
+	skeleton.set_bone_pose_scale(bone, Vector3.ONE * 0.74)
 
 
 ## Satu material dipakai bersama semua mesh pemain: ia tidak pernah berbeda

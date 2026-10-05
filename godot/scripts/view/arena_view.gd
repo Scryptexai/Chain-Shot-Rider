@@ -52,7 +52,15 @@ const BOSS_UNIT := "boss"
 ## key art menempatkan satu prajurit setinggi 19% layar sebagai jangkar
 ## komposisi, dan satu unit seukuran musuh tidak akan pernah memegang peran
 ## itu (docs/17 §17.2).
-const PLAYER_SCALE := 1.35
+## Pengali ukuran pemain.
+##
+## 2,53 dan bukan 1,35: kamera diselesaikan dari key art dengan PLAYER_H =
+## 4,86 unit (lihat tools/solve_framing.py), sedangkan rig dinormalkan ke
+## CHAR_HEIGHT 1,92. Pengali lama menghasilkan badan setinggi 2,59 unit —
+## 53% dari yang diandaikan solver — jadi pemain hanya mengisi 11% tinggi
+## layar alih-alih 18,5% yang diukur dari gambar, dan jangkar komposisinya
+## hilang. 4,86 / 1,92 = 2,53.
+const PLAYER_SCALE := 2.53
 
 var _sim: SimWorld
 var _pal: Dictionary = {}
@@ -676,7 +684,7 @@ func _unit_name(type_index: int) -> String:
 ## lama tetap cocok bit demi bit.
 ##
 ## Konsekuensinya besar untuk komposisi: dengan satu badan di layar, pemain
-## boleh digambar 1,35x lebih besar dari siapa pun, diberi rim cyan, dan
+## boleh digambar 2,5x lebih besar dari siapa pun, diberi rim cyan, dan
 ## ditempatkan sebagai jangkar di dasar layar persis seperti key art.
 func _render_player() -> void:
 	var x: float = _ip(_sim.pose.squad_x, _sim.squad_x)

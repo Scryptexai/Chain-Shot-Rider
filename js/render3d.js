@@ -80,9 +80,13 @@
 
   // Props arena (tools/build_assets.py). Hanya benda mati: karakter TIDAK ada
   // di daftar ini lagi, lihat CAST di bawah.
+  // Hanya dinding perisai yang masih datang dari berkas. Bumper dan drum
+  // dulu memakai prop GLB hasil build_assets.py — kubah abu-abu dan tong
+  // cokelat yang, dengan pencahayaan apa pun, terbaca sebagai mainan
+  // plastik. Keduanya sekarang dibangun prosedural sebagai benda teknis
+  // (lihat makePylon / makeDrum): bukan soal jumlah poligon, melainkan soal
+  // benda itu memancarkan cahaya atau tidak.
   var MODELS = {
-    barrel: 'assets/models/barrel.glb',
-    bumper: 'assets/models/bumper.glb',
     shieldWall: 'assets/models/shield_wall.glb',
   };
   var loaded = {};      // name -> Object3D prototype
@@ -212,7 +216,12 @@
   }
 
   function loadModels(onDone) {
-    if (!THREE.GLTFLoader) { if (onDone) onDone(0); return; }
+    // Prop prosedural tidak perlu diunduh: ia sudah jadi begitu halaman
+    // dibaca, jadi arena tidak pernah tampil dengan silinder sementara.
+    loaded.bumper = makePylon();
+    loaded.barrel = makeDrum();
+    loadCount += 2;
+    if (!THREE.GLTFLoader) { if (onDone) onDone(loadCount); return; }
     var loader = new THREE.GLTFLoader();
     var names = Object.keys(MODELS), pending = names.length;
     names.forEach(function (name) {
@@ -450,6 +459,8 @@
     var proto = cloneSkinned(rig.scene);
     attachWeapons(proto, rig);
     if (kind && CAST[kind].skin === 'armor') wearArmor(proto);
+    else if (kind) wearThreat(proto, kind);
+    fixProportions(proto);
     var idle = rig.animations.filter(function (c) { return c.name === 'idle'; })[0];
     if (idle) {
       var mixer = new THREE.AnimationMixer(proto);
@@ -525,12 +536,20 @@
    * dengan fresnel sungguhan, yang tidak sepadan biayanya di WebGL ini.
    */
   function wearArmor(root) {
+    // Warna dasar DIGELAPKAN dari playerSteel. Steel terang dipakai di key
+    // art sebagai sorotan pada pelat yang menghadap cahaya, bukan sebagai
+    // warna seluruh badan; memakainya rata menghasilkan patung abu-abu pucat
+    // tanpa bentuk — persis tampilan boneka plastik. Logam gelap dengan
+    // metalness tinggi memantulkan tiga lampu ruangan dan memahat zirahnya.
     var armor = new THREE.MeshStandardMaterial({
-      color: col(PAL.playerSteel),
+      color: col(0x6d7f9b),
       emissive: col(PAL.playerCyan),
-      emissiveIntensity: 0.35,
-      metalness: 0.72,
-      roughness: 0.34,
+      emissiveIntensity: 0.14,
+      // 0,78 dan bukan 0,95: logam penuh hanya memantul, jadi bagian yang
+      // tidak menghadap sumber cahaya jatuh ke hitam dan siluetnya hilang.
+      metalness: 0.78,
+      roughness: 0.26,
+      envMapIntensity: 1.4,
     });
     root.traverse(function (node) {
       if (node.isMesh || node.isSkinnedMesh) node.material = armor;
@@ -563,6 +582,57 @@
     return gun;
   }
 
+  /**
+   * Mengecat musuh sebagai ANCAMAN, bukan sebagai cast fantasi.
+   *
+   * Rig yang tersedia adalah rogue hijau, ranger cokelat, penyihir berjubah
+   * biru — delapan skema warna yang saling bertabrakan dan, di ujung lorong,
+   * melebur jadi bubur cokelat-hijau. Key art melakukan hal sebaliknya:
+   * ratusan unit dengan SATU bahasa warna (merah-oranye), dibedakan hanya
+   * oleh siluet. Itu yang membuat kerumunan terbaca sebagai satu pasukan,
+   * dan itu juga yang menghapus sisa terakhir tampilan mainan.
+   *
+   * Nilai warnanya digeser tipis per peran supaya dua tipe yang berdiri
+   * berdampingan tidak melebur — tapi hue-nya tidak pernah berpindah.
+   */
+  var THREAT_SHADE = {
+    grunt: 0.0, runner: 0.18, brute: -0.12, splitter: 0.26, bomber: -0.2,
+    shielder: 0.08, boss: -0.06,
+  };
+
+  function wearThreat(root, kind) {
+    var shade = THREAT_SHADE[kind] || 0;
+    var body = new THREE.Color(0x6e1a14).offsetHSL(0, 0, shade * 0.35);
+    var skin = new THREE.MeshStandardMaterial({
+      color: body.convertSRGBToLinear(),
+      emissive: col(PAL.blast),
+      // Emissive sangat rendah: musuh harus memungut cahaya lorong, bukan
+      // memancarkannya. Yang menyala di dunia ini hanya dinding, peluru,
+      // dan pemain.
+      emissiveIntensity: 0.12,
+      metalness: 0.55, roughness: 0.55,
+    });
+    root.traverse(function (node) {
+      if (node.isMesh || node.isSkinnedMesh) node.material = skin;
+    });
+  }
+
+  /**
+   * Mengecilkan kepala rig.
+   *
+   * Karakter KayKit digambar dengan proporsi chibi — kepalanya sekitar
+   * seperempat tinggi badan (rasio 4 kepala), yang merupakan bahasa bentuk
+   * mainan konstruksi. Key art memakai proporsi dewasa (kira-kira 7 kepala).
+   * Satu skala tulang mengubah siluetnya dari boneka menjadi prajurit, dan
+   * karena ia dikerjakan pada pose tulang, seluruh animasi tetap jalan.
+   *
+   * 0,76 dan bukan lebih kecil: di bawah itu helm mulai menembus bahu.
+   */
+  function fixProportions(root) {
+    var head = root.getObjectByName('head') || root.getObjectByName('Head');
+    if (head) head.scale.setScalar(0.74);
+  }
+
   function attachWeapons(root, rig) {
     ['right', 'left'].forEach(function (hand) {
       var item = rig[hand];
@@ -591,7 +661,8 @@
     var root = cloneSkinned(rig.scene);
     root.scale.setScalar(rig.scale);
     attachWeapons(root, rig);
-    if (CAST[kind].skin === 'armor') wearArmor(root);
+    if (CAST[kind].skin === 'armor') wearArmor(root); else wearThreat(root, kind);
+    fixProportions(root);
     var mixer = new THREE.AnimationMixer(root);
     var actions = {};
     rig.animations.forEach(function (clip) {
@@ -713,6 +784,37 @@
     });
   }
 
+  /**
+   * Peta lingkungan prosedural: satu scene mini berisi gradien lorong, lalu
+   * diproses PMREM supaya bisa dipakai sebagai pantulan oleh semua material.
+   */
+  function makeEnvironment() {
+    var probe = document.createElement('canvas').getContext('2d');
+    if (!canPaint(probe) || !THREE.PMREMGenerator) return null;
+    var env = new THREE.Scene();
+    var geo = new THREE.SphereGeometry(10, 12, 8);
+    var c = document.createElement('canvas');
+    c.width = 16; c.height = 64;
+    var g = c.getContext('2d');
+    var grad = g.createLinearGradient(0, 0, 0, 64);
+    grad.addColorStop(0, '#05070f');     // langit malam
+    grad.addColorStop(0.42, '#2a1340');  // kabut ungu
+    grad.addColorStop(0.58, '#ff2bd6');  // pita dinding — sumber pantulan utama
+    grad.addColorStop(0.72, '#2a1340');
+    grad.addColorStop(1, '#0b1a24');     // pantulan kisi di lantai
+    g.fillStyle = grad; g.fillRect(0, 0, 16, 64);
+    var tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    env.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      map: tex, side: THREE.BackSide,
+    })));
+    var pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+    var target = pmrem.fromScene(env, 0.04);
+    pmrem.dispose();
+    return target.texture;
+  }
+
   /** Builds the perspective camera. Shared with the test so framing is proven. */
   function makeCamera(aspect) {
     var cam = new THREE.PerspectiveCamera(CAM.fov, aspect, CAM.near, CAM.far);
@@ -723,34 +825,174 @@
     return cam;
   }
 
-  /** Grid texture drawn procedurally — no image files to ship or load. */
+  /**
+   * Lantai: pelat logam yang disikat, dengan sambungan dan kisi cahaya.
+   *
+   * Versi sebelumnya menebar bercak elips acak sebagai "logam basah". Pada
+   * layar itu terbaca sebagai karpet berlumut — permukaan lunak, dan
+   * permukaan lunak adalah setengah dari alasan sebuah adegan terlihat
+   * seperti mainan. Yang membuat logam terbaca sebagai logam adalah GARIS
+   * LURUS: goresan sikat searah, sambungan pelat yang tegas, dan pantulan
+   * yang memanjang. Tidak ada satu pun bentuk organik di sini sekarang.
+   */
   function makeGridTexture() {
     var c = document.createElement('canvas');
     c.width = c.height = 256;
     var g = c.getContext('2d');
-    // Pelat logam basah dengan kisi cahaya: bercak kotor berbenih tetap,
-    // lalu dua garis kisi cyan yang terang. Padanan floor_grid.gdshader di
-    // sisi Godot — tidak sama persis (kanvas tidak punya fwidth), tapi
-    // membaca sebagai lantai yang sama.
-    g.fillStyle = '#0e1322'; g.fillRect(0, 0, 256, 256);
+    if (!canPaint(g)) return null;
+    g.fillStyle = '#0b0f1b'; g.fillRect(0, 0, 256, 256);
+
     var seed = 20260929;
     function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
-    for (var i = 0; i < 90; i++) {
-      var r = 6 + rnd() * 26;
-      g.fillStyle = rnd() < 0.5 ? 'rgba(22,30,52,0.55)' : 'rgba(8,11,20,0.6)';
-      g.beginPath(); g.ellipse(rnd() * 256, rnd() * 256, r, r * 0.6, rnd() * 3.14, 0, 6.28); g.fill();
+
+    // Goresan sikat: garis tipis searah sumbu lorong, nilai terang-gelap
+    // sangat rapat supaya tidak pernah membentuk motif yang terbaca.
+    for (var i = 0; i < 220; i++) {
+      var x = rnd() * 256;
+      g.strokeStyle = rnd() < 0.5 ? 'rgba(26,34,56,0.30)' : 'rgba(5,7,13,0.35)';
+      g.lineWidth = 0.6 + rnd() * 1.6;
+      g.beginPath(); g.moveTo(x, rnd() * 60); g.lineTo(x + (rnd() - 0.5) * 6, 256); g.stroke();
     }
-    g.strokeStyle = 'rgba(43,232,255,0.75)'; g.lineWidth = 3;
-    g.beginPath(); g.moveTo(0, 0); g.lineTo(256, 0); g.moveTo(0, 0); g.lineTo(0, 256); g.stroke();
+    // Sambungan pelat: satu salib gelap dengan sisi terang di bawahnya,
+    // seperti tepi pelat yang menangkap cahaya ruangan.
+    g.strokeStyle = 'rgba(3,4,9,0.9)'; g.lineWidth = 4;
+    g.beginPath(); g.moveTo(128, 0); g.lineTo(128, 256); g.moveTo(0, 128); g.lineTo(256, 128); g.stroke();
+    g.strokeStyle = 'rgba(70,86,124,0.22)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(131, 0); g.lineTo(131, 256); g.moveTo(0, 131); g.lineTo(256, 131); g.stroke();
+    // Baut di sudut pelat: detail terkecil yang masih terbaca pada jarak ini,
+    // dan satu-satunya hal yang memberi skala pada lantai.
+    g.fillStyle = 'rgba(96,116,160,0.25)';
+    [[16, 16], [240, 16], [16, 240], [240, 240]].forEach(function (b) {
+      g.beginPath(); g.arc(b[0], b[1], 2.4, 0, 6.28); g.fill();
+    });
+
+    // Kisi cahaya cyan di tepi petak, dengan halo tipis di sisinya.
+    g.strokeStyle = 'rgba(43,232,255,0.16)'; g.lineWidth = 7;
+    g.beginPath(); g.moveTo(0, 1); g.lineTo(256, 1); g.moveTo(1, 0); g.lineTo(1, 256); g.stroke();
+    g.strokeStyle = 'rgba(43,232,255,0.85)'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, 1); g.lineTo(256, 1); g.moveTo(1, 0); g.lineTo(1, 256); g.stroke();
+
     var tex = new THREE.CanvasTexture(c);
-    // Kanvas berisi warna sRGB (itulah arti '#222a18' di CSS). Sejak keluaran
-    // renderer pindah ke sRGB, tekstur yang lupa ditandai akan dianggap data
-    // linear lalu dicerahkan sekali lagi — lantai gelap berlumut berubah jadi
-    // hijau pucat seperti lapangan golf.
+    // Kanvas berisi warna sRGB. Tekstur yang lupa ditandai akan dianggap data
+    // linear lalu dicerahkan sekali lagi — lantai gelap berubah pucat.
     tex.encoding = THREE.sRGBEncoding;
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set(ARENA.halfWidth, ARENA.depth / 2);
+    tex.anisotropy = 4;
     return tex;
+  }
+
+  /**
+   * Dinding pantul: panel data, bukan pita magenta rata.
+   *
+   * Ini adalah perbedaan terbesar antara "dunia neon" dan "balok plastik
+   * berwarna". Warna rata tidak punya permukaan: tidak ada sambungan, tidak
+   * ada arah, tidak ada tanda bahwa benda itu dibuat. Tekstur ini menambahkan
+   * tiga hal dan hanya tiga: sambungan panel vertikal, garis data horizontal,
+   * dan satu pita panas di tepi atas — pita yang sama yang dipakai pemain
+   * untuk memperkirakan sudut pantul.
+   */
+  function makeWallTexture() {
+    var c = document.createElement('canvas');
+    c.width = 128; c.height = 256;
+    var g = c.getContext('2d');
+    if (!canPaint(g)) return null;
+    g.fillStyle = '#20132f'; g.fillRect(0, 0, 128, 256);
+
+    // Gradien vertikal: pangkal dinding gelap, puncaknya panas.
+    var grad = g.createLinearGradient(0, 256, 0, 0);
+    grad.addColorStop(0, 'rgba(8,5,14,0.97)');
+    grad.addColorStop(0.62, 'rgba(48,14,56,0.80)');
+    grad.addColorStop(0.92, 'rgba(150,26,122,0.80)');
+    grad.addColorStop(1, 'rgba(255,43,214,0.90)');
+    g.fillStyle = grad; g.fillRect(0, 0, 128, 256);
+
+    // Sambungan panel.
+    g.strokeStyle = 'rgba(4,2,8,0.85)'; g.lineWidth = 5;
+    g.beginPath(); g.moveTo(4, 0); g.lineTo(4, 256); g.moveTo(124, 0); g.lineTo(124, 256); g.stroke();
+    g.strokeStyle = 'rgba(255,155,238,0.35)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(9, 0); g.lineTo(9, 256); g.stroke();
+
+    // Garis data horizontal, jaraknya tidak teratur supaya tidak terbaca
+    // sebagai tangga.
+    [44, 96, 118, 170, 206].forEach(function (y, i) {
+      g.strokeStyle = i % 2 ? 'rgba(255,155,238,0.5)' : 'rgba(6,3,12,0.7)';
+      g.lineWidth = i % 2 ? 1.5 : 3;
+      g.beginPath(); g.moveTo(14, y); g.lineTo(114, y); g.stroke();
+    });
+
+    // Pita panas tepi atas — tipis. Inilah garis yang dibaca pemain untuk
+    // memperkirakan sudut pantul, jadi ia harus tajam, bukan lebar.
+    g.fillStyle = '#ff9bee'; g.fillRect(0, 0, 128, 4);
+
+    var tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, 1);
+    return tex;
+  }
+
+  /**
+   * Bumper sebagai pylon teknis: silinder logam gelap dengan dua cincin yang
+   * menyala dan tutup panas di atasnya.
+   *
+   * Yang diganti adalah kubah abu-abu bertudung ungu — bentuk jamur matte
+   * yang, lebih dari apa pun di layar, membuat arena terbaca sebagai mainan.
+   * Siluetnya sekarang tegak dan bersudut, dan ia MEMANCARKAN cahaya, jadi
+   * ia menjadi bagian dari dunia neon alih-alih benda yang ditaruh di
+   * atasnya.
+   */
+  function makePylon() {
+    var grp = new THREE.Group();
+    var shell = new THREE.MeshStandardMaterial({
+      color: col(0x241536), metalness: 0.9, roughness: 0.3,
+    });
+    var hot = new THREE.MeshBasicMaterial({ color: col(PAL.wallGlow) });
+    // Proporsi menentukan segalanya di sini: pendek-dan-gemuk terbaca sebagai
+    // mainan apa pun materialnya, tinggi-dan-ramping terbaca sebagai alat.
+    // Tingginya 2,1 dengan jari-jari 0,42 — rasio 5:1, mendekati tiang
+    // sungguhan, bukan kubah.
+    var base = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.72, 0.16, 8), shell);
+    base.position.y = 0.08; grp.add(base);
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.44, 1.74, 8), shell);
+    body.position.y = 1.03; grp.add(body);
+    // Garis nyala tipis, bukan pita tebal: cahaya harus terbaca sebagai celah
+    // di antara pelat, bukan sebagai cat berwarna.
+    [0.34, 0.86, 1.38].forEach(function (y, i) {
+      var r = 0.47 - i * 0.04;
+      var ring = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.045, 8), hot);
+      ring.position.y = y; grp.add(ring);
+    });
+    var head = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.36, 0.26, 8), shell);
+    head.position.y = 2.03; grp.add(head);
+    var tip = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.08, 8), hot);
+    tip.position.y = 2.2; grp.add(tip);
+    return grp;
+  }
+
+  /**
+   * Drum peledak: badan logam merah gelap, hanya pita atasnya yang panas.
+   *
+   * Emissive penuh akan membuatnya terbaca sebagai lampu, dan pemain berhenti
+   * takut pada benda yang menyala ramah (docs/00-art-bible.md §3).
+   */
+  function makeDrum() {
+    var grp = new THREE.Group();
+    var steel = new THREE.MeshStandardMaterial({
+      color: col(0x4a1410), metalness: 0.8, roughness: 0.45,
+    });
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.5, 14), steel);
+    body.position.y = 0.75; grp.add(body);
+    [0.42, 1.08].forEach(function (y) {
+      var rib = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.1, 14), steel);
+      rib.position.y = y; grp.add(rib);
+    });
+    var band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.64, 0.64, 0.22, 14),
+      new THREE.MeshBasicMaterial({ color: col(PAL.blast) })
+    );
+    band.position.y = 1.42; grp.add(band);
+    return grp;
   }
 
   /**
@@ -759,25 +1001,81 @@
    * `material.color` sudah linear, jadi tiap warna harus dikonversi sekali —
    * kalau tidak, seluruh arena tampak satu tingkat terlalu terang dan pucat.
    */
+  /**
+   * Apakah context kanvas ini benar-benar bisa menggambar?
+   *
+   * Uji geometri (tools/render3d_test.js) menjalankan berkas ini di Node
+   * dengan kanvas tiruan yang setiap metodenya no-op. Tekstur prosedural
+   * harus menyerah dengan rapi di sana, bukan melempar — kalau tidak, satu
+   * gradien menjatuhkan seluruh suite yang sebenarnya menguji matematika
+   * kamera dan tidak peduli pada piksel.
+   */
+  function canPaint(g) {
+    if (!g || typeof g.createLinearGradient !== 'function') return false;
+    var probe = g.createLinearGradient(0, 0, 0, 1);
+    return !!(probe && typeof probe.addColorStop === 'function');
+  }
+
   function col(hex) {
     return new THREE.Color(hex).convertSRGBToLinear();
   }
 
-  /** Gate labels ("x2", "+8", "-5") as cached canvas textures. */
+  /**
+   * Label gerbang sebagai HOLOGRAM, bukan papan nama.
+   *
+   * Versi sebelumnya adalah persegi hijau/merah pekat dengan teks sistem —
+   * bahasa visual aplikasi anak-anak, dan satu-satunya benda di layar yang
+   * tidak mungkin ada di dunia key art. Yang menggantikannya: kaca gelap
+   * tipis, bingkai neon, sudut penanda, dan angka bercahaya. Hijau dibuang
+   * sama sekali; gerbang baik memakai cyan pemain, gerbang buruk memakai
+   * merah ancaman, persis seperti arti warna di art bible.
+   */
   function labelTexture(text, positive) {
     var key = text + (positive ? '+' : '-');
     if (labelCache[key]) return labelCache[key];
     var c = document.createElement('canvas');
     c.width = 256; c.height = 128;
     var g = c.getContext('2d');
-    g.fillStyle = positive ? 'rgba(14,52,40,0.92)' : 'rgba(58,14,14,0.92)';
-    g.fillRect(0, 0, 256, 128);
-    g.strokeStyle = positive ? '#3ddc97' : '#ff4d3d'; g.lineWidth = 8;
-    g.strokeRect(4, 4, 248, 120);
-    g.fillStyle = positive ? '#d6ffe9' : '#ffd9d4';
-    g.font = 'bold 76px system-ui, sans-serif';
+    if (!canPaint(g)) return null;
+    var neon = positive ? '#2be8ff' : '#ff2a2a';
+
+    // Kaca: gelap di tengah, sedikit lebih terang ke tepi atas.
+    var glass = g.createLinearGradient(0, 128, 0, 0);
+    glass.addColorStop(0, positive ? 'rgba(6,24,34,0.55)' : 'rgba(34,6,8,0.55)');
+    glass.addColorStop(1, positive ? 'rgba(14,52,70,0.30)' : 'rgba(70,12,14,0.30)');
+    g.fillStyle = glass; g.fillRect(0, 0, 256, 128);
+
+    // Garis pindai horizontal: tanda paling murah bahwa ini proyeksi.
+    g.strokeStyle = positive ? 'rgba(43,232,255,0.10)' : 'rgba(255,42,42,0.10)';
+    g.lineWidth = 2;
+    for (var y = 6; y < 128; y += 9) {
+      g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke();
+    }
+
+    // Bingkai: hanya sudut, tidak tertutup penuh. Bingkai penuh terbaca
+    // sebagai papan; sudut terbaca sebagai antarmuka.
+    g.strokeStyle = neon; g.lineWidth = 5;
+    [[8, 8, 1, 1], [248, 8, -1, 1], [8, 120, 1, -1], [248, 120, -1, -1]].forEach(function (k) {
+      g.beginPath();
+      g.moveTo(k[0] + k[2] * 34, k[1]);
+      g.lineTo(k[0], k[1]);
+      g.lineTo(k[0], k[1] + k[3] * 26);
+      g.stroke();
+    });
+    // Pita tipis atas-bawah menyatukan keempat sudut tanpa mengurungnya.
+    g.globalAlpha = 0.45;
+    g.lineWidth = 2;
+    g.beginPath(); g.moveTo(8, 8); g.lineTo(248, 8); g.moveTo(8, 120); g.lineTo(248, 120); g.stroke();
+    g.globalAlpha = 1;
+
+    // Angka: bercahaya, bukan sekadar berwarna.
+    g.font = 'bold 72px ui-monospace, "SF Mono", Menlo, monospace';
     g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(text, 128, 68);
+    g.shadowColor = neon; g.shadowBlur = 26;
+    g.fillStyle = neon; g.fillText(text, 128, 66);
+    g.shadowBlur = 12;
+    g.fillStyle = '#ffffff'; g.fillText(text, 128, 66);
+
     var tex = new THREE.CanvasTexture(c);
     tex.encoding = THREE.sRGBEncoding;
     labelCache[key] = tex;
@@ -845,6 +1143,21 @@
     // Cahaya NEON: langit ungu dingin dari atas, kunci putih-biru dari depan
     // kanan (ini yang memahat zirah pemain), dan isian magenta lemah dari
     // sisi dinding supaya karakter ikut memungut warna lorong.
+    // Environment map: lorong itu sendiri, disederhanakan jadi enam sisi.
+    //
+    // Tanpa ini, setiap material metalness tinggi menjadi hitam pekat —
+    // logam hanyalah permukaan yang memantulkan sekitarnya, dan kalau tidak
+    // ada sekitar untuk dipantulkan, ia tidak punya apa-apa untuk
+    // ditampilkan. Inilah satu perbedaan teknis terbesar antara render yang
+    // terbaca "plastik" dan yang terbaca "logam": bukan warna, bukan
+    // poligon, melainkan ada-tidaknya pantulan.
+    //
+    // Isinya sengaja kasar: gelap di atas, magenta dari kedua sisi (dinding),
+    // cyan lemah dari bawah (kisi lantai). Delapan piksel pun sudah cukup,
+    // karena yang dibaca mata hanyalah ARAH datangnya cahaya.
+    var envMap = makeEnvironment();
+    if (envMap) scene.environment = envMap;
+
     scene.add(new THREE.HemisphereLight(0x6b7fd4, 0x14091f, 0.55));
     var sun = new THREE.DirectionalLight(0xdce6f2, 1.25);
     sun.position.set(10, 26, 16); scene.add(sun);
@@ -860,13 +1173,65 @@
     floor.position.set(0, 0, -ARENA.depth / 2 + (APRON - APRON_FAR) / 2);
     scene.add(floor);
 
-    var wallMat = new THREE.MeshLambertMaterial({
-      color: col(PAL.wall), emissive: col(PAL.wallGlow), emissiveIntensity: 1.1,
+    var wallLen = ARENA.depth + APRON;
+    var wallTex = makeWallTexture();
+    // Satu panel tiap 7 unit. Percobaan pertama memakai 2,5 dan hasilnya
+    // deretan balok terang yang terbaca sebagai gigi — pengulangan yang
+    // terlalu rapat selalu berubah jadi motif, dan motif terbaca sebagai
+    // mainan. Panel lebar memberi skala tanpa menjadi pola.
+    // Sumbu u tekstur berjalan di sepanjang lorong pada sisi panjang kotak,
+    // jadi pengulangan dipasang di u — bukan di v. Versi pertama memasangnya
+    // di v: gradien gelap-ke-magenta berulang sepuluh kali ke ARAH TINGGI
+    // dinding, yang di layar terbaca sebagai tumpukan batu bata terang.
+    if (wallTex) wallTex.repeat.set(wallLen / 7, 1);
+    var panelMat = new THREE.MeshStandardMaterial({
+      map: wallTex, emissiveMap: wallTex,
+      color: wallTex ? new THREE.Color(0xffffff) : col(PAL.wall),
+      emissive: wallTex ? new THREE.Color(0xffffff) : col(PAL.wallGlow),
+      emissiveIntensity: 0.55, metalness: 0.45, roughness: 0.42,
     });
+    var darkMat = new THREE.MeshStandardMaterial({
+      color: col(0x120a1c), metalness: 0.6, roughness: 0.5,
+    });
+    // Tepi atas dibuat sebagai material tersendiri dan bukan bagian dari
+    // tekstur: permukaan atas kotak memakai pemetaan UV yang sama sekali
+    // berbeda dari sisinya, dan memaksakan satu tekstur ke keduanya adalah
+    // persis yang membuat dinding tadi belang.
+    var crestMat = new THREE.MeshBasicMaterial({ color: col(PAL.wallGlow) });
+    // Urutan material BoxGeometry: +x, -x, +y, -y, +z, -z.
+    var wallMats = [panelMat, panelMat, crestMat, darkMat, darkMat, darkMat];
     [-1, 1].forEach(function (s) {
-      var w = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.8, ARENA.depth + APRON), wallMat);
+      var w = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.8, wallLen), wallMats);
       w.position.set(s * (ARENA.halfWidth + 0.22), 0.9, -ARENA.depth / 2 + APRON / 2);
       scene.add(w);
+
+      // Tumpahan cahaya dinding ke lantai. Tanpa bloom sungguhan (tiga.js di
+      // sini tidak membawa EffectComposer), inilah yang membuat neon terbaca
+      // sebagai CAHAYA dan bukan sebagai cat: satu pita aditif yang
+      // melebar di lantai persis di kaki dinding.
+      var spill = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.2, wallLen),
+        new THREE.MeshBasicMaterial({
+          color: col(PAL.wallGlow), transparent: true, opacity: 0.16,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        })
+      );
+      spill.rotation.x = -Math.PI / 2;
+      spill.position.set(s * (ARENA.halfWidth - 0.7), 0.02, -ARENA.depth / 2 + APRON / 2);
+      scene.add(spill);
+
+      // Halo tegak di sisi dalam dinding: tepi yang mekar, bukan tepi yang
+      // dipotong pisau.
+      var halo = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.1, wallLen),
+        new THREE.MeshBasicMaterial({
+          color: col(PAL.wallGlow), transparent: true, opacity: 0.22,
+          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        })
+      );
+      halo.rotation.y = Math.PI / 2;
+      halo.position.set(s * (ARENA.halfWidth - 0.04), 1.5, -ARENA.depth / 2 + APRON / 2);
+      scene.add(halo);
     });
 
     var line = new THREE.Mesh(
@@ -892,7 +1257,11 @@
     });
     pools.gatePanels = makePool(groups.gates, function () {
       return new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.93, side: THREE.DoubleSide }));
+        new THREE.MeshBasicMaterial({
+          transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+          // Aditif: hologram menambah cahaya ke lorong, tidak menutupinya.
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
     });
     pools.obstacles = makePool(groups.obstacles, function () { return new THREE.Group(); });
     pools.bossParts = makePool(groups.boss, function () { return new THREE.Group(); });
@@ -1231,7 +1600,10 @@
         actor.root.rotation.y = 0;              // menghadap -Z, arah musuh
         if (actor.lock <= 0) play(actor, moving ? 'run' : 'idle');
         // Pemain digambar lebih besar: ia jangkar komposisi key art.
-        actor.root.scale.setScalar(charScale('trooper') * 1.35);
+        // 2,53 = PLAYER_H 4,86 / CHAR_HEIGHT 1,92. Kembar dari PLAYER_SCALE
+        // di arena_view.gd; keduanya harus berubah bersama, karena angka itu
+        // bagian dari solusi kamera, bukan selera.
+        actor.root.scale.setScalar(charScale('trooper') * 2.53);
         if (fresh) {
           oneShot(actor, 'shoot', 0.22);
           if (actor.muzzle) {
