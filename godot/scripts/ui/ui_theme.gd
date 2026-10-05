@@ -52,6 +52,7 @@ static func palette(theme: Dictionary) -> Dictionary:
 		"bg_bottom": _color(theme, "bgBottom", "#070A14"),
 		"grid": _color(theme, "grid", "#1E8FA8"),
 		"player": _color(theme, "player", "#DCE6F2"),
+		"player_deep": _color(theme, "playerDeep", "#2E5BD8"),
 		"tracer": _color(theme, "tracer", "#FF2A2A"),
 		"chain": _color(theme, "chain", "#A64BFF"),
 		"bumper_glow": _color(theme, "bumperGlow", "#FF9BEE"),

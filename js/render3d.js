@@ -72,6 +72,10 @@
     fog: 0x2a1340,
     tracer: 0xff2a2a,
     blast: 0xff9a2e,
+    // Zirah pemain. Kembar dari artDirection di Config/arena_config.json.
+    playerSteel: 0xdce6f2,
+    playerDeep: 0x2e5bd8,
+    playerCyan: 0x2be8ff,
   };
 
   // Props arena (tools/build_assets.py). Hanya benda mati: karakter TIDAK ada
@@ -112,7 +116,10 @@
   // Peran -> karakter, senjata, dan klip. Hanya PEMILIHAN; tidak ada satu pun
   // angka di sini yang mengubah isi berkasnya.
   var CAST = {
-    trooper: { model: 'Knight', right: 'sword_1handed', left: 'shield_round_color' },
+    // Pemain tidak memakai senjata pack: pedang dan perisai fantasi dibuang,
+    // zirahnya dicat ulang, senapannya dibangun prosedural. Kembar dari CAST
+    // di godot/scripts/view/character_pool.gd. Lihat docs/00-art-bible.md §3.
+    trooper: { model: 'Knight', skin: 'armor' },
     grunt: { model: 'Rogue', right: 'dagger' },
     runner: { model: 'Ranger', right: 'bow_withString' },
     brute: { model: 'Barbarian', right: 'axe_2handed' },
@@ -427,7 +434,7 @@
       left: recipe.left ? items[recipe.left] : null,
     };
     rigCount++;
-    loaded[kind === 'trooper' ? 'soldier' : kind] = frozenIdle(rigs[kind]);
+    loaded[kind === 'trooper' ? 'soldier' : kind] = frozenIdle(rigs[kind], kind);
   }
 
   /**
@@ -439,9 +446,10 @@
    * tiga puluh musuh di ujung lorong tidak menelan tiga puluh pembaruan
    * tulang per frame.
    */
-  function frozenIdle(rig) {
+  function frozenIdle(rig, kind) {
     var proto = cloneSkinned(rig.scene);
     attachWeapons(proto, rig);
+    if (kind && CAST[kind].skin === 'armor') wearArmor(proto);
     var idle = rig.animations.filter(function (c) { return c.name === 'idle'; })[0];
     if (idle) {
       var mixer = new THREE.AnimationMixer(proto);
@@ -504,6 +512,57 @@
    * verteks yang dipindah, tidak ada mesh yang digabung — persis seperti
    * menaruh benda di tangan.
    */
+  /**
+   * Mengecat rig jadi zirah sci-fi dan menggantungkan senapan prosedural.
+   *
+   * Key art menunjukkan satu prajurit hard-surface biru-putih; rig yang
+   * tersedia adalah ksatria fantasi bertekstur emas. Teksturnya dibuang
+   * sepenuhnya (bukan dibaurkan — sisa emas 10% pun langsung terbaca sebagai
+   * fantasi) dan diganti material metalik steel dengan emissive cyan tipis,
+   * yang menjaga siluet tetap terpisah dari lantai gelap.
+   *
+   * Kembar dari shaders/player_armor.gdshader; Godot melakukan hal yang sama
+   * dengan fresnel sungguhan, yang tidak sepadan biayanya di WebGL ini.
+   */
+  function wearArmor(root) {
+    var armor = new THREE.MeshStandardMaterial({
+      color: col(PAL.playerSteel),
+      emissive: col(PAL.playerCyan),
+      emissiveIntensity: 0.35,
+      metalness: 0.72,
+      roughness: 0.34,
+    });
+    root.traverse(function (node) {
+      if (node.isMesh || node.isSkinnedMesh) node.material = armor;
+    });
+    var bone = root.getObjectByName(SOCKET.right);
+    if (bone) bone.add(makeRifle(armor));
+  }
+
+  /**
+   * Senapan: popor, badan, laras, inti menyala. Prosedural karena pada ukuran
+   * di layar ini satu-satunya hal yang harus benar adalah siluetnya — balok
+   * panjang dengan satu titik panas cyan di ujung.
+   */
+  function makeRifle(armor) {
+    var gun = new THREE.Group();
+    [[0.09, 0.22, 0.12, 0.02], [0.11, 0.34, 0.16, 0.30]].forEach(function (p) {
+      var box = new THREE.Mesh(new THREE.BoxGeometry(p[0], p[1], p[2]), armor);
+      box.position.y = p[3];
+      gun.add(box);
+    });
+    var barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.42, 8), armor);
+    barrel.position.y = 0.66;
+    gun.add(barrel);
+    var core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 8, 6),
+      new THREE.MeshBasicMaterial({ color: col(PAL.playerCyan) })
+    );
+    core.position.y = 0.88;
+    gun.add(core);
+    return gun;
+  }
+
   function attachWeapons(root, rig) {
     ['right', 'left'].forEach(function (hand) {
       var item = rig[hand];
@@ -532,6 +591,7 @@
     var root = cloneSkinned(rig.scene);
     root.scale.setScalar(rig.scale);
     attachWeapons(root, rig);
+    if (CAST[kind].skin === 'armor') wearArmor(root);
     var mixer = new THREE.AnimationMixer(root);
     var actions = {};
     rig.animations.forEach(function (clip) {

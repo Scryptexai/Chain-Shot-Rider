@@ -28,8 +28,6 @@ const APRON_FAR := 120.0
 ## Impact shells kept alive at once, and how long one lasts. Both are budget
 ## decisions: docs 08 caps active particles at 200, and these are the most
 ## frequent effect in the game.
-const IMPACT_POOL := 48
-const IMPACT_SECONDS := 0.35
 
 ## Kerumunan hiasan di balik gerbang spawn. Key art memperlihatkan musuh
 ## sampai ke garis kabut; arena hanya sepanjang 40 unit, jadi sisanya diisi
@@ -58,6 +56,7 @@ const PLAYER_SCALE := 1.35
 
 var _sim: SimWorld
 var _pal: Dictionary = {}
+var _player_rim: OmniLight3D = null
 ## Warna per tipe musuh, dibaca dari config.enemyTypes[].color. Dulu daftar
 ## konstanta di berkas ini, yang berarti palet hidup di dua tempat dan
 ## pelan-pelan menjadi dua palet berbeda.
@@ -82,10 +81,6 @@ var _floor: MeshInstance3D
 var _environment: WorldEnvironment
 var _obstacle_nodes: Array[Node3D] = []
 var _boss: Node3D
-var _impacts: Array[MeshInstance3D] = []
-var _impact_life := PackedFloat32Array()
-var _impact_scale := PackedFloat32Array()
-var _impact_next := 0
 var _chars: CharacterPool
 ## Darah terakhir tiap musuh, dibaca per indeks. Simulasi tidak mengirim event
 ## "kena pukul", tapi HP yang turun adalah sinyal yang sama persis dan tidak
@@ -111,7 +106,6 @@ func build(variant_index: int) -> void:
 	_build_floor()
 	_build_actors()
 	_build_far_crowd()
-	_build_impacts()
 	_fx = ArenaFx.new()
 	_fx.name = "ArenaFx"
 	add_child(_fx)
@@ -164,7 +158,6 @@ func render_frame() -> void:
 	_render_obstacles()
 	_render_boss()
 	_spawn_impacts()
-	_age_impacts()
 	_age_wall_hits(delta)
 	if _fx != null:
 		_fx.tick(delta)
@@ -317,6 +310,9 @@ func _build_actors() -> void:
 	_chars = CharacterPool.new()
 	_chars.name = "Characters"
 	add_child(_chars)
+	# Warna zirah dipasang SEBELUM warm(): materialnya dibangun saat aktor
+	# pertama lahir dan membaca nilai ini sekali.
+	_chars.set_player_skin(_pal["player"], _pal["player_deep"], _pal["primary"])
 	var roster: Array = ENEMY_UNITS.duplicate()
 	roster.append(PLAYER_UNIT)
 	roster.append(BOSS_UNIT)
@@ -505,29 +501,6 @@ func _cylinder(radius: float, height: float) -> Mesh:
 	return mesh
 
 
-## A fixed ring of impact shells, reused forever. Pooled rather than spawned
-## because a busy frame can produce dozens of kills, and allocating a node
-## per kill is exactly the per-frame garbage the budget forbids.
-func _build_impacts() -> void:
-	for i in range(IMPACT_POOL):
-		var shell := MeshInstance3D.new()
-		var mesh := SphereMesh.new()
-		mesh.radius = 1.0
-		mesh.height = 2.0
-		shell.mesh = mesh
-		var material := StandardMaterial3D.new()
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		material.albedo_color = _pal["primary"]
-		shell.material_override = material
-		shell.visible = false
-		add_child(shell)
-		_impacts.append(shell)
-		_impact_life.append(0.0)
-		_impact_scale.append(1.0)
-
-
 ## Reads this tick's events and lights a shell for each one worth seeing.
 ##
 ## Satu tempat membaca peristiwa, lima efek keluar dari sana. Alternatifnya —
@@ -535,6 +508,20 @@ func _build_impacts() -> void:
 ## atas daftar yang sama tiap frame, dan lima tempat yang bisa lupa menangani
 ## jenis peristiwa baru.
 func _spawn_impacts() -> void:
+	# Ledakan dibaca lebih dulu, karena peristiwa `kill` tidak membawa
+	# penyebabnya. Yang mati di dalam radius sebuah ledakan pada tick yang
+	# sama dianggap mati KARENA ledakan itu, dan ikut terlempar.
+	var blasts: Array[Vector3] = []
+	for entry in _sim.events:
+		var event: Dictionary = entry
+		if String(event.get("type", "")) == "explosion":
+			blasts.append(
+				Vector3(
+					float(event.get("x", 0.0)),
+					float(event.get("z", 0.0)),
+					float(event.get("radius", 3.0))
+				)
+			)
 	for entry in _sim.events:
 		var event: Dictionary = entry
 		var kind := String(event.get("type", ""))
@@ -548,7 +535,7 @@ func _spawn_impacts() -> void:
 				tint = _pal["enemy"]
 				if _chars != null:
 					var fallen := _unit_name(int(event.get("enemy", 0)) % ENEMY_UNITS.size())
-					_chars.drop_corpse(fallen, x, z)
+					_chars.drop_corpse(fallen, x, z, _blast_impulse(x, z, blasts))
 			"explosion":
 				radius = float(event.get("radius", 3.0))
 				tint = _pal["blast"]
@@ -565,7 +552,26 @@ func _spawn_impacts() -> void:
 					_fx.bounce_arc(Vector3(x, 0.7, -z))
 			_:
 				continue
-		_light_impact(Vector3(x, 0.6, -z), radius, tint)
+		if _fx != null:
+			_fx.impact(Vector3(x, 0.6, -z), radius, tint)
+
+
+## Lemparan untuk satu mayat: nol kalau ia mati di luar semua ledakan.
+##
+## Tenaganya memudar dari pusat ke tepi, dan selalu ada komponen ke atas —
+## lemparan yang murni mendatar menyeret mayat di lantai alih-alih
+## melontarkannya, dan dari sudut kamera serendah ini yang terbaca cuma
+## geseran aneh.
+func _blast_impulse(x: float, z: float, blasts: Array[Vector3]) -> Vector3:
+	for blast in blasts:
+		var away := Vector2(x - blast.x, z - blast.y)
+		var reach: float = blast.z
+		if away.length() > reach:
+			continue
+		var force := 1.0 - away.length() / maxf(reach, 0.001)
+		var dir := away.normalized() if away.length() > 0.01 else Vector2(0.0, -1.0)
+		return Vector3(dir.x, 1.0, -dir.y) * (3.0 + force * 7.0)
+	return Vector3.ZERO
 
 
 ## Menyalakan titik benturan di shader dinding, kalau benturannya memang di
@@ -608,41 +614,6 @@ func _update_heat(delta: float) -> void:
 	if _floor != null:
 		var material := _floor.material_override as ShaderMaterial
 		material.set_shader_parameter("combo_heat", _combo_heat)
-
-
-func _light_impact(where: Vector3, radius: float, tint: Color) -> void:
-	if _impacts.is_empty():
-		return
-	# Oldest slot wins when the pool is exhausted: a dropped effect is far
-	# cheaper than a frame spent growing the pool.
-	var index := _impact_next % _impacts.size()
-	_impact_next += 1
-	var shell := _impacts[index]
-	shell.position = where
-	shell.visible = true
-	_impact_life[index] = 1.0
-	_impact_scale[index] = radius
-	var material := shell.material_override as StandardMaterial3D
-	material.albedo_color = tint
-
-
-## Shells expand and fade on a square curve, which reads as a pop rather than
-## a balloon. Uses unscaled ticks so slow motion stretches them with the world.
-func _age_impacts() -> void:
-	var delta := float(Engine.get_frames_per_second())
-	var step := 1.0 / maxf(delta, 20.0) / IMPACT_SECONDS
-	for i in range(_impacts.size()):
-		if _impact_life[i] <= 0.0:
-			continue
-		_impact_life[i] = maxf(_impact_life[i] - step, 0.0)
-		var shell := _impacts[i]
-		if _impact_life[i] <= 0.0:
-			shell.visible = false
-			continue
-		var grow := 1.0 - _impact_life[i]
-		shell.scale = Vector3.ONE * _impact_scale[i] * (0.25 + grow * 0.9)
-		var material := shell.material_override as StandardMaterial3D
-		material.albedo_color.a = _impact_life[i] * _impact_life[i]
 
 
 func _render_enemies() -> void:
@@ -718,14 +689,40 @@ func _render_player() -> void:
 	actor.place(x, z, 0.0)
 	if actor.has_method("set_scale_multiplier"):
 		actor.call("set_scale_multiplier", PLAYER_SCALE)
+	_follow_rim(x, z)
 	if _squad_firing > 0.0:
 		actor.one_shot("shoot", 0.22)
 		# Kilatan moncong pemain BIRU, bukan oranye. Di key art itulah satu-
 		# satunya cara membedakan tembakan sendiri dari hujan tracer musuh
 		# dalam seperlima detik.
-		_light_impact(actor.muzzle_point(), 0.34, _pal["primary"])
+		if _fx != null:
+			_fx.impact(actor.muzzle_point(), 0.34, _pal["primary"])
 	elif actor.lock <= 0.0:
 		actor.play("run" if _squad_moving else "idle")
+
+
+## Satu lampu cyan kecil yang menempel di pemain.
+##
+## Di key art siluet pemain dipisahkan dari lantai gelap oleh cahaya tepi, dan
+## shader zirah hanya bisa menghasilkan tepi itu pada permukaan yang mengarah
+## ke kamera. Lampu ini mengurus sisanya: ia menumpahkan cyan ke lantai basah
+## di sekeliling kaki, yang sekaligus menjadi bayangan-terbalik pemain —
+## jauh lebih murah daripada pantulan sungguhan dan, pada jarak kamera ini,
+## tidak bisa dibedakan.
+func _follow_rim(x: float, z: float) -> void:
+	if _player_rim == null:
+		_player_rim = OmniLight3D.new()
+		_player_rim.name = "PlayerRim"
+		_player_rim.light_color = _pal["primary"]
+		_player_rim.light_energy = 2.4
+		_player_rim.omni_range = 4.6
+		_player_rim.omni_attenuation = 1.8
+		# Pemain satu-satunya badan yang pernah dapat lampu sendiri; sisanya
+		# diterangi lampu ruangan. Bayangan dimatikan karena ia akan
+		# memotong-motong kisi lantai persis di zona paling terbaca.
+		_player_rim.shadow_enabled = false
+		add_child(_player_rim)
+	_player_rim.position = Vector3(x, 1.4, -z)
 
 
 func _render_auto() -> void:

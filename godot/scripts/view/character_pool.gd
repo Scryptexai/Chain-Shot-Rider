@@ -62,7 +62,10 @@ const ANIM_FILES := [
 ## satu pun angka di sini yang mengubah isi berkasnya. Kembar dari CAST di
 ## js/render3d.js — kalau yang satu berubah, yang lain harus ikut.
 const CAST := {
-	"trooper": {"model": "Knight", "right": "sword_1handed", "left": "shield_round_color"},
+	# Pemain tidak memakai satu pun aset senjata pack: pedang dan perisai
+	# fantasi dibuang, zirahnya dicat ulang oleh ARMOR_SHADER, dan senjata
+	# api dibangun prosedural di _make_rifle(). Lihat docs/00-art-bible.md §3.
+	"trooper": {"model": "Knight", "skin": "armor"},
 	"grunt": {"model": "Rogue", "right": "dagger"},
 	"runner": {"model": "Ranger", "right": "bow_withString"},
 	"brute": {"model": "Barbarian", "right": "axe_2handed"},
@@ -85,6 +88,9 @@ const CLIP_SOURCE := {
 
 ## Tulang tempat senjata digantung, disediakan rig KayKit khusus untuk ini.
 const SOCKET := {"right": "handslot.r", "left": "handslot.l"}
+
+## Cat zirah sci-fi pemain. Lihat berkasnya untuk alasan tiap keputusannya.
+const ARMOR_SHADER := "res://shaders/player_armor.gdshader"
 
 ## Klip yang tidak boleh berulang: aksi sesaat yang harus berhenti di frame
 ## terakhirnya (roboh harus tetap roboh).
@@ -181,7 +187,14 @@ var _pools: Dictionary = {}
 var _used: Dictionary = {}
 var _corpses: Array = []
 var _corpse_life := PackedFloat32Array()
+## Lemparan mayat: kecepatan sisa dan laju jungkir, sejajar dengan _corpses.
+var _corpse_vel: Array[Vector3] = []
+var _corpse_spin: PackedFloat32Array = PackedFloat32Array()
 var _loaded := 0
+var _armor: ShaderMaterial = null
+var _armor_steel := Color("#DCE6F2")
+var _armor_deep := Color("#2E5BD8")
+var _armor_rim := Color("#2BE8FF")
 
 
 ## Memuat berkas pack untuk peran yang disebut. Dipanggil sekali sebelum run
@@ -224,6 +237,7 @@ func warm(kinds: Array) -> int:
 			"shoot": String(recipe.get("shoot", CLIP_SOURCE["shoot"])),
 			"right": recipe.get("right", ""),
 			"left": recipe.get("left", ""),
+			"skin": String(recipe.get("skin", "")),
 		}
 		_loaded += 1
 	return _loaded
@@ -328,7 +342,12 @@ func end(delta: float) -> void:
 
 ## Merobohkan satu tubuh di tempat musuh mati. Mayat bukan aktor pinjaman:
 ## ia harus tetap ada setelah musuhnya hilang dari simulasi.
-func drop_corpse(kind: String, x: float, z: float) -> void:
+## `impulse` adalah lemparan ledakan: murni tampilan, sama sekali tidak
+## kembali ke simulasi. Musuhnya sudah mati pada tick yang sama baik ia
+## terbang maupun tidak — yang ditambahkan hanyalah bukti bahwa ledakan itu
+## punya tenaga. Tanpa ini, satu drum yang meledak di tengah kerumunan
+## terbaca sebagai dua puluh unit yang sekadar menghilang.
+func drop_corpse(kind: String, x: float, z: float, impulse := Vector3.ZERO) -> void:
 	if not _rigs.has(kind):
 		return
 	var slot := -1
@@ -344,6 +363,8 @@ func drop_corpse(kind: String, x: float, z: float) -> void:
 			return
 		_corpses.append(actor)
 		_corpse_life.append(0.0)
+		_corpse_vel.append(Vector3.ZERO)
+		_corpse_spin.append(0.0)
 		slot = _corpses.size() - 1
 	elif _corpses[slot].kind != kind:
 		# Slot bebas tapi jenisnya salah: tubuh lama dibuang, diganti yang
@@ -359,7 +380,14 @@ func drop_corpse(kind: String, x: float, z: float) -> void:
 	corpse.current = ""
 	corpse.anim.speed_scale = 1.0
 	corpse.play("die", 0.0)
+	corpse.root.rotation.x = 0.0
+	corpse.root.rotation.z = 0.0
 	_corpse_life[slot] = CORPSE_SECONDS
+	_corpse_vel[slot] = impulse
+	# Jungkirnya diturunkan dari lemparannya sendiri: makin keras terlempar,
+	# makin cepat berputar. Arahnya ikut tanda x supaya dua mayat di sisi
+	# berlawanan dari ledakan tidak berputar ke arah yang sama.
+	_corpse_spin[slot] = signf(impulse.x) * impulse.length() * 0.9
 
 
 func corpse_count() -> int:
@@ -394,8 +422,106 @@ func _spawn(kind: String) -> Actor:
 	root.add_child(player)
 
 	var socket := _attach_items(root, rig)
+	if String(rig.get("skin", "")) == "armor":
+		_wear_armor(root, socket)
 	add_child(root)
 	return Actor.new(kind, root, player, socket, _all_meshes(root))
+
+
+## Warna zirah pemain, diambil dari palet ruangan yang sedang aktif.
+##
+## Dipanggil sebelum warm(): materialnya dibangun sekali saat aktor pertama
+## lahir, jadi perubahan setelah itu tidak akan terbaca.
+func set_player_skin(steel: Color, deep: Color, rim: Color) -> void:
+	_armor_steel = steel
+	_armor_deep = deep
+	_armor_rim = rim
+	if _armor != null:
+		_paint(_armor)
+
+
+func _paint(material: ShaderMaterial) -> void:
+	material.set_shader_parameter("steel_color", _armor_steel)
+	material.set_shader_parameter("deep_color", _armor_deep)
+	material.set_shader_parameter("rim_color", _armor_rim)
+
+
+## Satu material dipakai bersama semua mesh pemain: ia tidak pernah berbeda
+## per bagian tubuh, dan berbagi material berarti berbagi state GPU.
+func _armor_material() -> ShaderMaterial:
+	if _armor != null:
+		return _armor
+	var shader: Shader = load(ARMOR_SHADER)
+	if shader == null:
+		return null
+	_armor = ShaderMaterial.new()
+	_armor.shader = shader
+	_paint(_armor)
+	return _armor
+
+
+## Mengecat seluruh tubuh dan menggantungkan senjata prosedural.
+func _wear_armor(root: Node3D, socket: Node3D) -> void:
+	var material := _armor_material()
+	if material == null:
+		return
+	for mesh in _all_meshes(root):
+		(mesh as MeshInstance3D).material_override = material
+	if socket != null:
+		socket.add_child(_make_rifle(material))
+
+
+## Senjata api sederhana: popor, badan, laras, inti menyala.
+##
+## Prosedural dan bukan model, karena satu-satunya hal yang harus benar pada
+## ukuran di layar ini adalah SILUET-nya — balok panjang horizontal dengan
+## satu titik panas cyan di ujungnya. Begitu ada model sci-fi CC0 yang
+## sungguhan, fungsi ini diganti satu baris load().
+func _make_rifle(material: ShaderMaterial) -> Node3D:
+	var gun := Node3D.new()
+	gun.name = "Rifle"
+	var parts := [
+		# [ukuran, posisi di sumbu senjata]
+		[Vector3(0.09, 0.22, 0.12), 0.02],
+		[Vector3(0.11, 0.34, 0.16), 0.30],
+	]
+	for part in parts:
+		var box := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = part[0]
+		box.mesh = mesh
+		box.position = Vector3(0.0, part[1], 0.0)
+		box.material_override = material
+		gun.add_child(box)
+	var barrel := MeshInstance3D.new()
+	var tube := CylinderMesh.new()
+	tube.top_radius = 0.035
+	tube.bottom_radius = 0.045
+	tube.height = 0.42
+	tube.radial_segments = 8
+	barrel.mesh = tube
+	barrel.position = Vector3(0.0, 0.66, 0.0)
+	barrel.material_override = material
+	gun.add_child(barrel)
+	# Inti cyan di ujung laras: titik yang sama tempat kilatan tembakan lahir,
+	# jadi senjata tetap terbaca sebagai milik pemain bahkan saat diam.
+	var core := MeshInstance3D.new()
+	var bulb := SphereMesh.new()
+	bulb.radius = 0.055
+	bulb.height = 0.11
+	bulb.radial_segments = 8
+	bulb.rings = 4
+	core.mesh = bulb
+	core.position = Vector3(0.0, 0.88, 0.0)
+	var glow := StandardMaterial3D.new()
+	glow.albedo_color = _armor_rim
+	glow.emission_enabled = true
+	glow.emission = _armor_rim
+	glow.emission_energy_multiplier = 3.0
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core.material_override = glow
+	gun.add_child(core)
+	return gun
 
 
 ## Merakit AnimationPlayer berisi lima klip yang dipakai game.
@@ -606,7 +732,28 @@ func _age_corpses(delta: float) -> void:
 		if _corpse_life[i] <= 0.0:
 			corpse.root.visible = false
 			continue
+		_fly(corpse, i, delta)
 		# Memudar di setengah detik terakhir, bukan hilang mendadak.
 		var alpha := minf(_corpse_life[i] / CORPSE_FADE, 1.0)
 		for mesh in corpse.meshes:
 			(mesh as MeshInstance3D).transparency = 1.0 - alpha
+
+
+## Satu langkah balistik untuk mayat yang sedang terlempar.
+##
+## Gravitasinya 26 dan bukan 9,8: pada skala karakter 2x dan kamera sependek
+## ini, gravitasi sungguhan terbaca seperti rekaman lambat. Yang dicari
+## adalah lemparan pendek dan keras yang mendarat dalam setengah detik.
+func _fly(corpse: Actor, slot: int, delta: float) -> void:
+	var velocity: Vector3 = _corpse_vel[slot]
+	if velocity == Vector3.ZERO:
+		return
+	corpse.root.position += velocity * delta
+	corpse.root.rotation.x += _corpse_spin[slot] * delta
+	velocity.y -= 26.0 * delta
+	if corpse.root.position.y <= 0.0:
+		# Mendarat: berhenti total, tidak memantul. Mayat yang memantul
+		# terbaca sebagai boneka karet.
+		corpse.root.position.y = 0.0
+		velocity = Vector3.ZERO
+	_corpse_vel[slot] = velocity

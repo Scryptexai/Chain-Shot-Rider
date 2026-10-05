@@ -25,6 +25,12 @@ const ARC_SECONDS := 0.2
 const ARC_SEGMENTS := 7
 
 ## Cincin kejut di lantai saat sesuatu meledak.
+## Kulit benturan: satu bola aditif yang mengembang lalu padam. Dipakai oleh
+## SEMUA peristiwa (kill, ledakan, pantulan, kilatan moncong) dengan warna
+## dan radius berbeda — satu kolam, empat arti, dibedakan hanya oleh warna.
+const IMPACT_POOL := 48
+const IMPACT_SECONDS := 0.35
+
 const RING_POOL := 8
 const RING_SECONDS := 0.45
 
@@ -49,6 +55,11 @@ var _ring_life := PackedFloat32Array()
 var _ring_scale := PackedFloat32Array()
 var _ring_next := 0
 
+var _impacts: Array[MeshInstance3D] = []
+var _impact_life := PackedFloat32Array()
+var _impact_scale := PackedFloat32Array()
+var _impact_next := 0
+
 
 ## Dipanggil sekali oleh ArenaView, dengan palet varian yang sedang berjalan.
 func build(pal: Dictionary, seed_value: int) -> void:
@@ -57,6 +68,7 @@ func build(pal: Dictionary, seed_value: int) -> void:
 	_build_tracers()
 	_build_arcs()
 	_build_rings()
+	_build_impacts()
 
 
 func bind_sim(sim: SimWorld) -> void:
@@ -68,6 +80,7 @@ func tick(delta: float) -> void:
 	_tick_tracers(delta)
 	_age_arcs(delta)
 	_age_rings(delta)
+	_age_impacts()
 
 
 ## Hujan tracer musuh (docs/17 §17.5 E3).
@@ -294,3 +307,62 @@ func _make_multimesh(mesh: Mesh, tint: Color, capacity: int) -> MultiMeshInstanc
 	instance.material_override = material
 	add_child(instance)
 	return instance
+
+
+## A fixed ring of impact shells, reused forever. Pooled rather than spawned
+## because a busy frame can produce dozens of kills, and allocating a node
+## per kill is exactly the per-frame garbage the budget forbids.
+func _build_impacts() -> void:
+	for i in range(IMPACT_POOL):
+		var shell := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = 1.0
+		mesh.height = 2.0
+		shell.mesh = mesh
+		var material := StandardMaterial3D.new()
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		material.albedo_color = _pal["primary"]
+		shell.material_override = material
+		shell.visible = false
+		add_child(shell)
+		_impacts.append(shell)
+		_impact_life.append(0.0)
+		_impact_scale.append(1.0)
+
+
+## Menyalakan satu kulit benturan di titik mana pun.
+func impact(where: Vector3, radius: float, tint: Color) -> void:
+	if _impacts.is_empty():
+		return
+	# Oldest slot wins when the pool is exhausted: a dropped effect is far
+	# cheaper than a frame spent growing the pool.
+	var index := _impact_next % _impacts.size()
+	_impact_next += 1
+	var shell := _impacts[index]
+	shell.position = where
+	shell.visible = true
+	_impact_life[index] = 1.0
+	_impact_scale[index] = radius
+	var material := shell.material_override as StandardMaterial3D
+	material.albedo_color = tint
+
+
+## Shells expand and fade on a square curve, which reads as a pop rather than
+## a balloon. Uses unscaled ticks so slow motion stretches them with the world.
+func _age_impacts() -> void:
+	var delta := float(Engine.get_frames_per_second())
+	var step := 1.0 / maxf(delta, 20.0) / IMPACT_SECONDS
+	for i in range(_impacts.size()):
+		if _impact_life[i] <= 0.0:
+			continue
+		_impact_life[i] = maxf(_impact_life[i] - step, 0.0)
+		var shell := _impacts[i]
+		if _impact_life[i] <= 0.0:
+			shell.visible = false
+			continue
+		var grow := 1.0 - _impact_life[i]
+		shell.scale = Vector3.ONE * _impact_scale[i] * (0.25 + grow * 0.9)
+		var material := shell.material_override as StandardMaterial3D
+		material.albedo_color.a = _impact_life[i] * _impact_life[i]
