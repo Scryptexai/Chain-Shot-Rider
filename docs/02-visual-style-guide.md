@@ -1,4 +1,19 @@
-# 2. Visual Style Guide — CHAIN RIDER
+# 2. Visual Style Guide — CHAIN RIDER  ⚠️ DEPRECATED
+
+> **Dokumen ini sudah tidak berlaku sejak rombakan NEON (2026-10-05).**
+>
+> Arah visual fantasi di bawah — palet emas/lumut/batu, karakter KayKit
+> sebagai benda paling terang, neon yang dikurangi — telah **dibuang total**
+> atas keputusan desain. Arah yang berlaku sekarang ada di:
+>
+> * [`docs/17-keyart-neon-analysis.md`](17-keyart-neon-analysis.md) — palet,
+>   kamera, dan spesifikasi efek, diturunkan dari key art
+> * [`docs/18-neon-rebuild-roadmap.md`](18-neon-rebuild-roadmap.md) — rencana
+>   dan status integrasinya
+>
+> Yang masih berguna di sini hanyalah prinsip produksinya (*readability beats
+> beauty*, batas segitiga, aturan LOD). Setiap angka warna di bawah sudah
+> salah.
 
 ![Referensi arena 2.5D](images/arena-2_5d-reference.png)
 

@@ -105,6 +105,8 @@ class Actor:
 	## harus menyentuh kesembilannya.
 	var meshes: Array
 	var current := ""
+	## Skala rig apa adanya, sebelum pemain membesarkannya.
+	var base_scale := 1.0
 	## Sisa detik sebelum klip sesaat boleh diganti klip lain.
 	var lock := 0.0
 	## Fase dan kecepatan sendiri-sendiri. Tanpa ini tiga puluh musuh
@@ -117,6 +119,7 @@ class Actor:
 	) -> void:
 		kind = unit
 		root = node
+		base_scale = node.scale.x
 		anim = player
 		muzzle = socket
 		meshes = skins
@@ -127,6 +130,16 @@ class Actor:
 	func place(x: float, z: float, facing: float) -> void:
 		root.position = Vector3(x, 0.0, -z)
 		root.rotation.y = facing
+
+	## Pembesar ukuran, dipakai hanya oleh pemain.
+	##
+	## Aktor dipinjam dari kolam bersama, jadi skala harus disetel ulang tiap
+	## frame: badan yang kemarin jadi pemain bisa jadi musuh hari ini, dan
+	## seorang grunt sebesar 1,35x akan terbaca sebagai elite yang tidak ada.
+	## Karena itu pengalinya selalu dihitung dari base_scale rig, bukan
+	## ditumpuk di atas skala frame sebelumnya.
+	func set_scale_multiplier(factor: float) -> void:
+		root.scale = Vector3.ONE * base_scale * factor
 
 	func play(name: String, blend := 0.12) -> void:
 		if current == name or not anim.has_animation(name):
@@ -289,6 +302,10 @@ func take(kind: String) -> Actor:
 	_used[kind] = index + 1
 	var taken: Actor = pool[index]
 	taken.root.visible = true
+	# Skala dikembalikan ke ukuran rig setiap kali aktor dipinjam. Pemain
+	# membesarkan badannya sendiri setelah ini; tanpa reset, badan bekas
+	# pemain akan muncul kembali sebagai musuh raksasa di frame berikutnya.
+	taken.root.scale = Vector3.ONE * taken.base_scale
 	return taken
 
 

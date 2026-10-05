@@ -1,11 +1,16 @@
 extends Node3D
 ## Draws the simulation and owns the look of the arena. Owns no rules.
 ##
-## Enemies and troops are drawn with MultiMesh rather than one node each. At
-## 200 enemies plus a squad of 100, a node per unit means hundreds of transform
-## updates and draw calls per frame on a Snapdragon 660, which is the whole
-## frame budget spent on bookkeeping. One MultiMesh per unit type is a single
-## draw call regardless of count.
+## Arah visual: NEON, dari key art di docs/17-keyart-neon-analysis.md.
+## Rencana rombakannya di docs/18-neon-rebuild-roadmap.md. Satu hal yang
+## TIDAK berubah di sana: berkas ini tidak memiliki satu pun aturan main.
+##
+## Enemies are drawn with MultiMesh rather than one node each. At 200 enemies
+## a node per unit means hundreds of transform updates and draw calls per
+## frame on a Snapdragon 660, which is the whole frame budget spent on
+## bookkeeping. One MultiMesh per unit type is a single draw call regardless
+## of count. Hujan tracer dan kerumunan jauh memakai jalur yang sama persis,
+## dan karena itulah keduanya mampu ada sama sekali.
 ##
 ## Simulation space is (x, z) with z running away from the player. World space
 ## maps that to (x, y, -z) so the camera can sit at +Z looking down the lane.
@@ -20,44 +25,57 @@ const APRON := 34.0
 ## kabut, bukan berhenti sebagai garis lurus di sepertiga atas layar.
 const APRON_FAR := 120.0
 
-const MAX_TROOPS_DRAWN := 128
 ## Impact shells kept alive at once, and how long one lasts. Both are budget
 ## decisions: docs 08 caps active particles at 200, and these are the most
 ## frequent effect in the game.
 const IMPACT_POOL := 48
 const IMPACT_SECONDS := 0.35
 
-## Enemy palette in config enemyTypes order, lifted verbatim from
-## docs/02-visual-style-guide.md so art, prototype and build cannot drift
-## into three different reds.
-const ENEMY_COLORS := [
-	Color("#FF4D3D"),  # grunt    — Enemy Red
-	Color("#FF8A2B"),  # runner   — Enemy Orange
-	Color("#B14DFF"),  # brute    — Bumper Magenta, reads as heavy
-	Color("#FFC93C"),  # shielder — Enemy Yellow
-	Color("#FF3DBE"),  # splitter — Magenta Hot
-	Color("#FF6A1F"),  # bomber   — hot orange
-]
+## Kerumunan hiasan di balik gerbang spawn. Key art memperlihatkan musuh
+## sampai ke garis kabut; arena hanya sepanjang 40 unit, jadi sisanya diisi
+## siluet yang tidak pernah masuk simulasi dan tidak pernah bisa ditembak.
+const FAR_CROWD := 220
+const FAR_CROWD_FROM := 44.0
+const FAR_CROWD_TO := 96.0
 
 const FLOOR_SHADER := "res://shaders/floor_grid.gdshader"
-## Batu dinding. Satu-satunya warna arena yang bukan dari palet varian: batu
-## tetap batu di kelima tema, dan pendar rune-lah yang ikut berganti warna.
-const WALL_STONE := Color("#4A4336")
+const WALL_SHADER := "res://shaders/bumper_wall.gdshader"
+const BACKDROP_SHADER := "res://shaders/backdrop.gdshader"
 
-## Nama unit ber-tulang dalam urutan enemyTypes config, plus prajurit dan bos.
+## Nama unit ber-tulang dalam urutan enemyTypes config, plus pemain dan bos.
 ## Urutannya mengikat indeks tipe simulasi ke sebuah berkas GLB; kalau config
 ## menambah jenis musuh, daftar ini ikut bertambah atau unit itu jatuh ke
 ## jalur MultiMesh dengan sendirinya.
 const ENEMY_UNITS := ["grunt", "runner", "brute", "shielder", "splitter", "bomber"]
-const SQUAD_UNIT := "trooper"
+const PLAYER_UNIT := "trooper"
 const BOSS_UNIT := "boss"
+
+## Pemain digambar lebih besar daripada siapa pun di arena. Itu bukan selera:
+## key art menempatkan satu prajurit setinggi 19% layar sebagai jangkar
+## komposisi, dan satu unit seukuran musuh tidak akan pernah memegang peran
+## itu (docs/17 §17.2).
+const PLAYER_SCALE := 1.35
 
 var _sim: SimWorld
 var _pal: Dictionary = {}
+## Warna per tipe musuh, dibaca dari config.enemyTypes[].color. Dulu daftar
+## konstanta di berkas ini, yang berarti palet hidup di dua tempat dan
+## pelan-pelan menjadi dua palet berbeda.
+var _enemy_colors: PackedColorArray = PackedColorArray()
 var _enemy_mm: MultiMeshInstance3D
-var _troop_mm: MultiMeshInstance3D
 var _auto_mm: MultiMeshInstance3D
+var _far_crowd_mm: MultiMeshInstance3D
 var _chain: MeshInstance3D
+var _chain_trail: MeshInstance3D
+var _chain_trail_mesh: ImmediateMesh
+## Jejak peluru chain dalam ruang dunia, titik terbaru di depan.
+var _chain_points: Array[Vector3] = []
+var _backdrop: MeshInstance3D
+var _wall_mats: Array[ShaderMaterial] = []
+## Empat benturan dinding terakhir: x = lane z, y = sisa umur.
+var _wall_hits := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+var _wall_hit_next := 0
+var _fx: ArenaFx
 var _gate_pool: Array[MeshInstance3D] = []
 var _gate_labels: Array[Label3D] = []
 var _floor: MeshInstance3D
@@ -75,6 +93,8 @@ var _chars: CharacterPool
 var _enemy_hp_seen := PackedFloat32Array()
 var _alpha: float = 1.0
 var _squad_firing := 0.0
+## Tingkat "panas" combo 0..1, dikirim ke lantai supaya kisinya ikut menyala.
+var _combo_heat := 0.0
 ## Posisi squad frame lalu: dari sini datang jawaban "sedang jalan atau diam",
 ## yang menentukan klip lari atau siaga. Simulasi tidak menyimpan kecepatan
 ## squad, dan menanyakannya ke input akan salah saat squad masih meluncur.
@@ -85,16 +105,37 @@ var _squad_moving := false
 ## Called by Game before the first frame, with the variant for this stage.
 func build(variant_index: int) -> void:
 	_pal = UiTheme.palette(GameConfig.dict("variants.%d.theme" % variant_index))
+	_load_enemy_colors()
 	_build_environment()
+	_build_backdrop()
 	_build_floor()
 	_build_actors()
+	_build_far_crowd()
 	_build_impacts()
+	_fx = ArenaFx.new()
+	_fx.name = "ArenaFx"
+	add_child(_fx)
+	_fx.build(_pal, 0x4E454F4E + variant_index)
+
+
+## Palet musuh datang dari config, dalam urutan enemyTypes.
+func _load_enemy_colors() -> void:
+	_enemy_colors = PackedColorArray()
+	for entry in GameConfig.list("enemyTypes"):
+		var type_entry: Dictionary = entry
+		_enemy_colors.append(
+			Color.from_string(String(type_entry.get("color", "#E03A2F")), _pal["enemy"])
+		)
+	if _enemy_colors.is_empty():
+		_enemy_colors.append(_pal["enemy"])
 
 
 ## Called by Game once a run starts. The furniture can only be built now:
 ## which obstacles exist is a property of the run, not of the scene.
 func bind_sim(sim: SimWorld) -> void:
 	_sim = sim
+	if _fx != null:
+		_fx.bind_sim(sim)
 	_build_obstacles()
 
 
@@ -116,7 +157,7 @@ func render_frame() -> void:
 	if _chars != null:
 		_chars.begin()
 	_render_enemies()
-	_render_troops()
+	_render_player()
 	_render_auto()
 	_render_chain()
 	_render_gates()
@@ -124,6 +165,10 @@ func render_frame() -> void:
 	_render_boss()
 	_spawn_impacts()
 	_age_impacts()
+	_age_wall_hits(delta)
+	if _fx != null:
+		_fx.tick(delta)
+	_update_heat(delta)
 	if _chars != null:
 		_chars.end(delta)
 
@@ -139,28 +184,61 @@ func _ip(prev: float, now: float) -> float:
 
 func _build_environment() -> void:
 	# Glow is what sells neon. Without it the emissive materials are merely
-	# bright flat colours; with it they bleed and read as light sources.
+	# bright flat colours; with it they bleed and read as light sources. Nilai
+	# ambang/intensitas datang dari config.artDirection.postfx supaya arah
+	# visual bisa disetel tanpa menyentuh kode.
+	var fx := GameConfig.dict("artDirection.postfx")
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = _pal["bg_bottom"]
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = _pal["bg_top"]
-	env.ambient_light_energy = 0.6
+	env.ambient_light_energy = 0.55
 	env.glow_enabled = true
-	env.glow_intensity = 0.9
-	env.glow_bloom = 0.15
+	env.glow_intensity = Cfg.num(fx, "glowIntensity", 1.15)
+	env.glow_bloom = Cfg.num(fx, "glowBloom", 0.28)
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
-	env.glow_hdr_threshold = 0.85
+	env.glow_hdr_threshold = Cfg.num(fx, "glowThreshold", 0.6)
+	# ACES: inti ledakan di key art hampir putih tanpa pernah terlihat
+	# "terbakar" jadi bidang rata. Tonemap linear tidak bisa melakukan itu.
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = Cfg.num(fx, "exposure", 1.1)
+	env.tonemap_white = Cfg.num(fx, "tonemapWhite", 6.0)
 	# Fog hides the spawn gate's hard edge and gives the long lane real depth
 	# for free, which a portrait screen badly needs.
 	env.fog_enabled = true
-	env.fog_light_color = _pal["bg_top"]
-	env.fog_density = 0.012
+	env.fog_light_color = _pal["fog"]
+	env.fog_density = Cfg.num(fx, "fogDensity", 0.022)
 	env.fog_sky_affect = 0.0
+	# Vignette ungu + butir halus: keduanya menyatukan partikel dan bloom,
+	# dan memusatkan mata ke lorong. Adjustments murah, tidak seperti SSAO.
+	env.adjustment_enabled = true
+	env.adjustment_saturation = 1.08
+	env.adjustment_contrast = 1.05
 
 	_environment = WorldEnvironment.new()
 	_environment.environment = env
 	add_child(_environment)
+
+
+## Langit, kota, dan vortex dalam satu quad di belakang segalanya.
+func _build_backdrop() -> void:
+	var quad := QuadMesh.new()
+	quad.size = Vector2(2.0, 2.0)
+	var material := ShaderMaterial.new()
+	material.shader = load(BACKDROP_SHADER)
+	material.set_shader_parameter("fog_color", _pal["fog"])
+	material.set_shader_parameter("night_color", _pal["bg_bottom"])
+	material.set_shader_parameter("city_glow", _pal["primary"])
+	material.set_shader_parameter("vortex_color", _pal["vortex"])
+	_backdrop = MeshInstance3D.new()
+	_backdrop.mesh = quad
+	_backdrop.material_override = material
+	# Digambar paling awal dan tidak pernah di-cull: vertex shader-nya
+	# memaksa posisi layar penuh, jadi AABB-nya berbohong.
+	_backdrop.extra_cull_margin = 16384.0
+	_backdrop.sorting_offset = -1000.0
+	add_child(_backdrop)
 
 
 func _build_floor() -> void:
@@ -181,16 +259,17 @@ func _build_floor() -> void:
 	material.shader = shader
 	material.set_shader_parameter("bg_top", _pal["bg_top"])
 	material.set_shader_parameter("bg_bottom", _pal["bg_bottom"])
-	material.set_shader_parameter("grid_color", _pal["grid"])
-	# Warna tanah diturunkan dari warna lumut palet, bukan konstanta baru:
-	# kelima arena punya "grid" sendiri, dan tanahnya harus ikut pindah tema
-	# bersamanya. Angka 0,58/0,78 menyamakan hasilnya dengan PAL.floor dan
-	# PAL.floorFar di js/render3d.js untuk Lembah Batu.
-	material.set_shader_parameter("ground_near", _pal["grid"].darkened(0.58))
-	material.set_shader_parameter("ground_far", _pal["grid"].darkened(0.78))
+	material.set_shader_parameter("grid_color", _pal["primary"])
+	material.set_shader_parameter("wall_glow", _pal["bumper"])
+	material.set_shader_parameter("fog_color", _pal["fog"])
+	# Logam gelap, bukan warna palet yang diredupkan: lantai di key art
+	# nyaris netral, dan seluruh warnanya datang dari pantulan.
+	material.set_shader_parameter("ground_near", _pal["bg_top"].darkened(0.55))
+	material.set_shader_parameter("ground_far", _pal["bg_bottom"].lightened(0.06))
+	material.set_shader_parameter("arena_half_width", width * 0.5)
 	material.set_shader_parameter("arena_length", length)
 	material.set_shader_parameter("defense_line_z", GameConfig.num("arena.defenseLineZ"))
-	material.set_shader_parameter("defense_color", _pal["primary"])
+	material.set_shader_parameter("defense_color", UiTheme.DANGER)
 	material.set_shader_parameter("horizon_fade", APRON_FAR * 0.75)
 
 	_floor = MeshInstance3D.new()
@@ -203,26 +282,32 @@ func _build_floor() -> void:
 
 
 func _build_side_walls(width: float, length: float) -> void:
-	# Dinding batu rendah dengan pendar rune tipis, bukan pita neon. Ukuran dan
-	# warnanya mengikuti js/render3d.js (balok 0,5 × 1,4, batu PAL.wall dengan
-	# emisi lumut 0,18) supaya kedua target membaca sebagai tempat yang sama.
-	# Tetap rendah dengan sengaja: pemain harus bisa membaca permukaan pantul
-	# tanpa geometrinya memakan lapangan.
+	# Slab panel miring yang menyala, bukan palisade batu. Dinding adalah
+	# permukaan paling informatif di layar — di sanalah peluru memantul —
+	# jadi ia yang paling terang setelah peluru itu sendiri.
+	#
+	# Tingginya 1.8: cukup untuk terbaca sebagai bidang pantul dari kamera
+	# yang rendah, masih cukup pendek untuk tidak menutupi barisan musuh
+	# yang berjalan tepat di baliknya.
+	_wall_mats.clear()
 	for side in [-1.0, 1.0]:
 		var strip := MeshInstance3D.new()
 		var box := BoxMesh.new()
-		box.size = Vector3(0.5, 1.4, length + APRON)
+		box.size = Vector3(0.45, 1.8, length + APRON)
 		strip.mesh = box
-		strip.position = Vector3(side * (width * 0.5 + 0.25), 0.7, -length * 0.5 + APRON * 0.5)
-		var stone := StandardMaterial3D.new()
-		stone.albedo_color = WALL_STONE
-		stone.roughness = 0.95
-		stone.metallic = 0.0
-		stone.emission_enabled = true
-		stone.emission = _pal["grid"]
-		stone.emission_energy_multiplier = 0.18
-		strip.material_override = stone
+		strip.position = Vector3(side * (width * 0.5 + 0.22), 0.9, -length * 0.5 + APRON * 0.5)
+		var material := ShaderMaterial.new()
+		material.shader = load(WALL_SHADER)
+		material.set_shader_parameter("panel_color", _pal["wall_panel"])
+		material.set_shader_parameter("glow_color", _pal["bumper"])
+		material.set_shader_parameter("core_color", _pal["bumper_glow"])
+		material.set_shader_parameter("fog_color", _pal["fog"])
+		material.set_shader_parameter("arena_length", length)
+		material.set_shader_parameter("horizon_fade", APRON_FAR * 0.75)
+		material.set_shader_parameter("rim_height", 1.8)
+		strip.material_override = material
 		add_child(strip)
+		_wall_mats.append(material)
 
 
 func _build_actors() -> void:
@@ -233,7 +318,7 @@ func _build_actors() -> void:
 	_chars.name = "Characters"
 	add_child(_chars)
 	var roster: Array = ENEMY_UNITS.duplicate()
-	roster.append(SQUAD_UNIT)
+	roster.append(PLAYER_UNIT)
 	roster.append(BOSS_UNIT)
 	_chars.warm(roster)
 
@@ -241,14 +326,53 @@ func _build_actors() -> void:
 	_enemy_mm = _make_multimesh(
 		_capsule(0.35 * scale, 1.0 * scale), Color.WHITE, SimWorld.MAX_ENEMIES
 	)
-	_troop_mm = _make_multimesh(
-		_capsule(0.22 * scale, 0.8 * scale), _pal["primary"], MAX_TROOPS_DRAWN
-	)
-	_auto_mm = _make_multimesh(_sphere(0.12), Color("#FFF1D0"), SimWorld.MAX_AUTO_BULLETS)
+	_auto_mm = _make_multimesh(_sphere(0.1), _pal["primary"], SimWorld.MAX_AUTO_BULLETS)
+
+	# Chain shot: selongsong kuningan, bukan bola kecil (docs/17 §17.5 E1).
+	# Ini benda yang ditatap pemain selama seluruh pantulan, dan bola 26 cm
+	# di ujung lorong tidak terbaca sebagai apa pun.
 	_chain = MeshInstance3D.new()
-	_chain.mesh = _sphere(0.26)
-	_chain.material_override = _emissive(_pal["primary"], 3.0)
+	var shell := CapsuleMesh.new()
+	shell.radius = 0.26
+	shell.height = 0.92
+	shell.radial_segments = 8
+	shell.rings = 2
+	_chain.mesh = shell
+	_chain.material_override = _emissive(_pal["brass"], 2.6)
 	add_child(_chain)
+
+	# Jejak api: pita yang menyempit ke belakang, digambar ulang tiap frame.
+	# ImmediateMesh dipilih daripada partikel karena bentuknya HARUS persis
+	# mengikuti lintasan pantul — partikel akan melengkung di tikungan dan
+	# sudut pantul adalah seluruh isi permainan ini.
+	_chain_trail_mesh = ImmediateMesh.new()
+	_chain_trail = MeshInstance3D.new()
+	_chain_trail.mesh = _chain_trail_mesh
+	_chain_trail.material_override = _additive(_pal["blast"])
+	add_child(_chain_trail)
+
+
+## Siluet kerumunan di balik gerbang spawn. Satu MultiMesh statis, tidak
+## pernah diperbarui setelah dibangun: ia tidak bergerak, tidak bisa kena
+## tembak, dan hanya ada supaya ujung lorong tidak kosong.
+func _build_far_crowd() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0x43524F57
+	var scale: float = CharacterPool.CHAR_SCALE
+	_far_crowd_mm = _make_multimesh(_capsule(0.35 * scale, 1.0 * scale), _pal["enemy"], FAR_CROWD)
+	var mm := _far_crowd_mm.multimesh
+	var half := GameConfig.num("arena.width") * 0.5
+	for i in range(FAR_CROWD):
+		var t := float(i) / float(FAR_CROWD)
+		var z := lerpf(FAR_CROWD_FROM, FAR_CROWD_TO, t)
+		# Melebar ke kejauhan: lorong berakhir di gerbang, tapi pasukan tidak.
+		var spread := half * lerpf(1.0, 3.4, t)
+		var x := rng.randf_range(-spread, spread)
+		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, Vector3(x, 0.5 * scale, -z)))
+		# Makin jauh makin larut ke kabut. Alpha tidak dipakai: material
+		# kerumunan opaque, jadi yang digelapkan adalah warnanya.
+		mm.set_instance_color(i, _pal["enemy"].lerp(_pal["fog"], 0.35 + t * 0.6))
+	mm.visible_instance_count = FAR_CROWD
 
 
 ## Builds one node per obstacle, once. They are few and long-lived, so a
@@ -297,8 +421,18 @@ func _make_obstacle(obstacle: Dictionary) -> Node3D:
 			glass.emission_energy_multiplier = 0.5
 			node.material_override = glass
 		"barrel":
+			# Drum merah bertanda bahaya di key art: badannya gelap, hanya
+			# pita atasnya yang panas. Emissive penuh membuatnya terbaca
+			# sebagai lampu dan pemain berhenti takut padanya.
 			node.mesh = _cylinder(0.6, 1.2)
-			node.material_override = _emissive(Color("#FF8A2B"), 1.8)
+			var drum := StandardMaterial3D.new()
+			drum.albedo_color = _pal["enemy"].darkened(0.35)
+			drum.metallic = 0.6
+			drum.roughness = 0.45
+			drum.emission_enabled = true
+			drum.emission = _pal["blast"]
+			drum.emission_energy_multiplier = 0.55
+			node.material_override = drum
 		"shieldWall", "movingPlatform":
 			var slab := BoxMesh.new()
 			slab.size = Vector3(float(obstacle["width"]), 0.9, 0.5)
@@ -306,16 +440,20 @@ func _make_obstacle(obstacle: Dictionary) -> Node3D:
 			node.material_override = _emissive(_pal["bumper"], 0.9)
 		"pillar":
 			node.mesh = _cylinder(radius, 3.0)
-			var stone := StandardMaterial3D.new()
-			stone.albedo_color = _pal["grid"].darkened(0.4)
-			stone.roughness = 0.9
-			node.material_override = stone
+			var column := StandardMaterial3D.new()
+			column.albedo_color = _pal["wall_panel"]
+			column.metallic = 0.5
+			column.roughness = 0.6
+			column.emission_enabled = true
+			column.emission = _pal["bumper"]
+			column.emission_energy_multiplier = 0.22
+			node.material_override = column
 		_:
 			var ball := SphereMesh.new()
 			ball.radius = radius
 			ball.height = radius * 2.0
 			node.mesh = ball
-			node.material_override = _emissive(_pal["bumper"], 2.0)
+			node.material_override = _emissive(_pal["bumper_glow"], 2.4)
 	return node
 
 
@@ -391,10 +529,17 @@ func _build_impacts() -> void:
 
 
 ## Reads this tick's events and lights a shell for each one worth seeing.
+##
+## Satu tempat membaca peristiwa, lima efek keluar dari sana. Alternatifnya —
+## tiap efek menyapu daftar peristiwa sendiri — berarti lima kali iterasi
+## atas daftar yang sama tiap frame, dan lima tempat yang bisa lupa menangani
+## jenis peristiwa baru.
 func _spawn_impacts() -> void:
 	for entry in _sim.events:
 		var event: Dictionary = entry
 		var kind := String(event.get("type", ""))
+		var x := float(event.get("x", 0.0))
+		var z := float(event.get("z", 0.0))
 		var radius := 0.0
 		var tint: Color = _pal["primary"]
 		match kind:
@@ -403,20 +548,66 @@ func _spawn_impacts() -> void:
 				tint = _pal["enemy"]
 				if _chars != null:
 					var fallen := _unit_name(int(event.get("enemy", 0)) % ENEMY_UNITS.size())
-					_chars.drop_corpse(
-						fallen, float(event.get("x", 0.0)), float(event.get("z", 0.0))
-					)
+					_chars.drop_corpse(fallen, x, z)
 			"explosion":
 				radius = float(event.get("radius", 3.0))
-				tint = Color("#FF8A2B")
+				tint = _pal["blast"]
+				# Cincin kejut mengambil radius yang SAMA dengan ledakan di
+				# simulasi: pemain belajar jangkauan barrel dari cincin ini,
+				# jadi cincin yang berbohong lebih buruk daripada tidak ada.
+				if _fx != null:
+					_fx.explosion_ring(Vector3(x, 0.08, -z), radius)
 			"bounce":
 				radius = 0.6
-				tint = _pal["bumper"]
+				tint = _pal["bumper_glow"]
+				_register_wall_hit(x, z)
+				if _fx != null:
+					_fx.bounce_arc(Vector3(x, 0.7, -z))
 			_:
 				continue
-		_light_impact(
-			Vector3(float(event.get("x", 0.0)), 0.6, -float(event.get("z", 0.0))), radius, tint
-		)
+		_light_impact(Vector3(x, 0.6, -z), radius, tint)
+
+
+## Menyalakan titik benturan di shader dinding, kalau benturannya memang di
+## dinding samping dan bukan di bumper tengah lapangan.
+func _register_wall_hit(x: float, z: float) -> void:
+	var half := GameConfig.num("arena.width") * 0.5
+	if absf(absf(x) - half) > 1.2:
+		return
+	var slot := _wall_hit_next % _wall_hits.size()
+	_wall_hit_next += 1
+	_wall_hits[slot] = Vector2(z, 1.0)
+
+
+## Umur benturan dinding turun linear, lalu didorong ke kedua material
+## sekaligus. Dikirim per frame dan bukan per benturan: empat uniform vec4
+## adalah biaya tetap, sedangkan jumlah benturan tidak terbatas.
+func _age_wall_hits(delta: float) -> void:
+	if _wall_mats.is_empty():
+		return
+	var z_values := Vector4.ZERO
+	var life_values := Vector4.ZERO
+	for i in range(_wall_hits.size()):
+		var hit := _wall_hits[i]
+		hit.y = maxf(hit.y - delta / 0.3, 0.0)
+		_wall_hits[i] = hit
+		z_values[i] = hit.x
+		life_values[i] = hit.y
+	for material in _wall_mats:
+		material.set_shader_parameter("hit_z", z_values)
+		material.set_shader_parameter("hit_life", life_values)
+
+
+## Combo memanaskan lantai. Naik cepat, turun lambat: pemain harus melihat
+## dunia membalas prestasinya, tapi tidak boleh melihatnya berkedip mati
+## setiap kali rantai putus sesaat.
+func _update_heat(delta: float) -> void:
+	var want: float = clampf(float(_sim.combo) / 40.0, 0.0, 1.0)
+	var rate := 6.0 if want > _combo_heat else 1.6
+	_combo_heat = move_toward(_combo_heat, want, delta * rate)
+	if _floor != null:
+		var material := _floor.material_override as ShaderMaterial
+		material.set_shader_parameter("combo_heat", _combo_heat)
 
 
 func _light_impact(where: Vector3, radius: float, tint: Color) -> void:
@@ -474,7 +665,7 @@ func _render_enemies() -> void:
 
 	var drawn := 0
 	for i in range(count):
-		var type_index: int = _sim.enemy_type[i] % ENEMY_COLORS.size()
+		var type_index: int = _sim.enemy_type[i] % _enemy_colors.size()
 		var hurt: bool = _sim.enemy_hp[i] < _enemy_hp_seen[i] - 0.001
 		_enemy_hp_seen[i] = _sim.enemy_hp[i]
 		var unit := _unit_name(type_index)
@@ -493,7 +684,7 @@ func _render_enemies() -> void:
 			continue
 		var pos := Vector3(ex, 0.5 * CharacterPool.CHAR_SCALE, -ez)
 		mm.set_instance_transform(drawn, Transform3D(Basis.IDENTITY, pos))
-		mm.set_instance_color(drawn, ENEMY_COLORS[type_index])
+		mm.set_instance_color(drawn, _enemy_colors[type_index])
 		drawn += 1
 	mm.visible_instance_count = drawn
 
@@ -505,40 +696,36 @@ func _unit_name(type_index: int) -> String:
 	return String(ENEMY_UNITS[type_index])
 
 
-func _render_troops() -> void:
-	var mm := _troop_mm.multimesh
-	var shown: int = mini(_sim.troops, MAX_TROOPS_DRAWN)
-	var columns := 5
-	# Jarak formasi ikut membesar bersama CHAR_SCALE, kalau tidak bahu
-	# prajurit saling menembus dan barisan jadi bubur.
-	var spacing: float = 0.42 * CharacterPool.CHAR_SCALE
-	var drawn := 0
-	for i in range(shown):
-		@warning_ignore("integer_division")
-		var row := i / columns
-		var col := i % columns
-		var offset_x := (float(col) - float(columns - 1) * 0.5) * spacing
-		var offset_z := float(row) * spacing
-		var x: float = _ip(_sim.pose.squad_x, _sim.squad_x) + offset_x
-		var z: float = SimWorld.SQUAD_Z - offset_z
-		var actor: CharacterPool.Actor = null
-		if i < int(CharacterPool.BUDGET["troops"]) and _chars != null:
-			actor = _chars.take(SQUAD_UNIT)
-		if actor != null:
-			actor.place(x, z, 0.0)
-			# Tiga terdepan yang mengangkat senjata; kalau sepuluh orang
-			# menembak berbarengan recoil-nya berubah jadi gempa.
-			if _squad_firing > 0.0 and i < 3:
-				actor.one_shot("shoot", 0.22)
-				_light_impact(actor.muzzle_point(), 0.28, Color("#FFF3C4"))
-			elif actor.lock <= 0.0:
-				actor.play("run" if _squad_moving else "idle")
-			continue
-		var pos := Vector3(x, 0.4 * CharacterPool.CHAR_SCALE, -z)
-		mm.set_instance_transform(drawn, Transform3D(Basis.IDENTITY, pos))
-		mm.set_instance_color(drawn, _pal["primary"] if i == 0 else Color(1, 1, 1, 0.85))
-		drawn += 1
-	mm.visible_instance_count = drawn
+## Satu prajurit, bukan peleton (docs/18 Fase 4, keputusan D1).
+##
+## Simulasi masih menyimpan `troops`, dan aturannya tidak diubah sedikit pun:
+## angka itu tetap menaikkan laju tembak dan tetap dipotong saat musuh lolos.
+## Yang berubah hanyalah pembacaannya — ia POWER senjata, bukan jumlah badan.
+## Itu keputusan yang bisa diambil sepenuhnya di sisi tampilan, jadi replay
+## lama tetap cocok bit demi bit.
+##
+## Konsekuensinya besar untuk komposisi: dengan satu badan di layar, pemain
+## boleh digambar 1,35x lebih besar dari siapa pun, diberi rim cyan, dan
+## ditempatkan sebagai jangkar di dasar layar persis seperti key art.
+func _render_player() -> void:
+	var x: float = _ip(_sim.pose.squad_x, _sim.squad_x)
+	var z: float = SimWorld.SQUAD_Z
+	var actor: CharacterPool.Actor = null
+	if _chars != null:
+		actor = _chars.take(PLAYER_UNIT)
+	if actor == null:
+		return
+	actor.place(x, z, 0.0)
+	if actor.has_method("set_scale_multiplier"):
+		actor.call("set_scale_multiplier", PLAYER_SCALE)
+	if _squad_firing > 0.0:
+		actor.one_shot("shoot", 0.22)
+		# Kilatan moncong pemain BIRU, bukan oranye. Di key art itulah satu-
+		# satunya cara membedakan tembakan sendiri dari hujan tracer musuh
+		# dalam seperlima detik.
+		_light_impact(actor.muzzle_point(), 0.34, _pal["primary"])
+	elif actor.lock <= 0.0:
+		actor.play("run" if _squad_moving else "idle")
 
 
 func _render_auto() -> void:
@@ -549,7 +736,7 @@ func _render_auto() -> void:
 			_ip(_sim.pose.auto_x[i], _sim.auto_x[i]), 0.5, -_ip(_sim.pose.auto_z[i], _sim.auto_z[i])
 		)
 		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, pos))
-		mm.set_instance_color(i, Color("#FFF1D0"))
+		mm.set_instance_color(i, _pal["primary"])
 
 
 ## Chain shot sengaja TIDAK diinterpolasi.
@@ -559,8 +746,52 @@ func _render_auto() -> void:
 ## js/render3d.js, yang mengambil keputusan sama.
 func _render_chain() -> void:
 	_chain.visible = _sim.chain_active
-	if _sim.chain_active:
-		_chain.position = Vector3(_sim.chain_pos.x, 0.6, -_sim.chain_pos.y)
+	if not _sim.chain_active:
+		_chain_points.clear()
+		_chain_trail_mesh.clear_surfaces()
+		return
+	var here := Vector3(_sim.chain_pos.x, 0.6, -_sim.chain_pos.y)
+	_chain.position = here
+	# Selongsong menghadap arah geraknya. Tanpa ini ia berputar acak dan
+	# terbaca sebagai pil, bukan peluru.
+	var dir := Vector3(_sim.chain_dir.x, 0.0, -_sim.chain_dir.y)
+	if dir.length_squared() > 0.0001:
+		_chain.look_at(here + dir, Vector3.UP)
+		# CapsuleMesh berdiri di sumbu Y; miringkan agar berbaring ke depan.
+		_chain.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+	_chain_points.push_front(here)
+	# Panjang jejak 8-10 unit pada kecepatan jelajah; dibatasi jumlah titik
+	# supaya biaya menggambarnya tetap konstan berapa pun laju frame.
+	while _chain_points.size() > 18:
+		_chain_points.pop_back()
+	_rebuild_trail()
+
+
+## Pita api: dua simpul per titik jejak, melebar di kepala dan menyempit di
+## ekor. Digambar ulang tiap frame karena jejaknya memang berubah tiap frame;
+## tidak ada yang bisa di-cache di sini.
+func _rebuild_trail() -> void:
+	_chain_trail_mesh.clear_surfaces()
+	if _chain_points.size() < 2:
+		return
+	_chain_trail_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	var count := _chain_points.size()
+	for i in range(count):
+		var t := float(i) / float(count - 1)
+		var point: Vector3 = _chain_points[i]
+		var ahead: Vector3 = _chain_points[maxi(i - 1, 0)]
+		var along := ahead - point
+		if along.length_squared() < 0.000001:
+			along = Vector3.FORWARD
+		var side := along.normalized().cross(Vector3.UP).normalized() * (0.34 * (1.0 - t))
+		# Inti nyaris putih di kepala, oranye di ekor, lalu habis.
+		var tint: Color = _pal["blast_core"].lerp(_pal["blast"], t)
+		tint.a = (1.0 - t) * (1.0 - t)
+		_chain_trail_mesh.surface_set_color(tint)
+		_chain_trail_mesh.surface_add_vertex(point - side)
+		_chain_trail_mesh.surface_set_color(tint)
+		_chain_trail_mesh.surface_add_vertex(point + side)
+	_chain_trail_mesh.surface_end()
 
 
 func _render_gates() -> void:
@@ -679,6 +910,22 @@ func _emissive(tint: Color, energy: float) -> StandardMaterial3D:
 	material.emission = tint
 	material.emission_energy_multiplier = energy
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return material
+
+
+## Material aditif berwarna simpul: dipakai jejak peluru, busur petir, dan
+## cincin kejut. Aditif, bukan alpha, karena ketiganya adalah CAHAYA — alpha
+## blending membuatnya terlihat seperti cat di atas arena.
+func _additive(tint: Color) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = tint
+	material.vertex_color_use_as_albedo = true
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.disable_receive_shadows = true
+	material.no_depth_test = false
 	return material
 
 

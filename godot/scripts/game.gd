@@ -9,6 +9,13 @@ extends Node3D
 
 const STAGE_SEED_BASE := 20260929
 
+## Tinggi model pemain di dunia: 1.8 m x CharacterPool.CHAR_SCALE (2.0) x
+## ArenaView.PLAYER_SCALE (1.35). Dipakai untuk menjaga pemain tidak menyusut
+## di bawah ambang key art, dan merupakan angka yang sama yang dipakai
+## tools/solve_framing.py untuk menempatkan kamera — kalau salah satunya
+## berubah, keduanya harus berubah.
+const PLAYER_WORLD_HEIGHT := 4.86
+
 var _sim: SimWorld
 var _stage: int = 0
 var _pointer_down := false
@@ -23,6 +30,9 @@ var _audio: AudioDirector = null
 var _music: MusicDirector = null
 var _fov_scale: float = 1.0
 var _camera_home := Vector3.ZERO
+## Framing murni, sebelum follow dan dolly ditambahkan.
+var _camera_base := Vector3.ZERO
+var _camera_dolly := 0.0
 
 @onready var _view: Node3D = $ArenaView
 @onready var _hud: CanvasLayer = $HUD
@@ -256,6 +266,7 @@ func _process(_delta: float) -> void:
 		_hud.call("render_frame")
 	if _view.has_method("render_frame"):
 		_view.call("render_frame")
+	_track_camera(_delta)
 	_update_feel(_delta)
 
 
@@ -332,62 +343,84 @@ func _screen_to_arena_x(screen_x: float) -> float:
 	return lerpf(x_min, x_max, t)
 
 
+## Over-the-shoulder framing solved from the key art (docs/17 §17.2).
+##
+## The old camera aimed at a point and let look_at work out the angle, then
+## reversed away until the full twenty-unit lane fitted on screen. Both halves
+## were wrong for this art direction: the fit pass is what shrank the player
+## to a thumbnail, and an aim point on the floor meant the horizon moved
+## whenever the arena length changed.
+##
+## Now pitch is authored, not derived. Camera height, depth and pitch come
+## from tools/solve_framing.py, which is the only place the three key art
+## measurements live. Everything else here is a guard rail on top of them.
 func _place_camera() -> void:
-	# Positioned in code rather than baked into the scene file: the framing is
-	# derived from arena numbers, so a config change must move the camera too.
-	var defense_z := GameConfig.num("arena.defenseLineZ")
+	var pitch := deg_to_rad(GameConfig.num("camera.pitchDegrees"))
 	var height := GameConfig.num("camera.heightOffset")
-	var distance := GameConfig.num("camera.distance")
-	var look_ahead := GameConfig.num("camera.lookAheadZ")
-	var origin := Vector3(0.0, maxf(height, 8.0), distance)
-	_camera.look_at_from_position(origin, Vector3(0.0, 0.0, -(defense_z + look_ahead)), Vector3.UP)
+	var back_z := GameConfig.num("camera.backOffsetZ")
+	_camera.rotation = Vector3(-pitch, 0.0, 0.0)
+	_camera_base = Vector3(0.0, height, back_z)
 	_update_fov_scale()
 	_camera.fov = GameConfig.num("slowMo.fovNormal") * _fov_scale
-	# Lalu kamera mundur sepanjang sumbu pandangnya sampai arena benar-benar
-	# muat. Angka camera.distance/heightOffset di config membingkai arena yang
-	# lebih sempit daripada 20 unit: squad yang digeser ke tepi kiri keluar
-	# dari layar, dan peluru yang memantul di sana tidak terlihat sama sekali.
-	var back := _camera.global_transform.basis.z.normalized()   # +z lokal = mundur
-	_camera.position = origin + back * _fit_pullback()
-	# Remembered so shake can be an offset from it rather than an integration
-	# that slowly walks the camera away from its framing.
-	_camera_home = _camera.position
+	# +z lokal kamera menunjuk ke belakang, jadi mundur = menambah sumbu itu.
+	_camera_base += _camera.global_transform.basis.z.normalized() * _fit_pullback()
+	_camera_home = _camera_base
+	_camera.position = _camera_home
 
 
-## Berapa jauh kamera harus mundur supaya seluruh lebar arena terlihat.
+## Mundur secukupnya, lalu berhenti.
 ##
-## Mundur sepanjang sumbu pandang, bukan menaikkan FOV: FOV yang lebih lebar
-## melengkungkan perspektif dan membuat lorong terasa pendek, sedangkan mundur
-## hanya mengecilkan semuanya secara merata.
-##
-## Syaratnya dipisah dengan sengaja. Tepi kiri-kanan arena WAJIB terlihat di
-## seluruh panjang lorong — di sanalah peluru memantul, dan pantulan yang tidak
-## terlihat sama saja dengan mekanik yang tidak ada. Tapi secara vertikal yang
-## wajib hanyalah ujung jauh (gerbang spawn: pemain harus melihat musuh datang);
-## tepi dekat memang sengaja terpotong layar, itu apron lantai.
+## Yang WAJIB terlihat adalah kedua dinding samping sejak awal zona tempur
+## (camera.wallVisibleFromZ): pantulan yang terjadi di luar layar sama saja
+## dengan mekanik yang tidak ada. Yang juga wajib adalah pemain tetap besar —
+## itulah seluruh isi key art. Kedua syarat itu saling tarik, jadi syarat
+## pertama dipenuhi hanya sampai batas yang diizinkan syarat kedua.
 func _fit_pullback() -> float:
-	var half_w := GameConfig.num("arena.width") * 0.5 + 1.0
-	var far_z := GameConfig.num("arena.height")
+	var half_w := GameConfig.num("arena.width") * 0.5 + 0.6
+	var guard_z := GameConfig.num("camera.wallVisibleFromZ")
+	var tan_y := tan(deg_to_rad(_camera.fov) * 0.5)
 	var size := get_viewport().get_visible_rect().size
 	var aspect := size.x / maxf(size.y, 1.0)
-	var tan_y := tan(deg_to_rad(_camera.fov) * 0.5) * 0.92
 	var tan_x := tan_y * aspect
 	if tan_x <= 0.0 or tan_y <= 0.0:
 		return 0.0
-	var basis := _camera.global_transform.basis
-	var forward := -basis.z.normalized()
-	var right := basis.x.normalized()
-	var up := basis.y.normalized()
-	var need := 0.0
-	for sx in [-1.0, 1.0]:
-		for cz in [0.5, far_z]:
-			var corner := Vector3(sx * half_w, 1.0, -cz)
-			var v := corner - _camera.global_position
-			var depth := v.dot(forward)
-			need = maxf(need, absf(v.dot(right)) / tan_x - depth)
-			if cz > 1.0:
-				need = maxf(need, absf(v.dot(up)) / tan_y - depth)
-	return maxf(need, 0.0)
+	var forward := -_camera.global_transform.basis.z.normalized()
+	var wall_point := Vector3(half_w, 0.0, -guard_z)
+	var want := half_w / tan_x - (wall_point - _camera_base).dot(forward)
+	if want <= 0.0:
+		return 0.0
+	# Batas atas: seberapa jauh kamera boleh mundur sebelum pemain menyusut di
+	# bawah camera.playerMinScreenHeight.
+	var player_point := Vector3(0.0, 0.0, -SimWorld.SQUAD_Z)
+	var player_depth := (player_point - _camera_base).dot(forward)
+	var min_height := maxf(GameConfig.num("camera.playerMinScreenHeight"), 0.02)
+	var max_depth := PLAYER_WORLD_HEIGHT / (2.0 * tan_y * min_height)
+	return clampf(want, 0.0, maxf(max_depth - player_depth, 0.0))
+
+
+## Kamera menggeser mengikuti pemain, tapi hanya sebagian (followFactorX).
+##
+## Pada framing baru, lebar yang terlihat di kedalaman pemain hanya ~4 unit
+## per sisi sementara pemain bebas bergerak 6 unit: tanpa mengikuti, pemain
+## keluar layar di tepi lorong. Mengikuti PENUH juga salah — dunia jadi
+## terasa diam dan pemain kehilangan rasa bergerak. Sebagian adalah jawaban
+## yang dipakai lane shooter mana pun.
+func _track_camera(delta: float) -> void:
+	if _sim == null:
+		return
+	var factor := GameConfig.num("camera.followFactorX")
+	var want_x: float = _sim.squad_x * factor
+	# Dolly: saat combo tinggi kamera merapat sedikit. Lambat dengan sengaja
+	# (dollyRate), karena perubahan jarak yang cepat terbaca sebagai sentakan.
+	var dolly := 0.0
+	if _sim.combo >= int(GameConfig.num("camera.comboDollyAt")):
+		dolly = GameConfig.num("camera.comboDollyIn")
+	_camera_dolly = move_toward(_camera_dolly, dolly, GameConfig.num("camera.dollyRate") * delta)
+	var lerp_rate: float = GameConfig.num("camera.followLerp")
+	_camera_home.x = lerpf(_camera_home.x, want_x, clampf(lerp_rate * delta, 0.0, 1.0))
+	var forward := -_camera.global_transform.basis.z.normalized()
+	_camera_home.y = _camera_base.y + forward.y * _camera_dolly
+	_camera_home.z = _camera_base.z + forward.z * _camera_dolly
 
 
 ## Bukaan horizontal dikunci, bukan vertikal — persis seperti widthMatchedFov()
@@ -407,7 +440,7 @@ func _update_fov_scale() -> void:
 	var aspect := size.x / maxf(size.y, 1.0)
 	var half_width := tan(deg_to_rad(base) * 0.5) * (9.0 / 16.0)
 	var matched := rad_to_deg(2.0 * atan(half_width / maxf(aspect, 0.0001)))
-	_fov_scale = clampf(matched, base * 0.85, 58.0) / base
+	_fov_scale = clampf(matched, base * 0.85, GameConfig.num("camera.fovMaxDeg")) / base
 
 
 func _finish_run() -> void:
@@ -435,7 +468,7 @@ func _finish_run() -> void:
 					"label": "WAVE",
 					"value": "%d/%d" % [_sim.wave_index + 1, GameConfig.integer("spawn.waveCount")]
 				},
-				{"label": "SQUAD", "value": "x%d" % _sim.troops},
+				{"label": "POWER", "value": "x%d" % _sim.troops},
 				{"label": "COINS", "value": "+%d" % earned},
 				{"label": "BEST", "value": "%d" % SaveGame.best_score},
 			]

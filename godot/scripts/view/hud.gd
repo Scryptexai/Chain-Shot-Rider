@@ -143,9 +143,7 @@ class ChargeRing:
 			return
 		draw_arc(center, radius, 0.0, TAU, 72, Color(1, 1, 1, 0.10), 13.0, true)
 		if progress > 0.002:
-			draw_arc(
-				center, radius, -PI * 0.5, -PI * 0.5 + TAU * progress, 72, tint, 13.0, true
-			)
+			draw_arc(center, radius, -PI * 0.5, -PI * 0.5 + TAU * progress, 72, tint, 13.0, true)
 
 
 var _sim: SimWorld
@@ -156,6 +154,8 @@ var _score_pod: PanelContainer
 var _chip_column: VBoxContainer
 var _score_value: Label
 var _combo: Label
+var _combo_label: Label
+var _combo_box: VBoxContainer
 var _wave: Label
 var _stage_tag: Label
 var _wave_dots: HBoxContainer
@@ -303,15 +303,19 @@ func _update_combo(delta: float) -> void:
 	# Hidden below x2: showing "x1" is noise before the player has built
 	# anything, and it trains them to ignore the spot where x30 will appear.
 	var active: bool = _sim.combo > 1
-	_combo.visible = active
+	_combo_box.visible = active
 	if not active:
 		_combo_pulse = 0.0
 		return
 	_combo.text = "x%d" % _sim.combo
 	_combo_pulse = maxf(_combo_pulse - delta * 4.0, 0.0)
-	var scale := 1.0 + 0.15 * _combo_pulse
-	_combo.pivot_offset = _combo.size * 0.5
-	_combo.scale = Vector2(scale, scale)
+	# Punch, bukan denyut halus: angka melompat pada kill lalu kembali.
+	var scale := 1.0 + 0.22 * _combo_pulse
+	_combo_box.pivot_offset = Vector2(_combo_box.size.x, _combo_box.size.y * 0.5)
+	_combo_box.scale = Vector2(scale, scale)
+	# Warna naik bersama rantai: cyan dingin di awal, putih panas di puncak.
+	var heat: float = clampf(float(_sim.combo) / 60.0, 0.0, 1.0)
+	_combo.add_theme_color_override("font_color", UiTheme.COMBO_CHROME.lerp(Color.WHITE, heat))
 
 
 func _update_wave_and_squad() -> void:
@@ -327,7 +331,7 @@ func _update_wave_and_squad() -> void:
 		dot.add_theme_stylebox_override("panel", UiTheme.blob(fill, 6))
 
 	_squad.text = "%d" % _sim.troops
-	# Squad count is health and damage at once, so it gets an early warning
+	# POWER is health and damage at once, so it gets an early warning
 	# state rather than only being noticed when the run is already lost.
 	var low: bool = _sim.troops <= 5
 	_squad.add_theme_color_override("font_color", UiTheme.DANGER if low else UiTheme.INK)
@@ -594,8 +598,33 @@ func _build_top_bar() -> void:
 	_pause_button.pressed.connect(func() -> void: pause_pressed.emit())
 	top.add_child(_pause_button)
 
-	_combo = _label("", 86, UiTheme.GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-	_place(_combo, Vector2(REF_W * 0.5 - 300.0, 470.0), Vector2(600.0, 110.0))
+	_build_combo()
+
+
+## Combo counter, kanan atas, persis seperti "x999 COMBO" di key art.
+##
+## Dulu ia label emas di tengah layar — tepat di jalur peluru, pada warna
+## yang sama dengan ledakan, di tempat mata sedang bekerja. Key art menaruh
+## angka ini di pojok kanan atas karena itu satu-satunya sudut layar yang
+## tidak pernah berisi gameplay: lorong menyempit ke tengah, dan sudut atas
+## adalah langit.
+func _build_combo() -> void:
+	_combo_box = VBoxContainer.new()
+	_combo_box.add_theme_constant_override("separation", -18)
+	_combo_box.alignment = BoxContainer.ALIGNMENT_END
+	_combo_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_place(_combo_box, Vector2(REF_W - 560.0, 212.0), Vector2(520.0, 190.0))
+
+	_combo = _label("", 128, UiTheme.COMBO_CHROME, HORIZONTAL_ALIGNMENT_RIGHT, _combo_box)
+	# Outline gelap tebal, bukan bayangan: angka ini harus tetap terbaca di
+	# atas ledakan putih maupun di atas langit hitam, dan hanya outline yang
+	# bekerja pada keduanya.
+	_combo.add_theme_color_override("font_outline_color", UiTheme.COMBO_OUTLINE)
+	_combo.add_theme_constant_override("outline_size", 22)
+	_combo_label = _label("COMBO", 40, _pal["primary"], HORIZONTAL_ALIGNMENT_RIGHT, _combo_box)
+	_combo_label.add_theme_color_override("font_outline_color", UiTheme.COMBO_OUTLINE)
+	_combo_label.add_theme_constant_override("outline_size", 14)
+	_combo_box.visible = false
 
 
 func _build_boss_bar() -> void:
@@ -642,7 +671,11 @@ func _build_bottom_deck() -> void:
 	squad_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	squad_row.add_child(squad_box)
 	_squad = _label("5", 52, UiTheme.INK, HORIZONTAL_ALIGNMENT_LEFT, squad_box)
-	_label("PASUKAN", 20, UiTheme.INK_DIM, HORIZONTAL_ALIGNMENT_LEFT, squad_box)
+	# Bukan "PASUKAN" lagi: hanya ada satu prajurit di arena sejak rombakan
+	# NEON. Angkanya tidak berubah artinya di simulasi — ia tetap menggerakkan
+	# laju tembak dan tetap dipotong saat musuh lolos — tapi yang dibaca
+	# pemain sekarang adalah daya senjata, bukan jumlah badan (docs/18 D1).
+	_label("POWER", 20, UiTheme.INK_DIM, HORIZONTAL_ALIGNMENT_LEFT, squad_box)
 
 	# Meter steer hanya hidup saat menunggangi peluru.
 	var steer_row := HBoxContainer.new()

@@ -25,7 +25,7 @@ const STAT_ROWS: Array[Array] = [
 	["bounceBudget", "PANTULAN", "+"],
 	["chargeRateMul", "ISI ULANG", "x"],
 	["moveSpeedMul", "GERAK", "x"],
-	["startTroops", "PASUKAN AWAL", "+"],
+	["startTroops", "DAYA AWAL", "+"],
 	["negativeSideChance", "GATE BURUK", "x"],
 ]
 
@@ -82,7 +82,7 @@ func _build_screen() -> void:
 
 	var head := HBoxContainer.new()
 	box.add_child(head)
-	_text(head, "SQUAD", 56, UiTheme.INK)
+	_text(head, "ARSENAL", 56, UiTheme.INK)
 	var push := Control.new()
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(push)
@@ -245,11 +245,7 @@ func _spacer(height: float) -> Control:
 
 
 func _text(
-	parent: Node,
-	value: String,
-	size: int,
-	tint: Color,
-	alignment: int = HORIZONTAL_ALIGNMENT_LEFT
+	parent: Node, value: String, size: int, tint: Color, alignment: int = HORIZONTAL_ALIGNMENT_LEFT
 ) -> Label:
 	var label := Label.new()
 	label.text = value

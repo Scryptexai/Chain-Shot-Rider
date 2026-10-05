@@ -1,6 +1,6 @@
 class_name UiTheme
 extends RefCounted
-## Fantasy battlefield skin, built in code from the active arena palette.
+## NEON skin, built in code from the active arena palette.
 ##
 ## Every colour here comes from the variant's theme block in
 ## Config/arena_config.json — the same block that tints the arena, the crowd
@@ -20,8 +20,12 @@ extends RefCounted
 ## #FFFFFF against a near-black arcade background buzzes on OLED panels.
 const INK := Color("#F5F9FF")
 const INK_DIM := Color("#8A9BB8")
-const DANGER := Color("#FF1744")
-const GOLD := Color("#FFD54F")
+const DANGER := Color("#FF2A2A")
+## Combo chrome from the key art. Named GOLD for the call sites that predate
+## the NEON rebuild; the colour itself is no longer gold anywhere.
+const GOLD := Color("#9BF2FF")
+const COMBO_CHROME := Color("#9BF2FF")
+const COMBO_OUTLINE := Color("#0A2A33")
 const SHADOW := Color(0, 0, 0, 0.75)
 ## Hijau "go". Tombol aksi utama di game mobile hampir selalu hijau; memakai
 ## warna aksen arena untuk PLAY membuatnya hilang di antara chip lain.
@@ -32,15 +36,35 @@ const INK_DEEP := Color("#06240E")
 
 
 ## Reads a variant theme block into a palette dictionary with safe fallbacks.
+##
+## The fallbacks are the NEON core colours from config.artDirection, written
+## out here as literals so a palette is still correct when this is called from
+## a test with a bare dictionary. Six keys were enough for the fantasy skin;
+## the key art needs the player, the tracer rain, the chain arcs and the wall
+## panels to be themeable too, because those are the four things the eye
+## actually tracks.
 static func palette(theme: Dictionary) -> Dictionary:
-	return {
-		"primary": _color(theme, "primary", "#FFC24D"),
-		"enemy": _color(theme, "enemy", "#C2503D"),
-		"bumper": _color(theme, "bumper", "#9A6BFF"),
-		"bg_top": _color(theme, "bgTop", "#1A2133"),
-		"bg_bottom": _color(theme, "bgBottom", "#070A12"),
-		"grid": _color(theme, "grid", "#6E7A5E"),
+	var pal := {
+		"primary": _color(theme, "primary", "#2BE8FF"),
+		"enemy": _color(theme, "enemy", "#E03A2F"),
+		"bumper": _color(theme, "bumper", "#FF2BD6"),
+		"bg_top": _color(theme, "bgTop", "#131B38"),
+		"bg_bottom": _color(theme, "bgBottom", "#070A14"),
+		"grid": _color(theme, "grid", "#1E8FA8"),
+		"player": _color(theme, "player", "#DCE6F2"),
+		"tracer": _color(theme, "tracer", "#FF2A2A"),
+		"chain": _color(theme, "chain", "#A64BFF"),
+		"bumper_glow": _color(theme, "bumperGlow", "#FF9BEE"),
+		"wall_panel": _color(theme, "wallPanel", "#2A1B3D"),
+		"fog": _color(theme, "fog", "#2A1340"),
+		"vortex": _color(theme, "vortex", "#6B2FA8"),
 	}
+	# Derived, never authored: these two are always the hot core of the
+	# explosion and the brass of the chain round, in every room.
+	pal["blast"] = Color("#FF9A2E")
+	pal["blast_core"] = Color("#FFE3A0")
+	pal["brass"] = Color("#D9A441")
+	return pal
 
 
 ## Translucent panel with a lit edge — the base of every HUD chip.

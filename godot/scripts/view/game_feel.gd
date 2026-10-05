@@ -47,6 +47,17 @@ var _cinema_remaining: float = 0.0
 var _cinema_duration: float = 1.2
 var _fov_last_bullet: float = 32.0
 
+## Hitstop: dunia BERHENTI beberapa puluh milidetik saat peluru memantul.
+##
+## Berbeda dari slow motion dan dari denyut: keduanya adalah kurva yang
+## di-ease, sedangkan hitstop adalah dinding. Itulah yang membuat tabrakan
+## terasa punya massa — efek yang di-ease terbaca sebagai sirup, bukan
+## sebagai benturan. Durasinya sengaja di bawah 100 ms; di atas itu ia
+## berhenti terasa sebagai pukulan dan mulai terasa sebagai lag.
+var _hitstop_remaining: float = 0.0
+var _hitstop_bounce: float = 0.04
+var _hitstop_final: float = 0.09
+
 var _shake_amplitude: float = 0.0
 var _shake_frequency: float = 20.0
 var _shake_remaining: float = 0.0
@@ -65,6 +76,8 @@ func _init(config: Dictionary) -> void:
 	_pulse_scale = Cfg.num(slow, "bouncePulseTimeScale", 0.45)
 	_pulse_duration = maxf(Cfg.num(slow, "bouncePulseDuration", 0.18), 0.01)
 	_fov_last_bullet = Cfg.num(slow, "fovLastBullet", 32.0)
+	_hitstop_bounce = Cfg.num(slow, "hitstopBounce", 0.04)
+	_hitstop_final = Cfg.num(slow, "hitstopFinalBounce", 0.09)
 	var scoring: Dictionary = config.get("scoring", {})
 	_cinema_duration = maxf(Cfg.num(scoring, "lastBulletZoomDuration", 1.2), 0.01)
 	fov = _fov_normal
@@ -101,6 +114,13 @@ func update(sim: SimWorld, unscaled_delta: float) -> void:
 	fov = lerpf(fov, _target_fov, step)
 	if absf(time_scale - _target_scale) < 0.002:
 		time_scale = _target_scale
+
+	# Hitstop ditumpuk PALING AKHIR dan tanpa easing: selama sisanya belum
+	# habis, waktu tidak berjalan sama sekali. Easing di sini akan membatalkan
+	# satu-satunya alasan hitstop ada.
+	if _hitstop_remaining > 0.0:
+		_hitstop_remaining -= unscaled_delta
+		time_scale = 0.0
 
 	if _shake_remaining > 0.0:
 		_shake_remaining -= unscaled_delta
@@ -159,8 +179,21 @@ func react_to(event: Dictionary) -> void:
 			shake("bounceBig")
 		"bounce":
 			shake("bounceSmall")
+			hitstop(_hitstop_bounce)
+		"chain_end":
+			hitstop(_hitstop_final)
 		"life_lost":
 			shake("explosion")
+
+
+## Menghentikan dunia selama `seconds` waktu nyata. Permintaan yang lebih
+## pendek tidak pernah memotong hitstop yang sedang berjalan.
+func hitstop(seconds: float) -> void:
+	_hitstop_remaining = maxf(_hitstop_remaining, seconds)
+
+
+func hitstop_remaining() -> float:
+	return maxf(_hitstop_remaining, 0.0)
 
 
 ## Denyut pendek: dunia melambat sekejap lalu kembali. Dipakai tangga

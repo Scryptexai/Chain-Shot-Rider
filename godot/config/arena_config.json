@@ -1,13 +1,44 @@
 {
   "$schema": "./arena_config.schema.json",
-  "version": "1.1.0-fantasy",
-  "notes": "Single source of truth untuk arena CHAIN RIDER (arah visual fantasi, karakter KayKit Adventurers CC0). Dipakai oleh tools/blueprint_gen.py, prototype web, dan importer ScriptableObject di Unity. Koordinat dunia: X = -10..+10 (lebar 20), Z = 0..40 (panjang 40), Y = up. Origin (0,0,0) = tengah dinding bawah.",
+  "version": "3.0.0-neon",
+  "notes": "Single source of truth untuk arena CHAIN RIDER (arah visual NEON, basis key art docs/17-keyart-neon-analysis.md). Dipakai tools/blueprint_gen.py, prototipe web, dan Godot. Koordinat dunia: X = -10..+10 (lebar 20), Z = 0..40 (panjang 40), Y = up. Origin (0,0,0) = tengah dinding bawah.",
+  "artDirection": {
+    "note": "NEON art direction. Satu-satunya sumber warna untuk arena, HUD, dan prototipe web. Diturunkan dari key art 'Neon Bullet-Hell Combo Assault' (docs/17-keyart-neon-analysis.md). Jangan menulis hex di kode; baca dari sini.",
+    "playerCyan": "#2BE8FF",
+    "playerSteel": "#DCE6F2",
+    "playerDeep": "#2E5BD8",
+    "bumperMagenta": "#FF2BD6",
+    "bumperCore": "#FF9BEE",
+    "tracerRed": "#FF2A2A",
+    "enemyRed": "#E03A2F",
+    "enemyOrange": "#FF7A18",
+    "blastOrange": "#FF9A2E",
+    "blastCore": "#FFE3A0",
+    "chainViolet": "#A64BFF",
+    "vortexPurple": "#6B2FA8",
+    "nightBase": "#070A14",
+    "comboChrome": "#9BF2FF",
+    "comboOutline": "#0A2A33",
+    "brassBullet": "#D9A441",
+    "postfx": {
+      "glowIntensity": 1.15,
+      "glowBloom": 0.28,
+      "glowThreshold": 0.6,
+      "fogColor": "#2A1340",
+      "fogStartZ": 28.0,
+      "fogDensity": 0.022,
+      "vignette": 0.35,
+      "grain": 0.03,
+      "exposure": 1.1,
+      "tonemapWhite": 6.0
+    }
+  },
   "arena": {
-    "width": 20.0,
+    "width": 12.0,
     "height": 40.0,
     "origin": "bottom-center",
-    "xMin": -10.0,
-    "xMax": 10.0,
+    "xMin": -6.0,
+    "xMax": 6.0,
     "zMin": 0.0,
     "zMax": 40.0,
     "playerZone": {
@@ -40,14 +71,14 @@
     "walls": {
       "left": {
         "type": "ricochet_bumper",
-        "x": -10.0,
+        "x": -6.0,
         "restitution": 0.95,
         "friction": 0.1,
         "reflectsEnemies": false
       },
       "right": {
         "type": "ricochet_bumper",
-        "x": 10.0,
+        "x": 6.0,
         "restitution": 0.95,
         "friction": 0.1,
         "reflectsEnemies": false
@@ -65,7 +96,8 @@
         "restitution": 0.0,
         "absorbsBullet": true
       }
-    }
+    },
+    "widthScaledFrom": 20.0
   },
   "bullet": {
     "baseSpeed": 25.0,
@@ -93,40 +125,54 @@
     "transitionDuration": 0.2,
     "fovNormal": 60.0,
     "fovBulletTime": 40.0,
-    "chromaticAberrationMax": 0.45,
+    "chromaticAberrationMax": 0.25,
     "vignetteMax": 0.42,
     "audioDuckDb": -6.0,
     "minFixedDeltaScale": 0.15,
     "bouncePulseTimeScale": 0.45,
     "bouncePulseDuration": 0.18,
-    "fovLastBullet": 32.0
+    "fovLastBullet": 32.0,
+    "hitstopBounce": 0.04,
+    "hitstopFinalBounce": 0.09,
+    "hitstopNote": "Hitstop pendek tiap pantulan (docs/18 Fase 8). Dihitung dalam detik waktu nyata, bukan tick: ia harus terasa sama di 60 dan 120 fps."
   },
   "camera": {
-    "pitchDegrees": 40.0,
+    "pitchDegrees": 22.5,
     "yawDegrees": 0.0,
-    "distance": 18.0,
-    "heightOffset": 12.0,
-    "lookAheadZ": 6.0,
+    "heightOffset": 15.95,
+    "backOffsetZ": 11.1,
+    "lookTargetZ": 27.4,
     "followLerp": 8.0,
+    "followFactorX": 0.75,
     "bulletFollowLerp": 14.0,
+    "playerScreenAnchor": 0.87,
+    "playerMinScreenHeight": 0.15,
+    "wallVisibleFromZ": 9.0,
+    "fovMaxDeg": 62.0,
+    "comboDollyIn": 0.5,
+    "comboDollyAt": 20,
+    "dollyRate": 1.5,
+    "framingNote": "Diselesaikan dari tiga ukuran key art (anchor 0.87, tinggi pemain 0.185, horizon 0.14) lewat tools/solve_framing.py. Angka lama (pitch 40, distance 18, heightOffset 12) membingkai arena isometrik datar dengan pemain sebesar ibu jari.",
+    "distance": 11.5,
+    "lookAheadZ": 9.0,
     "shake": {
       "bounceSmall": {
-        "amplitude": 0.08,
+        "amplitude": 0.1,
         "frequency": 22.0,
         "duration": 0.1
       },
       "bounceBig": {
-        "amplitude": 0.22,
+        "amplitude": 0.264,
         "frequency": 18.0,
         "duration": 0.18
       },
       "explosion": {
-        "amplitude": 0.35,
+        "amplitude": 0.42,
         "frequency": 14.0,
         "duration": 0.28
       },
       "comboMilestone": {
-        "amplitude": 0.18,
+        "amplitude": 0.225,
         "frequency": 20.0,
         "duration": 0.22
       }
@@ -199,14 +245,14 @@
       5,
       12
     ],
-    "spacing": 0.8,
+    "spacing": 0.48,
     "descendSpeedRange": [
       0.5,
       1.1
     ],
     "swayAmplitude": 0.35,
     "swayFrequency": 0.6,
-    "separationRadius": 0.7,
+    "separationRadius": 0.42,
     "separationWeight": 1.0,
     "alignmentWeight": 0.25,
     "cohesionWeight": 0.1,
@@ -220,8 +266,8 @@
       "speed": 0.6,
       "tris": 180,
       "score": 10,
-      "color": "#4E9E5F",
-      "note": "Perampok dasar berbelati, mati 1 hit.",
+      "color": "#E03A2F",
+      "note": "Infanteri dasar, mati 1 hit.",
       "speedWas": 1.2
     },
     {
@@ -230,8 +276,8 @@
       "speed": 1.1,
       "tris": 190,
       "score": 15,
-      "color": "#D8B98A",
-      "note": "Pemanah lincah, memecah formasi.",
+      "color": "#FF7A18",
+      "note": "Penyerbu cepat, memecah formasi.",
       "speedWas": 2.2
     },
     {
@@ -240,8 +286,8 @@
       "speed": 0.5,
       "tris": 290,
       "score": 50,
-      "color": "#C98B5E",
-      "note": "Barbarian berkapak, butuh bounce ber-stack.",
+      "color": "#B32015",
+      "note": "Lapis berat, butuh bounce ber-stack.",
       "speedWas": 0.6
     },
     {
@@ -250,8 +296,8 @@
       "speed": 0.5,
       "tris": 260,
       "score": 40,
-      "color": "#8FA3C4",
-      "note": "Ksatria berperisai, hanya rusak dari samping/belakang.",
+      "color": "#FF9A5E",
+      "note": "Pembawa perisai energi, hanya rusak dari samping/belakang.",
       "speedWas": 0.9
     },
     {
@@ -260,8 +306,8 @@
       "speed": 0.5,
       "tris": 240,
       "score": 35,
-      "color": "#8B6FD4",
-      "note": "Penyihir; pecah jadi 3 perampok saat mati.",
+      "color": "#FF4D7A",
+      "note": "Pecah jadi 3 infanteri saat mati.",
       "speedWas": 1.0
     },
     {
@@ -270,8 +316,8 @@
       "speed": 0.7,
       "tris": 220,
       "score": 45,
-      "color": "#3E6B4A",
-      "note": "Penyelinap bom asap, meledak saat mati, radius 2.5, chain kill.",
+      "color": "#FFC247",
+      "note": "Pembawa muatan, meledak saat mati, radius 2.5, chain kill.",
       "speedWas": 1.4
     }
   ],
@@ -310,41 +356,48 @@
     {
       "id": "classic_pit",
       "index": 1,
-      "name": "Lembah Batu",
+      "name": "Neon Dock",
       "theme": {
-        "primary": "#FFC24D",
-        "enemy": "#C2503D",
-        "bumper": "#9A6BFF",
-        "bgTop": "#1A2133",
-        "bgBottom": "#070A12",
-        "grid": "#6E7A5E"
+        "primary": "#2BE8FF",
+        "enemy": "#E03A2F",
+        "bumper": "#FF2BD6",
+        "bgTop": "#131B38",
+        "bgBottom": "#070A14",
+        "grid": "#1E8FA8",
+        "player": "#DCE6F2",
+        "tracer": "#FF2A2A",
+        "chain": "#A64BFF",
+        "bumperGlow": "#FF9BEE",
+        "wallPanel": "#2A1B3D",
+        "fog": "#2A1340",
+        "vortex": "#6B2FA8"
       },
       "musicLayer": "base_synth",
       "specialEnemy": "runner",
       "boss": "colossus",
-      "description": "Arena dasar, 4 bumper simetris. Mengajarkan sudut pantul 45 derajat.",
+      "description": "Dok bongkar-muat. Empat bumper simetris mengajarkan sudut pantul 45 derajat.",
       "obstacles": [
         {
           "type": "bumper",
-          "x": -5.5,
+          "x": -3.3,
           "z": 13.0,
           "radius": 0.9
         },
         {
           "type": "bumper",
-          "x": 5.5,
+          "x": 3.3,
           "z": 13.0,
           "radius": 0.9
         },
         {
           "type": "bumper",
-          "x": -5.5,
+          "x": -3.3,
           "z": 23.0,
           "radius": 0.9
         },
         {
           "type": "bumper",
-          "x": 5.5,
+          "x": 3.3,
           "z": 23.0,
           "radius": 0.9
         }
@@ -353,53 +406,60 @@
     {
       "id": "twin_towers",
       "index": 2,
-      "name": "Menara Kembar",
+      "name": "Data Spires",
       "theme": {
-        "primary": "#E8B44A",
-        "enemy": "#B4553A",
-        "bumper": "#A15CFF",
-        "bgTop": "#241A33",
-        "bgBottom": "#0A0612",
-        "grid": "#7A6EA0"
+        "primary": "#36D9FF",
+        "enemy": "#E8452E",
+        "bumper": "#C62BFF",
+        "bgTop": "#1A1440",
+        "bgBottom": "#06060F",
+        "grid": "#2C6FD8",
+        "player": "#DCE6F2",
+        "tracer": "#FF3A1F",
+        "chain": "#B45CFF",
+        "bumperGlow": "#E59BFF",
+        "wallPanel": "#241a46",
+        "fog": "#2B1A52",
+        "vortex": "#7A3AC4"
       },
       "musicLayer": "base_synth+arp",
       "specialEnemy": "brute",
       "boss": "twin_warden",
-      "description": "Dua pilar besar di tengah membentuk 3 lorong sempit. Peluru mudah terjebak zig-zag bernilai tinggi.",
+      "description": "Dua menara data membelah lorong jadi tiga jalur sempit. Zig-zag bernilai tinggi.",
       "obstacles": [
         {
           "type": "pillar",
-          "x": -3.6,
+          "x": -2.16,
           "z": 20.0,
-          "radius": 2.4
+          "radius": 1.44
         },
         {
           "type": "pillar",
-          "x": 3.6,
+          "x": 2.16,
           "z": 20.0,
-          "radius": 2.4
+          "radius": 1.44
         },
         {
           "type": "bumper",
-          "x": -7.5,
+          "x": -4.5,
           "z": 11.0,
           "radius": 0.9
         },
         {
           "type": "bumper",
-          "x": 7.5,
+          "x": 4.5,
           "z": 11.0,
           "radius": 0.9
         },
         {
           "type": "bumper",
-          "x": -7.5,
+          "x": -4.5,
           "z": 28.0,
           "radius": 0.9
         },
         {
           "type": "bumper",
-          "x": 7.5,
+          "x": 4.5,
           "z": 28.0,
           "radius": 0.9
         }
@@ -408,43 +468,50 @@
     {
       "id": "gravity_chamber",
       "index": 3,
-      "name": "Kuil Melayang",
+      "name": "Singularity Bay",
       "theme": {
-        "primary": "#6FE3C4",
-        "enemy": "#D4544F",
-        "bumper": "#7A5CFF",
-        "bgTop": "#0E2630",
-        "bgBottom": "#040B0F",
-        "grid": "#4E8C84"
+        "primary": "#2BFFE0",
+        "enemy": "#FF4D4D",
+        "bumper": "#FF2BD6",
+        "bgTop": "#0D2338",
+        "bgBottom": "#04080F",
+        "grid": "#1E9E9E",
+        "player": "#E4F3FF",
+        "tracer": "#FF2A2A",
+        "chain": "#9B5CFF",
+        "bumperGlow": "#FFA8F0",
+        "wallPanel": "#17304a",
+        "fog": "#1C2A5C",
+        "vortex": "#5C32C4"
       },
       "musicLayer": "base_synth+pad",
       "specialEnemy": "splitter",
       "boss": "singularity",
-      "description": "Dua gravity well membelokkan peluru jadi kurva. Lintasan non-linear, reward tinggi.",
+      "description": "Dua sumur gravitasi melengkungkan peluru. Lintasan non-linear, imbalan tinggi.",
       "obstacles": [
         {
           "type": "gravityWell",
-          "x": -4.0,
+          "x": -2.4,
           "z": 15.0,
-          "radius": 4.0,
+          "radius": 2.4,
           "force": 5.0
         },
         {
           "type": "gravityWell",
-          "x": 4.0,
+          "x": 2.4,
           "z": 26.0,
-          "radius": 4.0,
+          "radius": 2.4,
           "force": 5.0
         },
         {
           "type": "bumper",
-          "x": -6.0,
+          "x": -3.6,
           "z": 21.0,
           "radius": 0.9
         },
         {
           "type": "bumper",
-          "x": 6.0,
+          "x": 3.6,
           "z": 21.0,
           "radius": 0.9
         }
@@ -453,38 +520,45 @@
     {
       "id": "explosive_yard",
       "index": 4,
-      "name": "Ladang Bara",
+      "name": "Fuel Yard",
       "theme": {
-        "primary": "#FF9D3C",
-        "enemy": "#D9603A",
-        "bumper": "#FF5A4D",
-        "bgTop": "#2E140A",
-        "bgBottom": "#0C0402",
-        "grid": "#A35A2E"
+        "primary": "#FFB02E",
+        "enemy": "#FF5A1F",
+        "bumper": "#FF3DA6",
+        "bgTop": "#331026",
+        "bgBottom": "#0B0408",
+        "grid": "#C2561F",
+        "player": "#DCE6F2",
+        "tracer": "#FF2A2A",
+        "chain": "#FF6AD5",
+        "bumperGlow": "#FFB0E6",
+        "wallPanel": "#3A1A20",
+        "fog": "#3A1430",
+        "vortex": "#8A2F6B"
       },
       "musicLayer": "base_synth+percussion",
       "specialEnemy": "bomber",
       "boss": "pyro_baron",
-      "description": "Ladang barrel. Satu pantulan tepat memicu chain explosion sepanjang arena.",
+      "description": "Ladang drum bahan bakar. Satu pantulan tepat memicu ledakan berantai sepanjang arena.",
       "obstacles": [
         {
           "type": "barrel",
-          "x": -6.0,
+          "x": -3.6,
           "z": 12.0
         },
         {
           "type": "barrel",
-          "x": -4.0,
+          "x": -2.4,
           "z": 14.0
         },
         {
           "type": "barrel",
-          "x": 4.0,
+          "x": 2.4,
           "z": 14.0
         },
         {
           "type": "barrel",
-          "x": 6.0,
+          "x": 3.6,
           "z": 12.0
         },
         {
@@ -494,54 +568,61 @@
         },
         {
           "type": "barrel",
-          "x": -5.0,
+          "x": -3.0,
           "z": 24.0
         },
         {
           "type": "barrel",
-          "x": 5.0,
+          "x": 3.0,
           "z": 24.0
         },
         {
           "type": "barrel",
-          "x": -2.0,
+          "x": -1.2,
           "z": 27.0
         },
         {
           "type": "barrel",
-          "x": 2.0,
+          "x": 1.2,
           "z": 27.0
         },
         {
           "type": "pillar",
           "x": 0.0,
           "z": 22.0,
-          "radius": 1.5
+          "radius": 0.9
         }
       ]
     },
     {
       "id": "moving_maze",
       "index": 5,
-      "name": "Labirin Berduri",
+      "name": "Shift Grid",
       "theme": {
-        "primary": "#9ADB5E",
-        "enemy": "#C2503D",
-        "bumper": "#8A5CFF",
-        "bgTop": "#122A17",
-        "bgBottom": "#040D06",
-        "grid": "#4E7A4A"
+        "primary": "#7CFF4D",
+        "enemy": "#E03A2F",
+        "bumper": "#FF2BD6",
+        "bgTop": "#10202A",
+        "bgBottom": "#050A0C",
+        "grid": "#39A86B",
+        "player": "#DCE6F2",
+        "tracer": "#FF2A2A",
+        "chain": "#A64BFF",
+        "bumperGlow": "#FF9BEE",
+        "wallPanel": "#1C2E2A",
+        "fog": "#1E2A44",
+        "vortex": "#6B2FA8"
       },
       "musicLayer": "base_synth+glitch",
       "specialEnemy": "shielder",
       "boss": "shifter",
-      "description": "Tiga platform bergerak memaksa timing. Formasi musuh pecah dinamis saat tertahan.",
+      "description": "Pelat lantai bergeser terus. Celah tembak berubah tiap detik.",
       "obstacles": [
         {
           "type": "movingPlatform",
           "x": 0.0,
           "z": 12.0,
-          "width": 5.0,
+          "width": 3.0,
           "travel": 6.0,
           "speed": 2.0,
           "phase": 0.0
@@ -550,7 +631,7 @@
           "type": "movingPlatform",
           "x": 0.0,
           "z": 20.0,
-          "width": 5.0,
+          "width": 3.0,
           "travel": 6.0,
           "speed": 2.5,
           "phase": 0.5
@@ -559,22 +640,22 @@
           "type": "movingPlatform",
           "x": 0.0,
           "z": 28.0,
-          "width": 5.0,
+          "width": 3.0,
           "travel": 6.0,
           "speed": 1.8,
           "phase": 0.25
         },
         {
           "type": "shieldWall",
-          "x": -6.5,
+          "x": -3.9,
           "z": 16.0,
-          "width": 3.0
+          "width": 1.8
         },
         {
           "type": "shieldWall",
-          "x": 6.5,
+          "x": 3.9,
           "z": 24.0,
-          "width": 3.0
+          "width": 1.8
         }
       ]
     }
@@ -655,7 +736,7 @@
     "bossHpScaleNote": "Measured, not guessed. At full HP the boss phase stalled in 5/30 runs because auto-fire cannot satisfy vulnerability rules and the player at troop cap cannot die. A stalemate is worse than a loss. Sweep: 1.00 -> 5 stalls, 0.65 -> 5, 0.50 -> 1, 0.40 -> 0."
   },
   "squad": {
-    "note": "Last War ATM: player squad slides horizontally and auto-fires. Auto-fire is chip damage; the aimed ricochet chain shot is the skill layer.",
+    "note": "Satu prajurit, bukan peleton (keputusan NEON, docs/18 Fase 4). Nilai `troops` tetap mengemudikan laju tembak dan hukuman kebobolan, tapi dibaca sebagai POWER senjata. Aturan sim tidak berubah, jadi replay lama tetap cocok.",
     "startTroops": 5,
     "maxTroops": 100,
     "minTroops": 1,
@@ -684,14 +765,16 @@
       "chargePerKill": 0.12,
       "maxCharges": 2,
       "note": "Ricochets, can be ridden. Fires straight up from squad X: position IS the aim."
-    }
+    },
+    "presentation": "solo",
+    "powerLabel": "POWER"
   },
   "gates": {
     "note": "Math doors descend toward the player. Squad passing -> troop count. Ridden bullet passing -> bullet buffs. Both, per design decision.",
     "enabled": true,
     "spawnZ": 38.0,
     "descendSpeed": 2.4,
-    "halfWidth": 4.7,
+    "halfWidth": 2.82,
     "centerGapX": 0.6,
     "height": 0.9,
     "firstAtSeconds": 6.0,
@@ -771,56 +854,56 @@
     "cards": [
       {
         "id": "extra_troops",
-        "name": "Panggilan Perang",
-        "desc": "+4 prajurit awal",
+        "name": "Overclock Inti",
+        "desc": "+4 daya tembak awal",
         "stat": "startTroops",
         "add": 4.0
       },
       {
         "id": "fire_rate",
-        "name": "Tempo Busur",
-        "desc": "+15% laju serang otomatis",
+        "name": "Siklus Cepat",
+        "desc": "+15% laju tembak otomatis",
         "stat": "fireRateMul",
         "mul": 1.15
       },
       {
         "id": "auto_damage",
-        "name": "Mata Panah Perak",
-        "desc": "+20% damage serang otomatis",
+        "name": "Muatan Terfokus",
+        "desc": "+20% damage tembak otomatis",
         "stat": "autoDamageMul",
         "mul": 1.2
       },
       {
         "id": "chain_bounces",
-        "name": "Sihir Pantul",
+        "name": "Lapis Pantul",
         "desc": "+5 pantulan chain shot",
         "stat": "bounceBudget",
         "add": 5.0
       },
       {
         "id": "chain_damage",
-        "name": "Inti Naga",
+        "name": "Inti Plasma",
         "desc": "+25% damage chain shot",
         "stat": "chainDamageMul",
         "mul": 1.25
       },
       {
         "id": "charge_speed",
-        "name": "Mantra Cepat",
+        "name": "Kapasitor Kilat",
         "desc": "Chain shot terisi 20% lebih cepat",
         "stat": "chargeRateMul",
         "mul": 1.2
       },
       {
         "id": "move_speed",
-        "name": "Sepatu Peri",
-        "desc": "+12% kecepatan gerak squad",
+        "name": "Servo Ringan",
+        "desc": "+12% kecepatan geser",
         "stat": "moveSpeedMul",
         "mul": 1.12
       },
       {
         "id": "gate_luck",
-        "name": "Ramalan Baik",
+        "name": "Prediksi Gerbang",
         "desc": "Gerbang negatif 25% lebih jarang",
         "stat": "negativeSideChance",
         "mul": 0.75

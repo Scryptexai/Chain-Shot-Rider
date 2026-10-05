@@ -22,39 +22,56 @@
   'use strict';
 
   // --- Framing ---------------------------------------------------------------
-  // Arena is 20 wide x 40 deep; portrait is 9:16. Those ratios (1:2 vs 1:1.78)
-  // are close, so a high, steeply tilted camera frames the lane almost exactly.
-  // Verified numerically by tools/render3d_test.js, not by eyeballing.
+  // Over-the-shoulder NEON framing, sama persis dengan build Godot. Angkanya
+  // diselesaikan dari tiga ukuran key art (docs/17 §17.2) oleh
+  // tools/solve_framing.py: pemain di 87% tinggi layar, setinggi 18.5% layar,
+  // horizon di 14%. Kamera lama (fov 40, tinggi 47) membingkai arena dari
+  // atas seperti papan permainan dan membuat pemain sebesar ibu jari.
   var CAM = {
-    fov: 40,          // vertical FOV in degrees
-    pos: [0, 47, 24], // three.js position: high, tilted 39 degrees
-    look: [0, 0, -14],
+    fov: 60,            // vertical FOV in degrees at 9:16
+    pos: [0, 15.95, 11.1],
+    // Titik bidik di lantai, bukan di nol: pitch 22.5 derajat ke bawah.
+    look: [0, 0, -27.4],
     near: 0.5,
-    far: 160,
+    far: 200,
   };
 
-  var ARENA = { halfWidth: 10, depth: 40, defenseLineZ: 5 };
+  // Lorong dipersempit 20 -> 12 bersama config: pada framing baru dinding di
+  // x=+-10 baru masuk layar di z~20, artinya separuh pantulan terjadi di luar
+  // layar. Lihat tools/migrate_neon.py.
+  var ARENA = { halfWidth: 6, depth: 40, defenseLineZ: 5 };
   // Lantai dan dinding dipanjangkan ke arah kamera melewati garis pertahanan.
   // Arena logis tetap 0..40; tambahan ini murni visual, supaya tanah mengisi
   // tepi bawah layar alih-alih berhenti di tengah-tengah dan menyisakan pita
   // hitam di bawah HUD — persis cacat yang terlihat di build sebelumnya.
-  var APRON = 14;
+  var APRON = 34;
+  // Lantai juga diteruskan jauh melewati gerbang spawn, supaya ujung lorong
+  // larut dalam kabut alih-alih berhenti sebagai garis potong di sepertiga
+  // atas layar — cacat yang langsung terlihat begitu kamera direndahkan.
+  var APRON_FAR = 120;
 
   // Palet dunia bergaya fantasi: tanah berlumut, pagar kayu-batu, dan cahaya
   // obor — bukan neon. Warna aksen per stage tetap datang dari config
   // (variants[].theme), yang di sini hanya dipakai sebagai sorotan, supaya
   // arena tidak pernah lebih terang daripada karakternya sendiri.
+  // Palet NEON, diambil dari config.artDirection (docs/17 §17.3). Nilai di
+  // sini adalah cadangan untuk halaman yang memuat renderer sebelum config
+  // selesai diunduh; begitu config ada, warnanya menang.
   var PAL = {
-    bg: 0x0b1424,
-    floor: 0x2c3324,
-    floorFar: 0x161b13,
-    grid: 0x6e7a5e,
-    wall: 0x4a4336,
-    danger: 0xc62828,
-    gatePos: 0x6fcf6a,
-    gateNeg: 0xc2503d,
-    bullet: 0xffe9a8,
-    chain: 0xb46bff,
+    bg: 0x070a14,
+    floor: 0x0e1322,
+    floorFar: 0x06080f,
+    grid: 0x2be8ff,
+    wall: 0x2a1b3d,
+    wallGlow: 0xff2bd6,
+    danger: 0xff2a2a,
+    gatePos: 0x2be8ff,
+    gateNeg: 0xff2a2a,
+    bullet: 0xd9a441,
+    chain: 0xa64bff,
+    fog: 0x2a1340,
+    tracer: 0xff2a2a,
+    blast: 0xff9a2e,
   };
 
   // Props arena (tools/build_assets.py). Hanya benda mati: karakter TIDAK ada
@@ -651,18 +668,19 @@
     var c = document.createElement('canvas');
     c.width = c.height = 256;
     var g = c.getContext('2d');
-    // Lempeng batu berlumut, bukan kisi neon: dua garis nat yang pudar plus
-    // bercak tanah yang ditaburkan dengan acak berbenih tetap, supaya lantai
-    // punya tekstur tanpa satu pun berkas gambar tambahan di build.
-    g.fillStyle = '#222a18'; g.fillRect(0, 0, 256, 256);
+    // Pelat logam basah dengan kisi cahaya: bercak kotor berbenih tetap,
+    // lalu dua garis kisi cyan yang terang. Padanan floor_grid.gdshader di
+    // sisi Godot — tidak sama persis (kanvas tidak punya fwidth), tapi
+    // membaca sebagai lantai yang sama.
+    g.fillStyle = '#0e1322'; g.fillRect(0, 0, 256, 256);
     var seed = 20260929;
     function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
     for (var i = 0; i < 90; i++) {
       var r = 6 + rnd() * 26;
-      g.fillStyle = rnd() < 0.5 ? 'rgba(48,58,36,0.55)' : 'rgba(26,32,20,0.55)';
+      g.fillStyle = rnd() < 0.5 ? 'rgba(22,30,52,0.55)' : 'rgba(8,11,20,0.6)';
       g.beginPath(); g.ellipse(rnd() * 256, rnd() * 256, r, r * 0.6, rnd() * 3.14, 0, 6.28); g.fill();
     }
-    g.strokeStyle = 'rgba(110,122,94,0.35)'; g.lineWidth = 3;
+    g.strokeStyle = 'rgba(43,232,255,0.75)'; g.lineWidth = 3;
     g.beginPath(); g.moveTo(0, 0); g.lineTo(256, 0); g.moveTo(0, 0); g.lineTo(0, 256); g.stroke();
     var tex = new THREE.CanvasTexture(c);
     // Kanvas berisi warna sRGB (itulah arti '#222a18' di CSS). Sejak keluaran
@@ -750,8 +768,10 @@
     renderer.outputEncoding = THREE.sRGBEncoding;
 
     scene = new THREE.Scene();
-    scene.background = col(PAL.bg);
-    scene.fog = new THREE.FogExp2(col(PAL.bg).getHex(), 0.009);
+    // Latar dan kabut memakai warna kabut, bukan warna malam: ujung lantai
+    // harus melebur ke langit, dan itu hanya terjadi kalau keduanya sewarna.
+    scene.background = col(PAL.fog);
+    scene.fog = new THREE.FogExp2(col(PAL.fog).getHex(), 0.022);
 
     camera = makeCamera(9 / 16);
 
@@ -762,26 +782,30 @@
     // Intensitas diturunkan sejak keluaran renderer pindah ke sRGB: dengan
     // pipeline warna yang benar, total 3,8 yang dulu terasa pas langsung
     // membakar lantai jadi hijau pucat dan menghapus bayangan di zirah.
-    scene.add(new THREE.HemisphereLight(0xa8c4e8, 0x241f14, 0.5));
-    var sun = new THREE.DirectionalLight(0xfff0d2, 1.35);
-    sun.position.set(16, 34, 18); scene.add(sun);
-    var fill = new THREE.DirectionalLight(0xff9a4d, 0.25);
-    fill.position.set(-18, 20, -16); scene.add(fill);
+    // Cahaya NEON: langit ungu dingin dari atas, kunci putih-biru dari depan
+    // kanan (ini yang memahat zirah pemain), dan isian magenta lemah dari
+    // sisi dinding supaya karakter ikut memungut warna lorong.
+    scene.add(new THREE.HemisphereLight(0x6b7fd4, 0x14091f, 0.55));
+    var sun = new THREE.DirectionalLight(0xdce6f2, 1.25);
+    sun.position.set(10, 26, 16); scene.add(sun);
+    var fill = new THREE.DirectionalLight(0xff2bd6, 0.35);
+    fill.position.set(-18, 8, -12); scene.add(fill);
 
     // --- static world ---
     var floorMat = new THREE.MeshLambertMaterial({ map: makeGridTexture() });
+    var floorLen = ARENA.depth + APRON + APRON_FAR;
     var floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(ARENA.halfWidth * 2, ARENA.depth + APRON), floorMat);
+      new THREE.PlaneGeometry(ARENA.halfWidth * 2, floorLen), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, -ARENA.depth / 2 + APRON / 2);
+    floor.position.set(0, 0, -ARENA.depth / 2 + (APRON - APRON_FAR) / 2);
     scene.add(floor);
 
     var wallMat = new THREE.MeshLambertMaterial({
-      color: col(PAL.wall), emissive: col(PAL.grid), emissiveIntensity: 0.18,
+      color: col(PAL.wall), emissive: col(PAL.wallGlow), emissiveIntensity: 1.1,
     });
     [-1, 1].forEach(function (s) {
-      var w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, ARENA.depth + APRON), wallMat);
-      w.position.set(s * (ARENA.halfWidth + 0.25), 0.7, -ARENA.depth / 2 + APRON / 2);
+      var w = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.8, ARENA.depth + APRON), wallMat);
+      w.position.set(s * (ARENA.halfWidth + 0.22), 0.9, -ARENA.depth / 2 + APRON / 2);
       scene.add(w);
     });
 
@@ -1113,8 +1137,12 @@
 
     // --- squad: a block formation centred on squadX ---
     pools.troops.begin();
-    var shown = Math.min(S.troops || 0, 48);
-    var perRow = 6, sx = lerpFrom(S.prevSquadX, S.squadX || 0, lerpA);
+    // Satu prajurit, bukan peleton (docs/18 Fase 4, keputusan D1). `troops`
+    // tetap jadi angka aturan — laju tembak dan hukuman kebocoran — tapi
+    // dibaca sebagai POWER senjata, bukan jumlah badan. Keputusan tampilan
+    // murni: simulasinya tidak diubah sebaris pun.
+    var shown = (S.troops || 0) > 0 ? 1 : 0;
+    var perRow = 1, sx = lerpFrom(S.prevSquadX, S.squadX || 0, lerpA);
     // Jarak formasi ikut membesar bersama CHAR_SCALE, kalau tidak bahu
     // prajurit saling menembus dan barisan jadi bubur.
     var spread = 0.42 * CHAR_SCALE;
@@ -1142,7 +1170,9 @@
         actor.root.position.set(tx, 0, -tz);
         actor.root.rotation.y = 0;              // menghadap -Z, arah musuh
         if (actor.lock <= 0) play(actor, moving ? 'run' : 'idle');
-        if (fresh && i < 3) {
+        // Pemain digambar lebih besar: ia jangkar komposisi key art.
+        actor.root.scale.setScalar(charScale('trooper') * 1.35);
+        if (fresh) {
           oneShot(actor, 'shoot', 0.22);
           if (actor.muzzle) {
             actor.muzzle.getWorldPosition(muzzleWorld);
@@ -1153,9 +1183,11 @@
             fm.position.copy(muzzleWorld);
             fm.quaternion.copy(camera.quaternion);
             fm.scale.setScalar(0.85);
-            fm.material.color.setHex(0xfff3c4);
+            // Kilatan moncong BIRU: satu-satunya cara membedakan tembakan
+            // sendiri dari hujan tracer musuh dalam seperlima detik.
+            fm.material.color.setHex(0x2be8ff);
             fm.material.opacity = 0.95;
-            blob(muzzleWorld.x, muzzleWorld.y, -muzzleWorld.z, 0.16, PAL.bullet, 0.9);
+            blob(muzzleWorld.x, muzzleWorld.y, -muzzleWorld.z, 0.2, PAL.grid, 0.9);
           }
         }
         continue;
