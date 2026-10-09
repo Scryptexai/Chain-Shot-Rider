@@ -54,6 +54,7 @@ godot --headless --path godot/ --script tests/sim_headless.gd   # aturan + deter
 godot --headless --path godot/ res://tests/smoke.tscn           # scene nyata, 5 varian
 gdlint godot/scripts                                            # batas 1000 baris/berkas
 node tools/qa_screenshot.js http://localhost:8000/ --play       # bukti visual
+node tools/look_audit.js 14 look                                # adegan penuh untuk menilai arah visual
 ```
 
 ## Lisensi aset

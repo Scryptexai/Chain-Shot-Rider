@@ -39,8 +39,8 @@ Jarak yang tersisa ke key art, diurutkan dari yang paling terlihat:
    berjambul tidak bisa dilepas sebagian). Cat, proporsi, dan senjatanya
    sudah diganti; sisanya menunggu model sci-fi CC0.
 2. Musuh yang mati karena ledakan tidak terlempar; mereka hanya jatuh.
-3. Prototipe web belum punya latar kota, kerumunan jauh, maupun hujan tracer,
-   jadi ujung lorongnya kosong.
+3. ~~Prototipe web belum punya latar kota, kerumunan jauh, maupun hujan
+   tracer.~~ **Selesai** — lihat M3.
 4. Belum ada tingkat kualitas; glow dan pantulan selalu menyala.
 5. Balance belum disetel ulang setelah lorong menyempit 20 → 12.
 
@@ -92,18 +92,17 @@ bukan sekadar unit yang hilang.
 
 ---
 
-## M3 — Paritas web
+## M3 — Paritas web — **sebagian besar SELESAI**
 
 Prototipe web adalah satu-satunya mata yang kita punya di sandbox ini; kalau
 ia tertinggal dua generasi, kita kehilangan kemampuan memverifikasi apa pun.
 
-- [ ] Teruskan `events` simulasi ke renderer web (prasyarat death pop di web)
-- [ ] Port latar: kota + kabut + vortex (shader quad → canvas texture).
-- [ ] Port kerumunan jauh di balik gerbang.
-- [ ] Port hujan tracer.
-- [ ] Port jejak api chain shot dan busur petir.
-- [ ] `tools/qa_screenshot.js` dijalankan tiap milestone, hasilnya disimpan
-      sebagai `screenshots/mN-*.png`.
+- [x] Port latar: kota + kabut + vortex sebagai quad bertekstur kanvas di z=150. Geometrinya DIHITUNG, bukan dikira: horizon jatuh di baris 146 dari 256, dan tepi bawahnya dihapus dengan gradien alfa supaya larut ke lantai berkabut.
+- [x] Port kerumunan jauh: 220 InstancedMesh di z 44..96, melebar ke belakang, warna melebur ke kabut.
+- [x] Port hujan tracer: kolam 120 batang aditif, laju dari jumlah musuh, menuju SEKITAR pemain.
+- [x] Port jejak api: pita 18 titik yang menyempit ke ekor, inti putih→oranye, ekor ungu saat combo ≥ 20. Busur petir dipicu oleh pembalikan arah peluru — renderer tidak pernah bertanya apa pun pada simulasi.
+- [x] `tools/look_audit.js` (baru): memotret adegan PENUH — musuh dekat, tracer hidup, tutorial sudah dibuang. `qa_screenshot.js` memotret empat detik setelah mulai, yang selalu menghasilkan lorong kosong dan menyembunyikan justru hal yang perlu dinilai.
+- [ ] Teruskan `events` simulasi ke renderer web (prasyarat death pop di web).
 
 **Lulus kalau:** screenshot web berdampingan dengan key art terbaca sebagai
 game yang sama.

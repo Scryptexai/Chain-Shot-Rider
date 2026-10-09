@@ -125,10 +125,20 @@
     box-shadow:inset 0 3px 0 rgba(255,255,255,.1), inset 0 0 0 3px rgba(var(--accentRGB),.5),
       0 2px 0 rgba(2,6,16,.9), 0 6px 14px rgba(0,0,0,.5); }
 
-  .combo { position:absolute; top:430px; left:0; right:0; text-align:center;
-    font:900 86px/1 var(--display); color:var(--gold); opacity:0; transform:scale(.8);
-    text-shadow:0 0 36px rgba(255,213,79,.6), 0 7px 0 rgba(0,0,0,.45);
-    transition:transform .12s ease-out, opacity .25s ease; }
+  /* Combo: angka chrome besar di KANAN ATAS, bukan teks kecil di tengah.
+     Di key art inilah elemen antarmuka terbesar di layar — x999 COMBO
+     menyala setinggi seperenam layar. Ditaruh di kanan atas karena lorong
+     menyempit ke tengah: sudut adalah satu-satunya tempat angka sebesar ini
+     tidak menutupi lintasan peluru. */
+  .combo { position:absolute; top:150px; right:22px; text-align:right;
+    font:900 86px/0.88 ui-monospace,"SF Mono",Menlo,monospace; letter-spacing:-2px;
+    color:#9bf2ff;
+    text-shadow:0 0 2px #0a2a33, 0 3px 0 #0a2a33, 0 0 22px rgba(43,232,255,.75),
+      0 0 46px rgba(43,232,255,.35);
+    opacity:0; transform:scale(.7); transform-origin:100% 50%;
+    transition:opacity .12s, transform .12s; pointer-events:none; }
+  .combo::after { content:"COMBO"; display:block; font-size:22px; letter-spacing:6px;
+    color:#2be8ff; text-shadow:0 0 12px rgba(43,232,255,.8); margin-top:-4px; }
   .combo.on { opacity:1; transform:scale(1); }
 
   /* ---------- Boss ---------- */
