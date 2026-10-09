@@ -19,7 +19,7 @@ dari penonton**, bukan lorong yang didekati.
 | Properti | Nilai terbaca | Catatan |
 | --- | --- | --- |
 | Rasio | 9:16 potret | 720×1280 |
-| Sudut pandang | belakang-atas, pitch ~25–30° ke bawah | ekor jet terlihat penuh, sayap hampir datar |
+| Sudut pandang | belakang-atas, pitch **11,1°** ke bawah | taksiran mata 25–30° salah: dengan FOV vertikal 60°, cakrawala 0,33 mengunci pitch di 11,1° (lihat N1) |
 | Jangkar pemain X | 0.50 (tengah) | bukan 0.87 seperti spec lama |
 | Jangkar pemain Y | ~0.72 dari atas | hidung jet ~0.60, nozzle ~0.80 |
 | Tinggi pemain | ~**20%** tinggi layar | ujung sayap ke ujung sayap ~38% lebar layar |
@@ -28,7 +28,17 @@ dari penonton**, bukan lorong yang didekati.
 | Roll | 0 | jet lurus, horizon datar |
 
 Konsekuensi langsung: kamera lorong (pitch 22,5°, anchor 0,87, horizon 0,14)
-**tidak berlaku lagi**. Nilai baru harus diselesaikan ulang.
+**tidak berlaku lagi**.
+
+**Solusi kamera N1 (terpasang, terbukti di `tools/render3d_test.js` §4):**
+pitch 11,1° · jet 25,4° di bawah horizontal dari kamera · jarak miring 19,8 ·
+kamera 8,5 di atas dan 17,9 di belakang jet · FOV 60° · roll 0.
+Terukur: jangkar X **50,0%**, jangkar Y **72,1%**, cakrawala **33,2%**.
+
+Jarak dinaikkan dari 17,7 (nilai murni dari "jet 20% tinggi layar") ke 19,8
+karena pada 17,7 lebar pandang di baris jet hanya 11,4 unit sementara koridor
+pantul selebar 12 — pantulan di samping pemain terjadi di luar layar. Jet jadi
+18% dan bukan 20%; keterbacaan pantulan lebih mahal daripada dua persen itu.
 
 ---
 

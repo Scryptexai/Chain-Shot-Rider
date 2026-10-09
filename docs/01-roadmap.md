@@ -42,15 +42,27 @@ vortex ungu, framing anchor 0,87 / horizon 0,14, dan palet `3.0.0-neon`.
 
 ---
 
-## N1 — Framing dan langit (pondasi)
+## N1 — Framing dan langit (pondasi) — **SELESAI**
 
-- [ ] Selesaikan ulang kamera: jangkar pemain X 0,50 · Y 0,72 · tinggi 20% ·
-      cakrawala 0,33 · pitch 25–30° ke bawah · roll 0.
-- [ ] Ganti `scene.background` dan backdrop: langit senja bergradien
-      `#2E3E4E` → `#F8D496` dengan lapisan awan kumulus.
-- [ ] Bidang laut `#67738B` dengan pantulan api, bergulir menjauh.
-- [ ] Naikkan ambang bloom: hanya api, peluru, dan inti bos yang mekar.
-- [ ] Perbarui asersi `tools/render3d_test.js` ke angka jangkar baru.
+Bukti: `screenshots/look-n1.png`.
+
+- [x] Kamera diselesaikan ulang dan diturunkan dari konstanta, bukan angka
+      ajaib: `PITCH_DEG 11,1` · `DROP_DEG 25,4` · `RANGE 19,8`. Terukur
+      50,0% / 72,1% / 33,2%.
+- [x] Langit senja sebagai `scene.background` (kanvas 512×1024, gradien
+      dimampatkan ke sepertiga atas, awan tiga pita perspektif).
+- [x] Laut `#4A5570` dengan riak mendatar dan pantulan api, 6 unit di bawah
+      bidang aksi — simulasi tidak tahu apa-apa soal ketinggian terbang.
+- [x] Kabut dicocokkan dengan pita cakrawala (`#D9C0A0`, 0,0082) supaya laut
+      jauh melebur ke langit tanpa garis potong.
+- [x] Ambang bloom dinaikkan 0,74 → 0,88 untuk adegan siang.
+- [x] Dibuang: lantai kisi, dinding magenta, latar kota/vortex, pelataran,
+      kerumunan jauh (±280 baris). Batas koridor sekarang dua tirai cahaya
+      samar; aturan pantul di x=±6 tidak disentuh.
+- [x] `tools/render3d_test.js` §1 dan §4 ditulis ulang ke spesifikasi baru.
+
+Sisa yang terlihat di tangkapan layar dan sengaja ditunda: badan pemain masih
+rig berjalan kaki (N2), musuh masih pylon (N4), HUD masih lama (N6).
 
 ## N2 — Jet pemain
 

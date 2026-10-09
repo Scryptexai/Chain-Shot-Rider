@@ -22,23 +22,56 @@
   'use strict';
 
   // --- Framing ---------------------------------------------------------------
-  // Over-the-shoulder NEON framing, sama persis dengan build Godot. Angkanya
-  // diselesaikan dari tiga ukuran key art (docs/17 §17.2) oleh
-  // tools/solve_framing.py: pemain di 87% tinggi layar, setinggi 18.5% layar,
-  // horizon di 14%. Kamera lama (fov 40, tinggi 47) membingkai arena dari
-  // atas seperti papan permainan dan membuat pemain sebesar ibu jari.
+  // Framing shmup udara, diselesaikan dari docs/images/keyart-master.jpg.
+  //
+  // Tiga ukuran yang dibaca dari gambar mengunci seluruh kamera:
+  //   jangkar pemain  x 0,50 · y 0,72 dari atas
+  //   tinggi pemain   20% tinggi layar
+  //   cakrawala       0,33 dari atas
+  //
+  // Dari cakrawala saja pitch sudah tertentukan: dengan FOV vertikal 60°,
+  //   y_cakrawala = 0,5 - 0,5·tan(pitch)/tan(30°)  ⇒  pitch = 11,1°.
+  // Art bible sempat menaksir 25–30° dengan mata; geometri menang, dan
+  // taksiran itu sudah dikoreksi di dokumen. Dari pitch + jangkar pemain,
+  // jet berada 25,4° di bawah horizontal dari kamera, dan dari tinggi 20%
+  // jarak miringnya 17,7 unit. Maka kamera duduk 7,6 di atas dan 16 di
+  // belakang jet.
+  //
+  // Perhatikan tanda z: simulasi memakai z maju positif, renderer memetakan
+  // z_sim -> -z_dunia. Jet di z_sim=2 berarti z_dunia=-2, jadi kamera di
+  // z_dunia = -2 + 16 = 14. Versi pertama memakai 18 dan melesetkan jangkar
+  // ke 64,5% — kesalahan tanda yang hanya ketahuan lewat uji proyeksi.
+  // Turunan, bukan angka ajaib: ubah salah satu konstanta di bawah dan
+  // posisi serta titik bidik ikut menyesuaikan sendiri.
+  //
+  //   PITCH_DEG   dikunci oleh cakrawala 0,33 (lihat rumus di atas)
+  //   DROP_DEG    dikunci oleh jangkar pemain 0,72
+  //   RANGE       jarak miring kamera -> jet
+  //
+  // RANGE dinaikkan dari 17,7 (nilai yang jatuh langsung dari "tinggi jet
+  // 20% layar") menjadi 19,8. Alasannya terukur: pada 17,7 lebar pandang di
+  // baris jet hanya 11,4 unit sedangkan koridor pantul selebar 12, jadi
+  // pantulan tepat di samping pemain terjadi DI LUAR layar. Jet jadi tampil
+  // 18% dan bukan 20% tinggi layar — masih di dalam toleransi, dan
+  // keterbacaan pantulan lebih mahal daripada selisih dua persen itu.
+  var PITCH_DEG = 11.1, DROP_DEG = 25.4, RANGE = 19.8;
+  var _p = PITCH_DEG * Math.PI / 180, _d = DROP_DEG * Math.PI / 180;
+  // Jet di z_sim=2; renderer memetakan z_sim -> -z_dunia, jadi z_dunia=-2.
+  // Versi pertama lupa tanda ini dan melesetkan jangkar ke 64,5%.
+  var _jetZ = -2;
+  var _camY = RANGE * Math.sin(_d), _camZ = _jetZ + RANGE * Math.cos(_d);
+
   var CAM = {
-    fov: 60,            // vertical FOV in degrees at 9:16
-    pos: [0, 15.95, 11.1],
-    // Titik bidik di lantai, bukan di nol: pitch 22.5 derajat ke bawah.
-    look: [0, 0, -27.4],
+    fov: 60,
+    pos: [0, _camY, _camZ],
+    look: [0, _camY - Math.sin(_p) * 50, _camZ - Math.cos(_p) * 50],
     near: 0.5,
-    far: 200,
+    far: 600,
   };
 
-  // Lorong dipersempit 20 -> 12 bersama config: pada framing baru dinding di
-  // x=+-10 baru masuk layar di z~20, artinya separuh pantulan terjadi di luar
-  // layar. Lihat tools/migrate_neon.py.
+  // Laut: bidang besar 6 unit DI BAWAH bidang aksi.
+  var SEA = { y: -6, size: 520 };
+
   var ARENA = { halfWidth: 6, depth: 40, defenseLineZ: 5, playerZ: 2 };
   // Lantai dan dinding dipanjangkan ke arah kamera melewati garis pertahanan.
   // Arena logis tetap 0..40; tambahan ini murni visual, supaya tanah mengisi
@@ -816,231 +849,155 @@
   }
 
   /**
-   * Latar: kota cyberpunk, kabut ungu, dan vortex — satu quad di ujung lorong.
+   * Langit senja dan laut.
    *
-   * Tanpa ini, 40% layar bagian atas adalah hitam kosong, dan itulah
-   * perbedaan paling besar antara tangkapan layar kita dan key art. Gambar
-   * itu tidak pernah punya ruang kosong: di atas horizon ada kota yang
-   * menyala, kabut tebal, dan pusaran yang menelan langit.
+   * Dua bidang ini menggantikan seluruh latar lama (kota neon, vortex,
+   * pelataran, kerumunan). Key art tidak punya satu pun di antaranya: yang
+   * ada adalah langit senja berawan di dua pertiga atas dan laut dingin yang
+   * memantulkan api di bawahnya.
    *
-   * Dibuat sebagai tekstur kanvas dan bukan shader karena ia tidak pernah
-   * berubah, tidak pernah bergerak, dan tidak pernah diinteraksi — satu
-   * gambar statis di kejauhan adalah bentuk paling murah dari kedalaman.
+   * Langit dipasang sebagai scene.background — bukan quad di kejauhan —
+   * karena ia harus mengisi SETIAP piksel di atas cakrawala tanpa peduli ke
+   * mana kamera menengok. Quad latar versi lama selalu meninggalkan tepi
+   * yang harus ditambal; background tidak punya tepi sama sekali.
    */
-  /**
-   * Geometri latar, dihitung dan bukan dikira-kira.
-   *
-   * Quad berdiri di z=150, sejauh 161 unit dari kamera. Pada framing ini
-   * (pitch 22,5°, FOV 60°) tepi atas layar memotong bidang itu di y=37,2 dan
-   * horizon ada di y=15,95 — jadi HANYA pita 21 unit itu yang pernah
-   * terlihat. Percobaan sebelumnya menaruh kota di tengah tekstur: yang
-   * muncul di layar adalah potongan kabutnya saja, lengkap dengan tepi bawah
-   * quad sebagai garis lurus melintang.
-   *
-   * Dengan quad y=-2..40, horizon (y=15,95) jatuh pada 57% dari bawah =
-   * baris 146 dari 256. Di situlah kaki kota harus berdiri; di bawahnya hanya
-   * kabut setipis mungkin, di atasnya langit dan vortex. Angka-angka ini
-   * diverifikasi dengan memproyeksikan titik lewat kamera game — bukan
-   * dengan trigonometri di kepala, yang sudah salah dua kali.
-   */
-  // y0=-2 menaruh tepi bawah quad di 24,5% layar — sedikit DI BAWAH ujung
-  // lantai (23,6%), supaya keduanya bertumpang tindih dan tidak pernah ada
-  // celah hitam di antaranya. Tepi itu sendiri dihapus dengan gradien alfa,
-  // karena tepi lurus melintang layar adalah cacat yang paling cepat
-  // terlihat dari semuanya.
-  var BACKDROP = { z: 150, y0: -2, y1: 40, width: 320, horizonRow: 146 };
+  var SKY = {
+    top: '#2E3E4E', mid: '#7E7E92', horizon: '#F8D496', glow: '#FFD9A0',
+  };
 
-  function makeBackdropTexture() {
+  function makeSkyTexture() {
     var c = document.createElement('canvas');
-    c.width = 512; c.height = 256;
+    // 512x1024, bukan 256x512: tekstur ini diregangkan ke seluruh layar, jadi
+    // setiap piksel kanvas menjadi dua piksel layar. Pada setengah resolusi,
+    // gumpalan awan selebar 70 px membengkak jadi bola putih raksasa —
+    // persis cacat pada iterasi pertama.
+    c.width = 512; c.height = 1024;
     var g = c.getContext('2d');
     if (!canPaint(g)) return null;
-    var HZ = BACKDROP.horizonRow;
 
-    // Langit malam hampir hitam, menghangat jadi ungu hanya tepat di atas
-    // horizon. Di key art ungu adalah KABUT, bukan warna langit; langit yang
-    // ikut ungu membuat sepertiga layar bersinar lebih terang daripada
-    // arena, dan mata berhenti melihat lorong.
-    var sky = g.createLinearGradient(0, 0, 0, HZ);
-    sky.addColorStop(0, '#04050b');
-    sky.addColorStop(0.55, '#0a0718');
-    sky.addColorStop(0.85, '#1b0d2e');
-    sky.addColorStop(1, '#2a1340');
-    g.fillStyle = sky; g.fillRect(0, 0, 512, HZ);
-    // Di bawah horizon: warna kabut murni, supaya sambungan dengan lantai
-    // berkabut tidak pernah terlihat sebagai garis.
-    g.fillStyle = '#2a1340'; g.fillRect(0, HZ, 512, 256 - HZ);
+    // Gradien DIMAMPATKAN ke sepertiga atas kanvas. Tekstur ini diregangkan
+    // ke seluruh layar, sedangkan laut menutupi 67% bawahnya — jadi pada
+    // pembagian 0..1 yang merata, seluruh pita emas senja jatuh di belakang
+    // laut dan yang tersisa terlihat hanyalah biru dingin. Cakrawala ada di
+    // 0,33, maka emasnya harus mendarat tepat di sana.
+    var H = 0.33;
+    var grad = g.createLinearGradient(0, 0, 0, 1024);
+    // Emas DIPADATKAN tepat di atas cakrawala, bukan disebar jadi pita
+    // selebar sepertiga layar. Matahari rendah hanya menyalakan beberapa
+    // derajat langit di atas garis air; sisanya tetap biru baja.
+    grad.addColorStop(0.00, SKY.top);
+    grad.addColorStop(H * 0.42, SKY.mid);
+    grad.addColorStop(H * 0.78, '#C8A98D');
+    grad.addColorStop(H * 0.94, SKY.horizon);
+    grad.addColorStop(H * 1.00, SKY.glow);
+    grad.addColorStop(Math.min(1, H * 1.06), '#E3C8A6');
+    grad.addColorStop(1.00, '#C9BCAB');
+    g.fillStyle = grad; g.fillRect(0, 0, 512, 1024);
 
-    var seed = 0x5EED11;
-    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
-
-    // Vortex: cincin elips berpilin, duduk di langit di atas kota.
-    var vx = 384, vy = 54;
-    for (var r = 40; r > 3; r -= 2.6) {
-      g.strokeStyle = 'rgba(150,72,224,' + (0.1 + (40 - r) / 40 * 0.62).toFixed(3) + ')';
-      g.lineWidth = 1 + (40 - r) / 16;
-      g.beginPath();
-      g.ellipse(vx + (40 - r) * 0.14, vy, r, r * 0.5, (40 - r) * 0.07, 0, 6.28);
-      g.stroke();
-    }
-    // Halo di sekeliling pusaran, lalu lubang gelap di tengahnya: tanpa halo
-    // ia hanya terbaca sebagai coretan, dengan halo ia terbaca sebagai benda
-    // yang menyedot cahaya.
-    var halo = g.createRadialGradient(vx, vy, 4, vx, vy, 46);
-    halo.addColorStop(0, 'rgba(167,96,238,0.42)');
-    halo.addColorStop(1, 'rgba(107,47,168,0)');
-    g.fillStyle = halo;
-    g.beginPath(); g.ellipse(vx, vy, 46, 26, 0, 0, 6.28); g.fill();
-    g.fillStyle = 'rgba(5,2,10,0.96)';
-    g.beginPath(); g.ellipse(vx + 5, vy, 7, 3.4, 0, 0, 6.28); g.fill();
-
-    // Kota: dua lapis siluet berdiri di baris horizon. Lapis belakang lebih
-    // pucat dan lebih pendek — kabut di antaranya yang menciptakan jarak.
-    [{ pale: true, max: 48, fill: '#130b22' }, { pale: false, max: 84, fill: '#07040d' }]
-      .forEach(function (layer) {
-        var x = -12;
-        while (x < 524) {
-          var w = 12 + rnd() * 30;
-          var h = layer.max * (0.22 + rnd() * 0.78);
-          g.fillStyle = layer.fill;
-          g.fillRect(x, HZ - h, w, h + 6);
-          if (!layer.pale) {
-            // Jendela menyala hanya di menara depan, dan jarang: kota yang
-            // seluruh jendelanya hidup terbaca sebagai papan sirkuit.
-            for (var wy = HZ - h + 5; wy < HZ - 3; wy += 6) {
-              for (var wx = x + 3; wx < x + w - 3; wx += 5) {
-                if (rnd() > 0.86) {
-                  g.fillStyle = rnd() > 0.45 ? 'rgba(43,232,255,0.8)' : 'rgba(255,43,214,0.65)';
-                  g.fillRect(wx, wy, 2, 2);
-                }
-              }
-            }
-          }
-          x += w + 2 + rnd() * 9;
+    // Awan dalam tiga lapis perspektif: makin dekat cakrawala, makin kecil,
+    // makin pipih, makin rapat, makin hangat. Satu lapis berukuran seragam
+    // tidak pernah terbaca sebagai langit — yang memberi kedalaman adalah
+    // perubahan ukuran, bukan jumlahnya.
+    var rnd = mulberry(7);
+    // Ketiga pita ikut mampat ke sepertiga atas, dan tingginya dipangkas:
+    // awan di key art adalah pita mendatar, bukan bola. Elips setinggi 20 px
+    // pada kanvas yang diregangkan dua kali kembali menjadi bokeh.
+    var bands = [
+      { y0: 40, y1: 150, n: 22, w: 64, h: 9, a: 0.24 },
+      { y0: 130, y1: 250, n: 40, w: 40, h: 5.5, a: 0.20 },
+      { y0: 230, y1: 338, n: 64, w: 24, h: 3, a: 0.2 },
+    ];
+    for (var b = 0; b < bands.length; b++) {
+      var L = bands[b];
+      for (var i = 0; i < L.n; i++) {
+        var t = rnd();
+        var cy = L.y0 + t * (L.y1 - L.y0);
+        var cx = rnd() * 512;
+        var warm = Math.min(1, (cy - 100) / 700);
+        g.globalAlpha = L.a * (0.5 + rnd() * 0.8);
+        g.fillStyle = 'rgb(' + Math.round(206 + 48 * warm) + ','
+          + Math.round(198 + 22 * warm) + ',' + Math.round(200 - 48 * warm) + ')';
+        // Dasar rata, puncak menggumpal: itulah yang membedakan awan dari
+        // noda. Semua elips digambar DI ATAS satu garis dasar yang sama.
+        for (var k = 0; k < 3; k++) {
+          var ew = L.w * (0.3 + rnd() * 0.5), eh = L.h * (0.6 + rnd() * 0.7);
+          g.beginPath();
+          g.ellipse(cx + (rnd() - 0.5) * L.w, cy - eh * 0.4, ew, eh, 0, 0, Math.PI * 2);
+          g.fill();
         }
-      });
-
-    // Kabut yang menelan kaki kota.
-    var haze = g.createLinearGradient(0, HZ - 46, 0, HZ + 10);
-    haze.addColorStop(0, 'rgba(42,19,64,0)');
-    haze.addColorStop(0.65, 'rgba(42,19,64,0.68)');
-    haze.addColorStop(1, 'rgba(42,19,64,1)');
-    g.fillStyle = haze; g.fillRect(0, HZ - 46, 512, 56);
-
-    // Puing melayang. Siluet saja, tidak pernah punya collider.
-    for (var d = 0; d < 22; d++) {
-      var dx = rnd() * 512, dy = 14 + rnd() * 96, ds = 1 + rnd() * 2.5;
-      g.fillStyle = 'rgba(9,5,15,' + (0.35 + rnd() * 0.5).toFixed(2) + ')';
-      g.fillRect(dx, dy, ds * (1 + rnd()), ds);
+      }
     }
-
-    // Bagian di bawah horizon dihapus perlahan: quad harus LARUT ke dalam
-    // lantai berkabut, bukan berakhir pada sebuah garis.
-    var fade = g.createLinearGradient(0, HZ + 4, 0, 256);
-    fade.addColorStop(0, 'rgba(0,0,0,0)');
-    fade.addColorStop(1, 'rgba(0,0,0,1)');
-    g.globalCompositeOperation = 'destination-out';
-    g.fillStyle = fade; g.fillRect(0, HZ + 4, 512, 256 - HZ - 4);
-    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
 
     var tex = new THREE.CanvasTexture(c);
     tex.encoding = THREE.sRGBEncoding;
     return tex;
   }
 
-  function buildBackdrop() {
-    var tex = makeBackdropTexture();
-    if (!tex) return;
-    var h = BACKDROP.y1 - BACKDROP.y0;
-    var mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(BACKDROP.width, h),
-      // fog: false — latar ADALAH kabutnya. Kalau ia ikut dikaburkan sekali
-      // lagi oleh FogExp2, kotanya hilang dan kita kembali ke hitam.
-      new THREE.MeshBasicMaterial({
-        map: tex, fog: false, depthWrite: false, transparent: true,
-      })
-    );
-    mesh.position.set(0, BACKDROP.y0 + h / 2, -BACKDROP.z);
-    mesh.renderOrder = -10;
-    scene.add(mesh);
+  function mulberry(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
-  /**
-   * Kerumunan jauh: ratusan siluet di balik gerbang spawn.
-   *
-   * Key art memperlihatkan pasukan yang tidak ada habisnya sampai ke kabut.
-   * Simulasi tidak akan pernah menjalankan 220 unit — dan tidak perlu:
-   * mereka di luar lorong yang bisa dimainkan (z 44..96), tidak pernah
-   * bergerak, tidak pernah bisa ditembak. Fungsinya satu, yaitu mengatakan
-   * "yang kamu lawan hanyalah barisan pertama".
-   */
-  /**
-   * Pelataran di balik gerbang.
-   *
-   * Lantai arena hanya selebar lorong (12 unit), jadi kerumunan jauh yang
-   * melebar ke samping berdiri di atas kekosongan dan terbaca sebagai benda
-   * melayang — cacat yang langsung terlihat begitu bloom menyalakannya.
-   * Pelat gelap ini memberi mereka tanah. Ia sengaja hampir hitam dan ikut
-   * berkabut: fungsinya meniadakan lubang, bukan menarik perhatian.
-   */
-  function buildFarPlaza() {
-    // Ukuran ditahan, bukan dimaksimalkan: bidang tanah apa pun yang
-    // dipanjangkan terus akan merayap naik sampai garis cakrawala dan
-    // menutupi siluet kota. Lebar 54 / dalam 34 cukup menopang kerumunan,
-    // dan tepi jauhnya tetap duduk di bawah cakrawala.
-    //
-    // MeshBasic, bukan Lambert: pelat ini tidak boleh ikut dicahayai lampu
-    // arena. Begitu ia menangkap cahaya, ia berubah jadi bidang ungu rata —
-    // persis pelanggaran "tanpa isian rata" di art bible §6.
-    var plaza = new THREE.Mesh(
-      new THREE.PlaneGeometry(54, 34),
-      new THREE.MeshBasicMaterial({ color: col(0x0b0a18), fog: true })
-    );
-    plaza.rotation.x = -Math.PI / 2;
-    plaza.position.set(0, -0.03, -(ARENA.depth + 14));
-    scene.add(plaza);
-  }
+  function makeSeaTexture() {
+    var c = document.createElement('canvas');
+    c.width = c.height = 256;
+    var g = c.getContext('2d');
+    if (!canPaint(g)) return null;
+    g.fillStyle = '#4A5570'; g.fillRect(0, 0, 256, 256);
 
-  function buildFarCrowd() {
-    if (!THREE.InstancedMesh) return;
-    var count = 170;
-    // Silinder bersisi enam, bukan kapsul: three.js r128 belum punya
-    // CapsuleGeometry, dan pada ukuran dua puluh piksel di balik kabut,
-    // perbedaannya tidak pernah sampai ke mata.
-    var geo = new THREE.CylinderGeometry(0.55, 0.62, 2.0, 6);
-    var mesh = new THREE.InstancedMesh(
-      geo, new THREE.MeshLambertMaterial({ color: col(PAL.danger) }), count);
-    var m = new THREE.Matrix4();
-    var color = new THREE.Color();
-    var seed = 0x43524F57;
-    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
-    for (var i = 0; i < count; i++) {
-      var t = i / count;
-      var z = 44 + t * 52;
-      // Melebar ke belakang: barisan yang melebihi lebar lorong membuat
-      // pasukan terbaca sebagai lautan, bukan sebagai antrean.
-      // Melebar secukupnya saja. Versi pertama melebar 26 unit ke samping:
-      // barisan terluar melayang di luar dinding, di atas kekosongan, dan
-      // terbaca sebagai benda yang lupa dihapus alih-alih sebagai pasukan.
-      var spread = ARENA.halfWidth + 1 + t * 11;
-      m.makeTranslation((rnd() * 2 - 1) * spread, 1.0, -(z + rnd() * 3));
-      mesh.setMatrixAt(i, m);
-      // Makin jauh makin larut ke kabut — persis seperti di gambar.
-      // Larut lebih dalam ke kabut: kerumunan jauh adalah KEDALAMAN, bukan
-      // ancaman. Begitu ia seterang musuh yang sebenarnya, mata berhenti
-      // membaca garis pertahanan.
-      color.copy(col(PAL.danger)).lerp(col(PAL.fog), 0.55 + t * 0.42);
-      mesh.setColorAt(i, color);
+    // Riak: goresan mendatar tipis, tidak pernah berupa bintik. Laut yang
+    // diberi noise titik terbaca sebagai pasir; yang membuatnya terbaca
+    // sebagai air adalah garis panjang mendatar dengan kontras rendah.
+    var rnd = mulberry(23);
+    for (var i = 0; i < 700; i++) {
+      var y = rnd() * 256, x = rnd() * 256, w = 6 + rnd() * 26;
+      g.globalAlpha = 0.08 + rnd() * 0.14;
+      g.fillStyle = rnd() > 0.45 ? '#8E9AB2' : '#333C52';
+      g.fillRect(x, y, w, 1);
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    scene.add(mesh);
+    // Pantulan api kota: bercak hangat yang jarang dan memanjang.
+    for (var j = 0; j < 26; j++) {
+      g.globalAlpha = 0.05 + rnd() * 0.07;
+      g.fillStyle = '#E8571A';
+      g.fillRect(rnd() * 256, rnd() * 256, 3 + rnd() * 10, 1);
+    }
+    g.globalAlpha = 1;
+    var tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    // Satu ubin = 24 unit dunia. Lebih rapat dari itu dan riaknya berubah
+    // jadi motif kain (aturan anti-plastik A5).
+    tex.repeat.set(SEA.size / 24, SEA.size / 24);
+    return tex;
+  }
+
+  function buildSky() {
+    var tex = makeSkyTexture();
+    if (tex) scene.background = tex;
+    else scene.background = col(0x3d4b5e);
+  }
+
+  function buildSea() {
+    var mat = new THREE.MeshBasicMaterial({ color: col(0xffffff), fog: true });
+    var tex = makeSeaTexture();
+    if (tex) mat.map = tex; else mat.color = col(0x67738b);
+    var sea = new THREE.Mesh(new THREE.PlaneGeometry(SEA.size, SEA.size), mat);
+    sea.rotation.x = -Math.PI / 2;
+    // Bidang aksi tetap y=0 supaya simulasi tidak perlu tahu apa-apa soal
+    // ketinggian terbang. Lautlah yang turun 6 unit; selisih itu yang
+    // memberi rasa "di udara" tanpa menyentuh satu baris pun aturan main.
+    sea.position.set(0, SEA.y, -SEA.size * 0.32);
+    sea.renderOrder = -10;
+    scene.add(sea);
   }
 
   /**
-   * Hujan tracer musuh (docs/00-art-bible.md §4 E3).
-   *
-   * Inilah yang membuat layar terbaca sebagai bullet hell tanpa satu pun
    * peluru musuh ada di simulasi: musuh di game ini melukai pemain dengan
    * MENEROBOS garis pertahanan, bukan dengan menembak. Tracer adalah bahasa
    * visual yang menjelaskan ancaman itu — dan karena ia tidak pernah
@@ -1109,121 +1066,8 @@
   }
 
   /**
-   * Lantai: pelat logam yang disikat, dengan sambungan dan kisi cahaya.
-   *
-   * Versi sebelumnya menebar bercak elips acak sebagai "logam basah". Pada
-   * layar itu terbaca sebagai karpet berlumut — permukaan lunak, dan
-   * permukaan lunak adalah setengah dari alasan sebuah adegan terlihat
-   * seperti mainan. Yang membuat logam terbaca sebagai logam adalah GARIS
-   * LURUS: goresan sikat searah, sambungan pelat yang tegas, dan pantulan
-   * yang memanjang. Tidak ada satu pun bentuk organik di sini sekarang.
-   */
-  function makeGridTexture() {
-    var c = document.createElement('canvas');
-    c.width = c.height = 256;
-    var g = c.getContext('2d');
-    if (!canPaint(g)) return null;
-    g.fillStyle = '#0b0f1b'; g.fillRect(0, 0, 256, 256);
-
-    var seed = 20260929;
-    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
-
-    // Goresan sikat: garis tipis searah sumbu lorong, nilai terang-gelap
-    // sangat rapat supaya tidak pernah membentuk motif yang terbaca.
-    for (var i = 0; i < 220; i++) {
-      var x = rnd() * 256;
-      g.strokeStyle = rnd() < 0.5 ? 'rgba(26,34,56,0.30)' : 'rgba(5,7,13,0.35)';
-      g.lineWidth = 0.6 + rnd() * 1.6;
-      g.beginPath(); g.moveTo(x, rnd() * 60); g.lineTo(x + (rnd() - 0.5) * 6, 256); g.stroke();
-    }
-    // Sambungan pelat: satu salib gelap dengan sisi terang di bawahnya,
-    // seperti tepi pelat yang menangkap cahaya ruangan.
-    g.strokeStyle = 'rgba(3,4,9,0.9)'; g.lineWidth = 4;
-    g.beginPath(); g.moveTo(128, 0); g.lineTo(128, 256); g.moveTo(0, 128); g.lineTo(256, 128); g.stroke();
-    g.strokeStyle = 'rgba(70,86,124,0.22)'; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(131, 0); g.lineTo(131, 256); g.moveTo(0, 131); g.lineTo(256, 131); g.stroke();
-    // Baut di sudut pelat: detail terkecil yang masih terbaca pada jarak ini,
-    // dan satu-satunya hal yang memberi skala pada lantai.
-    g.fillStyle = 'rgba(96,116,160,0.25)';
-    [[16, 16], [240, 16], [16, 240], [240, 240]].forEach(function (b) {
-      g.beginPath(); g.arc(b[0], b[1], 2.4, 0, 6.28); g.fill();
-    });
-
-    // Kisi cahaya cyan di tepi petak, dengan halo tipis di sisinya.
-    g.strokeStyle = 'rgba(43,232,255,0.16)'; g.lineWidth = 7;
-    g.beginPath(); g.moveTo(0, 1); g.lineTo(256, 1); g.moveTo(1, 0); g.lineTo(1, 256); g.stroke();
-    g.strokeStyle = 'rgba(43,232,255,0.85)'; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(0, 1); g.lineTo(256, 1); g.moveTo(1, 0); g.lineTo(1, 256); g.stroke();
-
-    var tex = new THREE.CanvasTexture(c);
-    // Kanvas berisi warna sRGB. Tekstur yang lupa ditandai akan dianggap data
-    // linear lalu dicerahkan sekali lagi — lantai gelap berubah pucat.
-    tex.encoding = THREE.sRGBEncoding;
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(ARENA.halfWidth, ARENA.depth / 2);
-    tex.anisotropy = 4;
-    return tex;
-  }
-
-  /**
-   * Dinding pantul: panel data, bukan pita magenta rata.
-   *
-   * Ini adalah perbedaan terbesar antara "dunia neon" dan "balok plastik
-   * berwarna". Warna rata tidak punya permukaan: tidak ada sambungan, tidak
-   * ada arah, tidak ada tanda bahwa benda itu dibuat. Tekstur ini menambahkan
-   * tiga hal dan hanya tiga: sambungan panel vertikal, garis data horizontal,
-   * dan satu pita panas di tepi atas — pita yang sama yang dipakai pemain
-   * untuk memperkirakan sudut pantul.
-   */
-  function makeWallTexture() {
-    var c = document.createElement('canvas');
-    c.width = 128; c.height = 256;
-    var g = c.getContext('2d');
-    if (!canPaint(g)) return null;
-    g.fillStyle = '#20132f'; g.fillRect(0, 0, 128, 256);
-
-    // Gradien vertikal: pangkal dinding gelap, puncaknya panas.
-    var grad = g.createLinearGradient(0, 256, 0, 0);
-    grad.addColorStop(0, 'rgba(8,5,14,0.97)');
-    grad.addColorStop(0.62, 'rgba(48,14,56,0.80)');
-    grad.addColorStop(0.92, 'rgba(150,26,122,0.80)');
-    grad.addColorStop(1, 'rgba(255,43,214,0.90)');
-    g.fillStyle = grad; g.fillRect(0, 0, 128, 256);
-
-    // Sambungan panel.
-    g.strokeStyle = 'rgba(4,2,8,0.85)'; g.lineWidth = 5;
-    g.beginPath(); g.moveTo(4, 0); g.lineTo(4, 256); g.moveTo(124, 0); g.lineTo(124, 256); g.stroke();
-    g.strokeStyle = 'rgba(255,155,238,0.35)'; g.lineWidth = 1.5;
-    g.beginPath(); g.moveTo(9, 0); g.lineTo(9, 256); g.stroke();
-
-    // Garis data horizontal, jaraknya tidak teratur supaya tidak terbaca
-    // sebagai tangga.
-    [44, 96, 118, 170, 206].forEach(function (y, i) {
-      g.strokeStyle = i % 2 ? 'rgba(255,155,238,0.5)' : 'rgba(6,3,12,0.7)';
-      g.lineWidth = i % 2 ? 1.5 : 3;
-      g.beginPath(); g.moveTo(14, y); g.lineTo(114, y); g.stroke();
-    });
-
-    // Pita panas tepi atas — tipis. Inilah garis yang dibaca pemain untuk
-    // memperkirakan sudut pantul, jadi ia harus tajam, bukan lebar.
-    g.fillStyle = '#ff9bee'; g.fillRect(0, 0, 128, 4);
-
-    var tex = new THREE.CanvasTexture(c);
-    tex.encoding = THREE.sRGBEncoding;
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(1, 1);
-    return tex;
-  }
-
-  /**
    * Bumper sebagai pylon teknis: silinder logam gelap dengan dua cincin yang
    * menyala dan tutup panas di atasnya.
-   *
-   * Yang diganti adalah kubah abu-abu bertudung ungu — bentuk jamur matte
-   * yang, lebih dari apa pun di layar, membuat arena terbaca sebagai mainan.
-   * Siluetnya sekarang tegak dan bersudut, dan ia MEMANCARKAN cahaya, jadi
-   * ia menjadi bagian dari dunia neon alih-alih benda yang ditaruh di
-   * atasnya.
    */
   function makePylon() {
     var grp = new THREE.Group();
@@ -1426,8 +1270,14 @@
     // nyaris hitam; ungu hanya muncul sebagai kabut di sekitar horizon dan
     // sebagai pusaran. Peleburan ujung lantai sekarang diurus oleh quad
     // latar, yang memang menggambar kabut itu di tempat yang tepat.
-    scene.background = col(0x080610);
-    scene.fog = new THREE.FogExp2(col(PAL.fog).getHex(), 0.022);
+    buildSky();
+    // Kabut hangat tipis, bukan kabut ungu pekat. Di key art jarak jauh
+    // memutih karena uap air dan asap, bukan karena gelap; densitas 0,022
+    // yang lama akan menelan bos sebelum ia sempat terlihat.
+    // Warna kabut dicocokkan dengan pita cakrawala, bukan abu netral: kalau
+    // laut jauh memudar ke abu sementara langit di atasnya emas, sambungan
+    // keduanya menjadi garis potong yang terlihat jelas.
+    scene.fog = new THREE.FogExp2(col(0xd9c0a0).getHex(), 0.0082);
 
     camera = makeCamera(9 / 16);
 
@@ -1456,85 +1306,45 @@
     var envMap = makeEnvironment();
     if (envMap) scene.environment = envMap;
 
-    scene.add(new THREE.HemisphereLight(0x6b7fd4, 0x14091f, 0.55));
-    var sun = new THREE.DirectionalLight(0xdce6f2, 1.25);
-    sun.position.set(10, 26, 16); scene.add(sun);
-    var fill = new THREE.DirectionalLight(0xff2bd6, 0.35);
-    fill.position.set(-18, 8, -12); scene.add(fill);
+    // Cahaya siang-senja: langit biru dingin dari atas, laut hangat dari
+    // bawah, matahari rendah dari depan-kiri (di key art silaunya datang
+    // dari kiri atas, di balik bos), dan isian oranye lemah dari kota yang
+    // terbakar di bawah.
+    scene.add(new THREE.HemisphereLight(0x9fb4d4, 0x6b5a4e, 0.85));
+    var sun = new THREE.DirectionalLight(0xffd9a0, 1.35);
+    sun.position.set(-18, 20, -30); scene.add(sun);
+    var fill = new THREE.DirectionalLight(0xff8a2e, 0.3);
+    fill.position.set(8, -10, 6); scene.add(fill);
 
     // --- static world ---
-    var floorMat = new THREE.MeshLambertMaterial({ map: makeGridTexture() });
-    var floorLen = ARENA.depth + APRON + APRON_FAR;
-    var floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(ARENA.halfWidth * 2, floorLen), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, -ARENA.depth / 2 + (APRON - APRON_FAR) / 2);
-    scene.add(floor);
+    buildSea();
 
-    var wallLen = ARENA.depth + APRON;
-    var wallTex = makeWallTexture();
-    // Satu panel tiap 7 unit. Percobaan pertama memakai 2,5 dan hasilnya
-    // deretan balok terang yang terbaca sebagai gigi — pengulangan yang
-    // terlalu rapat selalu berubah jadi motif, dan motif terbaca sebagai
-    // mainan. Panel lebar memberi skala tanpa menjadi pola.
-    // Sumbu u tekstur berjalan di sepanjang lorong pada sisi panjang kotak,
-    // jadi pengulangan dipasang di u — bukan di v. Versi pertama memasangnya
-    // di v: gradien gelap-ke-magenta berulang sepuluh kali ke ARAH TINGGI
-    // dinding, yang di layar terbaca sebagai tumpukan batu bata terang.
-    if (wallTex) wallTex.repeat.set(wallLen / 7, 1);
-    var panelMat = new THREE.MeshStandardMaterial({
-      map: wallTex, emissiveMap: wallTex,
-      color: wallTex ? new THREE.Color(0xffffff) : col(PAL.wall),
-      emissive: wallTex ? new THREE.Color(0xffffff) : col(PAL.wallGlow),
-      emissiveIntensity: 0.55, metalness: 0.45, roughness: 0.42,
-    });
-    var darkMat = new THREE.MeshStandardMaterial({
-      color: col(0x120a1c), metalness: 0.6, roughness: 0.5,
-    });
-    // Tepi atas dibuat sebagai material tersendiri dan bukan bagian dari
-    // tekstur: permukaan atas kotak memakai pemetaan UV yang sama sekali
-    // berbeda dari sisinya, dan memaksakan satu tekstur ke keduanya adalah
-    // persis yang membuat dinding tadi belang.
-    var crestMat = new THREE.MeshBasicMaterial({ color: col(PAL.wallGlow) });
-    // Urutan material BoxGeometry: +x, -x, +y, -y, +z, -z.
-    var wallMats = [panelMat, panelMat, crestMat, darkMat, darkMat, darkMat];
-    [-1, 1].forEach(function (s) {
-      var w = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.8, wallLen), wallMats);
-      w.position.set(s * (ARENA.halfWidth + 0.22), 0.9, -ARENA.depth / 2 + APRON / 2);
-      scene.add(w);
-
-      // Tumpahan cahaya dinding ke lantai. Tanpa bloom sungguhan (tiga.js di
-      // sini tidak membawa EffectComposer), inilah yang membuat neon terbaca
-      // sebagai CAHAYA dan bukan sebagai cat: satu pita aditif yang
-      // melebar di lantai persis di kaki dinding.
-      var spill = new THREE.Mesh(
-        new THREE.PlaneGeometry(2.2, wallLen),
+    // Batas koridor terbang. Lorong logis tetap selebar 12 unit karena
+    // simulasi memantulkan peluru di x=±6 — aturan itu tidak disentuh. Yang
+    // berubah adalah bagaimana ia DIGAMBAR: bukan lagi dinding magenta
+    // setinggi pinggang, melainkan dua tirai cahaya tipis yang hanya
+    // terbaca saat dipandang menyamping, seperti penanda jalur udara.
+    [-1, 1].forEach(function (side) {
+      var curtain = new THREE.Mesh(
+        new THREE.PlaneGeometry(ARENA.depth + APRON, 3.2),
         new THREE.MeshBasicMaterial({
-          color: col(PAL.wallGlow), transparent: true, opacity: 0.16,
+          color: col(0x2bb8ff), transparent: true, opacity: 0.045,
           blending: THREE.AdditiveBlending, depthWrite: false,
+          side: THREE.DoubleSide, fog: true,
         })
       );
-      spill.rotation.x = -Math.PI / 2;
-      spill.position.set(s * (ARENA.halfWidth - 0.7), 0.02, -ARENA.depth / 2 + APRON / 2);
-      scene.add(spill);
-
-      // Halo tegak di sisi dalam dinding: tepi yang mekar, bukan tepi yang
-      // dipotong pisau.
-      var halo = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.1, wallLen),
-        new THREE.MeshBasicMaterial({
-          color: col(PAL.wallGlow), transparent: true, opacity: 0.22,
-          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-        })
-      );
-      halo.rotation.y = Math.PI / 2;
-      halo.position.set(s * (ARENA.halfWidth - 0.04), 1.5, -ARENA.depth / 2 + APRON / 2);
-      scene.add(halo);
+      curtain.rotation.y = Math.PI / 2;
+      curtain.position.set(side * ARENA.halfWidth, 1.4,
+        -ARENA.depth / 2 + APRON / 2);
+      scene.add(curtain);
     });
 
     var line = new THREE.Mesh(
       new THREE.BoxGeometry(ARENA.halfWidth * 2, 0.07, 0.3),
-      new THREE.MeshBasicMaterial({ color: col(PAL.danger), transparent: true, opacity: 0.85 })
+      new THREE.MeshBasicMaterial({
+        color: col(0x00d0ff), transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      })
     );
     line.position.set(0, 0.04, -ARENA.defenseLineZ);
     scene.add(line);
@@ -1549,9 +1359,6 @@
 
     // Lapisan NEON: latar, kerumunan jauh, hujan tracer. Ketiganya dibangun
     // setelah grup ada karena tracer hidup di dalam groups.fx.
-    buildBackdrop();
-    buildFarPlaza();
-    buildFarCrowd();
     buildTracers();
 
     pools.troops = makePool(groups.troops, function () { return new THREE.Group(); });
@@ -1686,7 +1493,10 @@
     rtA.texture.encoding = rtB.texture.encoding = THREE.LinearEncoding;
 
     var bright = makePass(
-      { tDiffuse: { value: null }, threshold: { value: 0.74 } },
+            // Adegan siang: langit senja saja sudah melewati 0,74, dan pada ambang
+      // itu seluruh awan mekar sampai layar putih. Hanya api, peluru, dan
+      // inti bos yang boleh mekar — dan ketiganya jauh di atas 0,88.
+      { tDiffuse: { value: null }, threshold: { value: 0.88 } },
       ['uniform sampler2D tDiffuse;', 'uniform float threshold;', 'varying vec2 vUv;',
        'void main() {',
        '  vec3 c = texture2D(tDiffuse, vUv).rgb;',
@@ -1722,8 +1532,8 @@
         // Dikalibrasi dari tangkapan layar, bukan dari selera: pada 1,15/1,1
         // hitam terangkat jadi abu ungu dan kontras yang dibangun lewat
         // palet hilang. Mekar harus terasa di SUMBER cahaya saja.
-        strength: { value: 0.85 }, exposure: { value: 0.92 },
-        vignette: { value: 0.42 } },
+        strength: { value: 0.75 }, exposure: { value: 1.0 },
+        vignette: { value: 0.26 } },
       ['uniform sampler2D tScene;', 'uniform sampler2D tBloom;',
        'uniform float strength;', 'uniform float exposure;', 'uniform float vignette;',
        'varying vec2 vUv;',
@@ -2408,7 +2218,7 @@
   var api = {
     ready: false,
     init: init, sync: sync, resize: resize, setAccent: setAccent,
-    makeCamera: makeCamera, CAM: CAM, ARENA: ARENA, modelsLoaded: 0, rigsLoaded: 0,
+    makeCamera: makeCamera, CAM: CAM, ARENA: ARENA, SEA: SEA, modelsLoaded: 0, rigsLoaded: 0,
     SKIN: SKIN,
     // Dipakai tools/char_test.js untuk memeriksa aktor hidup tanpa menebak
     // dari piksel: berapa yang ber-skeleton, berapa mayat, klip apa yang jalan.

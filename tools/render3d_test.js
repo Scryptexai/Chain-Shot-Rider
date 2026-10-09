@@ -66,12 +66,11 @@ console.log(`arena : lebar ${R3D.ARENA.halfWidth * 2}  dalam ${R3D.ARENA.depth} 
 const HW = R3D.ARENA.halfWidth;
 const D = R3D.ARENA.depth;
 
-console.log('[1] Lorong terbaca penuh dari z=2 ke belakang');
-// Tepi lantai TEPAT DI KAKI KAMERA sengaja terpotong. Framing diturunkan dari
-// key art (pemain pada 87% tinggi layar, horizon pada 14%), dan pada framing
-// itu baris z=0 memang jatuh di luar bawah layar. Yang penting bukan "semua
-// terlihat", melainkan: seluruh LORONG YANG BISA DIMAINKAN terbaca, termasuk
-// kedua dinding, sejak sedikit di depan pemain.
+console.log('[1] Koridor terbang terbaca penuh');
+// Framing shmup (N1): kamera di belakang-atas jet, cakrawala di 33%. Pada
+// framing ini seluruh koridor yang bisa dimainkan terbaca sekaligus, termasuk
+// baris tepat di bawah jet — tidak ada lagi tepi yang sengaja dipotong,
+// karena tidak ada lagi lantai yang berakhir di kaki kamera.
 const corners = {
   'sudut dekat kiri': project(-HW, 0),
   'sudut dekat kanan': project(HW, 0),
@@ -80,15 +79,19 @@ const corners = {
 };
 check('sudut jauh kiri terlihat', inside(corners['sudut jauh kiri']), fmt(corners['sudut jauh kiri']));
 check('sudut jauh kanan terlihat', inside(corners['sudut jauh kanan']), fmt(corners['sudut jauh kanan']));
-check('tepi z=0 memang di luar frame (disengaja)',
-  !inside(corners['sudut dekat kiri']), fmt(corners['sudut dekat kiri']));
-// z=2,4 adalah ambang terukur: di situ kedua dinding masuk frame (pada z=2,3
-// tepat menyentuh tepi). Pemain berdiri di z=2, jadi hanya 0,4 unit pertama
-// di depannya yang tidak terlihat — lebih dekat dari jarak pantul mana pun.
+// Baris z=0 ada DI BELAKANG jet dan lebih lebar daripada bingkai, jadi
+// sudutnya memang keluar ke samping. Yang tidak boleh terjadi adalah ia
+// keluar ke ATAS atau ke BAWAH: itu berarti kamera salah pitch, bukan
+// sekadar koridor yang melebar oleh perspektif.
+check('baris z=0 hanya terpotong menyamping, tidak tegak',
+  Math.abs(corners['sudut dekat kiri'].y) <= 1,
+  fmt(corners['sudut dekat kiri']));
+// Batas koridor diukur di depan jet, tempat pantulan peluru benar-benar
+// terjadi.
 const WALL_Z = 2.4;
 const wallNear = { kiri: project(-HW, WALL_Z), kanan: project(HW, WALL_Z) };
-check('dinding kiri terbaca sejak z=2,4', inside(wallNear.kiri), fmt(wallNear.kiri));
-check('dinding kanan terbaca sejak z=2,4', inside(wallNear.kanan), fmt(wallNear.kanan));
+check('batas koridor kiri terbaca sejak z=2,4', inside(wallNear.kiri), fmt(wallNear.kiri));
+check('batas koridor kanan terbaca sejak z=2,4', inside(wallNear.kanan), fmt(wallNear.kanan));
 
 console.log('\n[2] Elemen gameplay berada di tempat yang benar');
 const squad = project(0, 2);
@@ -114,26 +117,29 @@ check('lorong tidak terpotong di z=2,4', nearW <= 1.001, `${(nearW * 100).toFixe
 check('perspektif terasa: baris jauh lebih sempit', farW < nearW,
   `jauh ${(farW * 100).toFixed(0)}% < dekat ${(nearW * 100).toFixed(0)}%`);
 
-console.log('\n[4] Kedalaman dan jangkar pemain sesuai key art');
+console.log('\n[4] Framing sesuai key art (docs/images/keyart-master.jpg)');
 const depthSpan = project(0, D).y - project(0, 0).y;
-check('arena membentang >=60% tinggi layar', depthSpan >= 1.2,
+check('koridor membentang >=30% tinggi layar', depthSpan >= 0.6,
   `${(depthSpan / 2 * 100).toFixed(0)}% tinggi`);
 
-// Tiga angka ini DIUKUR dari key art dan menjadi definisi framing yang benar
-// (docs/00-art-bible.md §1). Kamera diselesaikan dari ketiganya, jadi di
-// sinilah solusinya dibuktikan — bukan di "apakah ada ruang kosong".
-const PLAYER_H = 4.86;                       // = CHAR_HEIGHT 1,92 x PLAYER_SCALE 2,53
-const head = project(0, 2, PLAYER_H);
-const feet = project(0, 2, 0);
-const centerScreen = (1 - (head.y + feet.y) / 2) / 2;   // NDC -> 0 di atas, 1 di bawah
-const heightScreen = Math.abs(head.y - feet.y) / 2;
+// Dua angka ini DIUKUR dari key art dan mendefinisikan framing (art bible §1).
+// Kamera diselesaikan dari keduanya, jadi di sinilah solusinya dibuktikan.
+//
+// Jangkar pemain diukur pada TITIK JANGKAR di bidang aksi (0, y=0, z=2),
+// bukan pada pusat badan. Alasannya: badan pemain masih rig berjalan kaki
+// setinggi 4,86 unit dan baru diganti jet di N2. Titik jangkar tidak
+// bergantung pada model, jadi ia tetap sahih sebelum dan sesudah pergantian.
+const anchor = project(0, 2);
+const anchorScreen = (1 - anchor.y) / 2;       // NDC -> 0 di atas, 1 di bawah
+const anchorX = (anchor.x + 1) / 2;
 const horizonScreen = (1 - project(0, 4000).y) / 2;
-check('pemain berjangkar di ~87% tinggi layar',
-  Math.abs(centerScreen - 0.87) <= 0.05, `${(centerScreen * 100).toFixed(1)}%`);
-check('pemain mengisi ~18,5% tinggi layar',
-  Math.abs(heightScreen - 0.185) <= 0.04, `${(heightScreen * 100).toFixed(1)}%`);
-check('horizon di ~14% dari atas',
-  Math.abs(horizonScreen - 0.14) <= 0.05, `${(horizonScreen * 100).toFixed(1)}%`);
+check('jangkar pemain di tengah lebar layar (0,50)',
+  Math.abs(anchorX - 0.5) <= 0.01, `${(anchorX * 100).toFixed(1)}%`);
+check('jangkar pemain di ~72% tinggi layar',
+  Math.abs(anchorScreen - 0.72) <= 0.04, `${(anchorScreen * 100).toFixed(1)}%`);
+check('cakrawala di ~33% dari atas',
+  Math.abs(horizonScreen - 0.33) <= 0.03, `${(horizonScreen * 100).toFixed(1)}%`);
+check('laut berada di bawah bidang aksi', R3D.SEA.y < 0, `y=${R3D.SEA.y}`);
 
 console.log('\n[5] Squad bergerak kiri-kanan tetap di dalam layar');
 for (const x of [-HW + 0.5, 0, HW - 0.5]) {
