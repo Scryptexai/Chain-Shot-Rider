@@ -974,9 +974,36 @@
    * bergerak, tidak pernah bisa ditembak. Fungsinya satu, yaitu mengatakan
    * "yang kamu lawan hanyalah barisan pertama".
    */
+  /**
+   * Pelataran di balik gerbang.
+   *
+   * Lantai arena hanya selebar lorong (12 unit), jadi kerumunan jauh yang
+   * melebar ke samping berdiri di atas kekosongan dan terbaca sebagai benda
+   * melayang — cacat yang langsung terlihat begitu bloom menyalakannya.
+   * Pelat gelap ini memberi mereka tanah. Ia sengaja hampir hitam dan ikut
+   * berkabut: fungsinya meniadakan lubang, bukan menarik perhatian.
+   */
+  function buildFarPlaza() {
+    // Ukuran ditahan, bukan dimaksimalkan: bidang tanah apa pun yang
+    // dipanjangkan terus akan merayap naik sampai garis cakrawala dan
+    // menutupi siluet kota. Lebar 54 / dalam 34 cukup menopang kerumunan,
+    // dan tepi jauhnya tetap duduk di bawah cakrawala.
+    //
+    // MeshBasic, bukan Lambert: pelat ini tidak boleh ikut dicahayai lampu
+    // arena. Begitu ia menangkap cahaya, ia berubah jadi bidang ungu rata —
+    // persis pelanggaran "tanpa isian rata" di art bible §6.
+    var plaza = new THREE.Mesh(
+      new THREE.PlaneGeometry(54, 34),
+      new THREE.MeshBasicMaterial({ color: col(0x0b0a18), fog: true })
+    );
+    plaza.rotation.x = -Math.PI / 2;
+    plaza.position.set(0, -0.03, -(ARENA.depth + 14));
+    scene.add(plaza);
+  }
+
   function buildFarCrowd() {
     if (!THREE.InstancedMesh) return;
-    var count = 220;
+    var count = 170;
     // Silinder bersisi enam, bukan kapsul: three.js r128 belum punya
     // CapsuleGeometry, dan pada ukuran dua puluh piksel di balik kabut,
     // perbedaannya tidak pernah sampai ke mata.
@@ -992,11 +1019,17 @@
       var z = 44 + t * 52;
       // Melebar ke belakang: barisan yang melebihi lebar lorong membuat
       // pasukan terbaca sebagai lautan, bukan sebagai antrean.
-      var spread = ARENA.halfWidth + 2 + t * 26;
-      m.makeTranslation((rnd() * 2 - 1) * spread, 1.1, -(z + rnd() * 3));
+      // Melebar secukupnya saja. Versi pertama melebar 26 unit ke samping:
+      // barisan terluar melayang di luar dinding, di atas kekosongan, dan
+      // terbaca sebagai benda yang lupa dihapus alih-alih sebagai pasukan.
+      var spread = ARENA.halfWidth + 1 + t * 11;
+      m.makeTranslation((rnd() * 2 - 1) * spread, 1.0, -(z + rnd() * 3));
       mesh.setMatrixAt(i, m);
       // Makin jauh makin larut ke kabut — persis seperti di gambar.
-      color.copy(col(PAL.danger)).lerp(col(PAL.fog), 0.35 + t * 0.6);
+      // Larut lebih dalam ke kabut: kerumunan jauh adalah KEDALAMAN, bukan
+      // ancaman. Begitu ia seterang musuh yang sebenarnya, mata berhenti
+      // membaca garis pertahanan.
+      color.copy(col(PAL.danger)).lerp(col(PAL.fog), 0.55 + t * 0.42);
       mesh.setColorAt(i, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
@@ -1374,6 +1407,16 @@
     // memalsukan encoding tekstur — cara yang salah, karena ia juga membuat
     // warna lain di scene meleset. Sekarang keluarannya yang diperbaiki.
     renderer.outputEncoding = THREE.sRGBEncoding;
+    // Bloom dibangun defensif: kalau target render tidak bisa dibuat (uji
+    // headless memakai WebGLRenderer tiruan), game tetap menggambar lewat
+    // jalur langsung alih-alih mati.
+    try {
+      var size = new THREE.Vector2();
+      if (renderer.getSize) renderer.getSize(size);
+      bloom = buildBloom(Math.max(2, size.x || 480), Math.max(2, size.y || 854));
+    } catch (e) {
+      bloom = null;
+    }
 
     scene = new THREE.Scene();
     // Langit GELAP, kabut ungu. Dulu keduanya memakai warna kabut supaya
@@ -1507,6 +1550,7 @@
     // Lapisan NEON: latar, kerumunan jauh, hujan tracer. Ketiganya dibangun
     // setelah grup ada karena tracer hidup di dalam groups.fx.
     buildBackdrop();
+    buildFarPlaza();
     buildFarCrowd();
     buildTracers();
 
@@ -1595,6 +1639,158 @@
    * on top would either waste a quarter of the fill rate on desktop or render
    * below panel resolution on a 3x phone.
    */
+  // ---------------------------------------------------------------------------
+  // BLOOM
+  //
+  // three.js yang di-vendor di sini tidak membawa EffectComposer maupun
+  // UnrealBloomPass (hanya three.min.js dan GLTFLoader), jadi pipeline-nya
+  // ditulis tangan. Itu tiga render target dan tiga shader kecil — jauh lebih
+  // ringan daripada menambah 60 KB addon, dan satu-satunya efek yang benar-
+  // benar membedakan "neon" dari "warna terang di ruang gelap".
+  //
+  // Alurnya: scene -> RT penuh, ambil piksel di atas ambang -> RT setengah,
+  // kabur mendatar lalu tegak, komposit kembali di atas scene. Ambangnya 0,62
+  // supaya hanya sumber cahaya yang mekar: kalau lantai ikut mekar, seluruh
+  // layar berkabut dan kontras yang susah payah dibangun hilang.
+  // ---------------------------------------------------------------------------
+  var bloom = null;
+
+  var QUAD_VERT = [
+    'varying vec2 vUv;',
+    'void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  ].join('\n');
+
+  function makePass(uniforms, frag) {
+    return new THREE.ShaderMaterial({
+      uniforms: uniforms, vertexShader: QUAD_VERT, fragmentShader: frag,
+      depthTest: false, depthWrite: false,
+    });
+  }
+
+  function buildBloom(w, h) {
+    // Dua syarat, bukan satu: uji headless memakai WebGLRenderer tiruan yang
+    // tidak punya setRenderTarget, sementara THREE.WebGLRenderTarget tetap
+    // ada karena pustakanya sungguhan.
+    if (!THREE.WebGLRenderTarget || !renderer || typeof renderer.setRenderTarget !== 'function') {
+      return null;
+    }
+    var half = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
+    var sceneRT = new THREE.WebGLRenderTarget(w, h, half);
+    // Linear: komposit terakhir yang mengurus konversi ke sRGB. Kalau RT ini
+    // ditandai sRGB, warnanya dikonversi dua kali dan seluruh adegan pucat.
+    sceneRT.texture.encoding = THREE.LinearEncoding;
+    sceneRT.depthBuffer = true;
+    var bw = Math.max(1, Math.round(w / 2)), bh = Math.max(1, Math.round(h / 2));
+    var rtA = new THREE.WebGLRenderTarget(bw, bh, half);
+    var rtB = new THREE.WebGLRenderTarget(bw, bh, half);
+    rtA.texture.encoding = rtB.texture.encoding = THREE.LinearEncoding;
+
+    var bright = makePass(
+      { tDiffuse: { value: null }, threshold: { value: 0.74 } },
+      ['uniform sampler2D tDiffuse;', 'uniform float threshold;', 'varying vec2 vUv;',
+       'void main() {',
+       '  vec3 c = texture2D(tDiffuse, vUv).rgb;',
+       // Luminансi, bukan maksimum kanal: ambang per-kanal membuat merah
+       // murni mekar lebih dulu daripada putih yang jelas lebih terang.
+       '  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));',
+       '  float k = smoothstep(threshold, threshold + 0.35, l);',
+       '  gl_FragColor = vec4(c * k, 1.0);',
+       '}'].join('\n'));
+
+    var blur = makePass(
+      { tDiffuse: { value: null }, dir: { value: new THREE.Vector2(1, 0) },
+        texel: { value: new THREE.Vector2(1 / bw, 1 / bh) } },
+      ['uniform sampler2D tDiffuse;', 'uniform vec2 dir;', 'uniform vec2 texel;',
+       'varying vec2 vUv;',
+       'void main() {',
+       // Gaussian 9 ketukan dengan bobot tetap. Cukup lebar untuk membuat
+       // dinding magenta benar-benar menumpahkan cahaya, cukup murah untuk
+       // ponsel menengah.
+       '  float w[5];',
+       '  w[0] = 0.227027; w[1] = 0.194595; w[2] = 0.121622; w[3] = 0.054054; w[4] = 0.016216;',
+       '  vec3 sum = texture2D(tDiffuse, vUv).rgb * w[0];',
+       '  for (int i = 1; i < 5; i++) {',
+       '    vec2 o = dir * texel * float(i) * 1.6;',
+       '    sum += texture2D(tDiffuse, vUv + o).rgb * w[i];',
+       '    sum += texture2D(tDiffuse, vUv - o).rgb * w[i];',
+       '  }',
+       '  gl_FragColor = vec4(sum, 1.0);',
+       '}'].join('\n'));
+
+    var composite = makePass(
+      { tScene: { value: null }, tBloom: { value: null },
+        // Dikalibrasi dari tangkapan layar, bukan dari selera: pada 1,15/1,1
+        // hitam terangkat jadi abu ungu dan kontras yang dibangun lewat
+        // palet hilang. Mekar harus terasa di SUMBER cahaya saja.
+        strength: { value: 0.85 }, exposure: { value: 0.92 },
+        vignette: { value: 0.42 } },
+      ['uniform sampler2D tScene;', 'uniform sampler2D tBloom;',
+       'uniform float strength;', 'uniform float exposure;', 'uniform float vignette;',
+       'varying vec2 vUv;',
+       'void main() {',
+       '  vec3 c = texture2D(tScene, vUv).rgb;',
+       '  c += texture2D(tBloom, vUv).rgb * strength;',
+       '  c *= exposure;',
+       // ACES ringkas: inti ledakan boleh mendekati putih tanpa menjadi
+       // bidang rata, dan neon jenuh tidak pernah "terbakar" jadi blok.
+       '  c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);',
+       '  vec2 q = vUv - 0.5;',
+       '  c *= 1.0 - vignette * dot(q, q) * 2.2;',
+       // Konversi ke sRGB dilakukan di sini, dengan tangan: ShaderMaterial
+       // buatan sendiri tidak ikut jalur encoding three.js.
+       '  gl_FragColor = vec4(pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);',
+       '}'].join('\n'));
+
+    var quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bright);
+    var quadScene = new THREE.Scene();
+    quadScene.add(quad);
+    var quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    return {
+      sceneRT: sceneRT, rtA: rtA, rtB: rtB,
+      bright: bright, blur: blur, composite: composite,
+      quad: quad, quadScene: quadScene, quadCam: quadCam,
+      resize: function (nw, nh) {
+        sceneRT.setSize(nw, nh);
+        var hw = Math.max(1, Math.round(nw / 2)), hh = Math.max(1, Math.round(nh / 2));
+        rtA.setSize(hw, hh); rtB.setSize(hw, hh);
+        blur.uniforms.texel.value.set(1 / hw, 1 / hh);
+      },
+    };
+  }
+
+  function drawPass(material, target) {
+    bloom.quad.material = material;
+    renderer.setRenderTarget(target || null);
+    renderer.render(bloom.quadScene, bloom.quadCam);
+  }
+
+  function renderWithBloom() {
+    if (!bloom) { renderer.render(scene, camera); return; }
+    renderer.setRenderTarget(bloom.sceneRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+
+    bloom.bright.uniforms.tDiffuse.value = bloom.sceneRT.texture;
+    drawPass(bloom.bright, bloom.rtA);
+
+    // Dua kali bolak-balik: satu lintasan menghasilkan halo keras bertepi,
+    // dua lintasan menghasilkan mekar yang benar-benar lembut.
+    for (var i = 0; i < 2; i++) {
+      bloom.blur.uniforms.tDiffuse.value = bloom.rtA.texture;
+      bloom.blur.uniforms.dir.value.set(1, 0);
+      drawPass(bloom.blur, bloom.rtB);
+      bloom.blur.uniforms.tDiffuse.value = bloom.rtB.texture;
+      bloom.blur.uniforms.dir.value.set(0, 1);
+      drawPass(bloom.blur, bloom.rtA);
+    }
+
+    bloom.composite.uniforms.tScene.value = bloom.sceneRT.texture;
+    bloom.composite.uniforms.tBloom.value = bloom.rtA.texture;
+    renderer.setRenderTarget(null);
+    drawPass(bloom.composite, null);
+  }
+
   function resize(w, h) {
     if (!renderer) return;
     renderer.setPixelRatio(1);
@@ -1608,6 +1804,7 @@
     baseFov = widthMatchedFov(camera.aspect);
     camera.fov = baseFov;
     camera.updateProjectionMatrix();
+    if (bloom) bloom.resize(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
   }
 
   /** FOV vertikal yang menjaga bukaan horizontal tetap sama seperti pada 9:16. */
@@ -2205,7 +2402,7 @@
     }
     updateCorpses(dt);
 
-    renderer.render(scene, camera);
+    renderWithBloom();
   }
 
   var api = {

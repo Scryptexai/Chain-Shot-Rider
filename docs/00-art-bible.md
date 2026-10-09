@@ -1,208 +1,150 @@
-# 00 — Art Bible: NEON
+# 00 — Art Bible CHAIN RIDER (v4.0, dari key art asli)
 
-**Satu gambar adalah spesifikasi seluruh game ini.**
+Sumber tunggal: `docs/images/keyart-master.jpg` (720×1280, 9:16).
 
-Key art *"Neon Bullet-Hell Combo Assault"*: seorang prajurit cyber tunggal di
-dasar koridor neon menembakkan satu peluru raksasa yang memantul zig-zag di
-antara dinding magenta, merantai petir, dan meledakkan drum — melawan ratusan
-musuh merah yang menghujani lorong dengan tracer, sementara **x999 COMBO**
-menyala di pojok kanan atas.
-
-Setiap angka di dokumen ini diukur dari gambar itu atau dihitung darinya.
-Kalau sebuah keputusan visual tidak bisa dilacak kembali ke sini, keputusan
-itu salah.
-
-> **Berkas referensi belum ada di repo.** Gambar dikirim lewat chat dan tidak
-> tersimpan di filesystem. Simpan salinannya ke
-> `docs/images/keyart-master.png` pada kesempatan pertama; sampai itu terjadi,
-> dokumen inilah satu-satunya salinan spesifikasinya.
+> **Catatan koreksi.** Art bible v3.0 ("neon lane") ditulis tanpa file gambarnya
+> ada di disk dan ternyata **salah total**: ia menggambarkan lorong neon ungu
+> dengan pasukan berjalan kaki. Key art yang sebenarnya adalah **shoot-'em-up
+> udara vertikal**. Seluruh dokumen ini ditulis ulang dengan gambar di depan
+> mata. Kalau ada konflik dengan kode atau dokumen lama, **gambar yang menang**.
 
 ---
 
-## 1. Framing — dihitung, bukan ditebak
+## 1. Genre dan kamera
 
-Tiga hal diukur dari gambar:
+Pesawat tempur dilihat dari **belakang-atas**, terbang ke arah layar bagian
+atas, di atas kota pesisir yang terbakar saat senja. Dunia bergulir **menjauh
+dari penonton**, bukan lorong yang didekati.
 
-| Ukuran | Nilai |
-|---|---|
-| Titik tengah badan pemain | **87%** tinggi layar |
-| Tinggi pemain | **18,5%** tinggi layar |
-| Garis horizon | **14%** tinggi layar |
+| Properti | Nilai terbaca | Catatan |
+| --- | --- | --- |
+| Rasio | 9:16 potret | 720×1280 |
+| Sudut pandang | belakang-atas, pitch ~25–30° ke bawah | ekor jet terlihat penuh, sayap hampir datar |
+| Jangkar pemain X | 0.50 (tengah) | bukan 0.87 seperti spec lama |
+| Jangkar pemain Y | ~0.72 dari atas | hidung jet ~0.60, nozzle ~0.80 |
+| Tinggi pemain | ~**20%** tinggi layar | ujung sayap ke ujung sayap ~38% lebar layar |
+| Cakrawala | ~**0.33** dari atas | laut bertemu awan; sepertiga atas = langit |
+| Bos | puncak layar, 0.03–0.25 | mengisi ~60% lebar |
+| Roll | 0 | jet lurus, horizon datar |
 
-Ketiganya diuji otomatis di `tools/render3d_test.js` §4 — terukur 87,0% /
-18,5% / 14,5% pada kamera yang dipakai game, bukan pada salinannya. Tinggi
-pemain di dunia harus **4,86 unit** (CHAR_HEIGHT 1,92 x PLAYER_SCALE 2,53);
-kalau pengali itu berubah, framing-nya bohong.
-
-Tiga ukuran, tiga variabel (tinggi kamera, kedalaman kamera, pitch) — jadi
-framing-nya **tertentu**. `tools/solve_framing.py` menyelesaikannya:
-
-```
-heightOffset  15.95      FOV vertikal   60° @ 9:16
-backOffsetZ   11.10      roll            0°  (dutch angle dilarang)
-pitchDegrees  22.50      yaw             0°
-lookTargetZ   27.4  (ruang arena)
-```
-
-**Pitch-nya rendah, bukan curam.** Pembacaan mata pertama hampir selalu
-"sekitar 54°", karena lantai di dekat pemain terlihat sangat miring. Itu
-ilusi: tepi bawah frame 60° sudah menunjuk 52° ke bawah dengan sendirinya.
-Kalau pitch benar-benar 54°, horizon terlempar jauh ke luar layar dan lorong
-berubah jadi papan permainan dilihat dari atas.
-
-### Lebar lorong
-
-Pada framing ini, dinding di x=±10 baru masuk layar di z≈20 — artinya separuh
-pantulan peluru terjadi di luar layar, yang sama saja dengan mekanik yang
-tidak ada. **Lorong = 12 unit (x = ±6)**, dan kedua dinding terbaca sejak
-z≈2. Kebetulan yang menguntungkan: lorong sempit juga persis seperti di key
-art, dan lebih banyak pantulan per tembakan.
-
-### Peta zona layar
-
-```
-  0% ──────── kabut ungu · siluet kota · vortex ────────
- 14%          horizon
- 20% ┐
-     │  KERUMUNAN JAUH    hiasan, di luar simulasi (z 44..96)
- 42% ┤
-     │  ARENA             z 40 → 5, musuh + gerbang + hujan tracer
- 72% ┤
-     │  ZONA PANTUL       dinding magenta, drum, lintasan peluru
- 85% ┤
-     │  PEMAIN            lantai grid cyan, prajurit, kilatan biru
-100% ┘
-```
+Konsekuensi langsung: kamera lorong (pitch 22,5°, anchor 0,87, horizon 0,14)
+**tidak berlaku lagi**. Nilai baru harus diselesaikan ulang.
 
 ---
 
-## 2. Palet
+## 2. Lapisan kedalaman (jauh → dekat)
 
-Sumber tunggal: `Config/arena_config.json` → `artDirection`. **Jangan pernah
-menulis hex di kode.**
+1. **Langit senja** — biru baja gelap di puncak (`#2E3E4E`) turun ke awan
+   kumulus keemasan (`#F8D496`), dengan celah cahaya hangat di kiri.
+2. **Bos dreadnought** — kapal udara raksasa abu metalik, menara dan antena
+   bertingkat, lampu merah dan biru kecil di lambung, **inti bundar menyala
+   oranye-putih** (`#FFFDD7`) di tengah bawahnya.
+3. **Skuadron** — ~20 helikopter serang dan drone, siluet gelap dengan aksen
+   merah, tersebar di sepertiga atas, beberapa menyeberang bingkai.
+4. **Laut** — abu-biru dingin (`#67738B`) dengan pantulan api.
+5. **Kota pesisir** — dua tepi daratan kiri-kanan, gedung terbakar, kolom
+   asap tegak (`#D89988`), api oranye di permukaan tanah.
+6. **Jet pemain** — putih-abu dengan panel biru, di tengah bawah.
+7. **HUD** — melayang di atas segalanya.
 
-| Peran | Hex | Di gambar |
-|---|---|---|
-| Player Cyan | `#2BE8FF` | kisi lantai, kilatan moncong, rim armor |
-| Player Steel | `#DCE6F2` | zirah putih-biru |
-| Player Deep | `#2E5BD8` | pelat gelap zirah |
-| Bumper Magenta | `#FF2BD6` | dinding pantul |
-| Bumper Core | `#FF9BEE` | inti panas di titik benturan |
-| Tracer Red | `#FF2A2A` | hujan tracer musuh |
-| Enemy Red | `#E03A2F` | zirah badan musuh |
-| Enemy Orange | `#FF7A18` | aksen bahu/helm musuh |
-| Blast Orange | `#FF9A2E` | bola api |
-| Blast Core | `#FFE3A0` | inti ledakan |
-| Chain Violet | `#A64BFF` | busur petir |
-| Vortex Purple | `#6B2FA8` | black hole latar |
-| Night Base | `#070A14` | kota, bayangan |
-| Combo Chrome | `#9BF2FF` + outline `#0A2A33` | teks x999 COMBO |
-| Brass Bullet | `#D9A441` | selongsong chain shot |
-
-**Rasio layar** (kenapa ini tidak terlihat seperti permen neon): ~55% gelap ·
-25% merah/oranye · 12% magenta/ungu · **8% cyan**. Cyan adalah warna paling
-sedikit di layar dan justru karena itu pemain langsung terbaca.
-
-**Arti warna, dipegang mati-matian:**
-cyan = milik pemain · magenta = permukaan pantul · merah/oranye = ancaman ·
-ungu = tenaga rantai · brass = peluru.
+Kota tidak pernah sampai ke tengah layar: koridor tengah selalu laut terbuka,
+supaya peluru terbaca.
 
 ---
 
-## 3. Elemen
+## 3. Palet (disampel dari gambar)
 
-**Pemain** — satu badan. Zirah hard-surface biru-putih, visor tertutup, tanpa
-wajah. Stance kaki lebar, satu tangan mengangkat senjata. Rim light cyan di
-seluruh siluet, pantulan di lantai basah. Kilatan moncong **biru** — itulah
-satu-satunya cara membedakan tembakan sendiri dari hujan tracer musuh dalam
-seperlima detik. Digambar 1,35× lebih besar dari unit mana pun: ia jangkar
-komposisi.
+| Peran | Hex |
+| --- | --- |
+| Langit puncak | `#2E3E4E` |
+| Awan senja | `#F8D496` |
+| Sorot awan | `#FFD9A0` |
+| Laut | `#67738B` |
+| Asap | `#D89988` |
+| Inti ledakan | `#FFEDA0` |
+| Api ledakan | `#FF9A2E` |
+| Tepi ledakan | `#E8571A` |
+| Peluru pemain (inti) | `#EAFFFF` |
+| Peluru pemain (pendar) | `#3FA9FF` |
+| Laser/tracer musuh | `#FF3B2F` |
+| Kubah perisai | `#2E8BFF` + tepi `#00D0FF` |
+| Badan jet | `#D8DEE9`, panel `#4A5A7E`, aksen `#2BB8FF` |
+| Semburan mesin | putih → `#FF8A2E` → `#2BB8FF` |
+| Lambung bos | `#8A94A6`, inti `#FFD24A` |
+| COMBO emas | `#FFC83A` / `#FFEBA1` |
 
-**Kerumunan** — ratusan unit identik, merah-oranye, berbaris rapat. Perbedaan
-tipe dibaca dari **siluet dan nilai warna**, tidak pernah dari hue yang
-berbeda; 200 unit harus tetap terbaca sebagai satu pasukan. Makin jauh makin
-larut ke kabut. Yang terkena ledakan terlempar ke udara.
-
-**Dinding pantul** — slab panel magenta yang menyala, bukan batu. Permukaan
-teknis dengan sambungan dan garis data. Tepi atasnya pita paling terang:
-itulah garis yang dipakai pemain memperkirakan sudut. Saat kena peluru:
-menyala lokal lalu meredam.
-
-**Drum** — badan gelap merah bertanda bahaya, hanya pita atas yang panas.
-Emissive penuh membuatnya terbaca sebagai lampu dan pemain berhenti takut.
-
-**Lantai** — pelat logam gelap, basah, dengan kisi cahaya cyan. Garis
-**menebal** dekat pemain dan **meredup** ke horizon: itu yang membuat zona
-pemain terbaca sebagai lantai dan zona spawn terbaca sebagai kedalaman.
-Pantulan dinding merembes ke lantai dalam bentuk goresan memanjang.
-
-**Latar** — kota cyberpunk gelap dengan jendela menyala, kabut ungu tebal,
-vortex berpilin di kanan atas, puing melayang.
+Suasananya **hangat-dingin**, bukan ungu. Oranye api melawan biru peluru;
+ungu hampir tidak ada.
 
 ---
 
-## 4. Efek serangan
+## 4. Senjata dan efek serangan (inventaris lengkap)
 
-| # | Efek | Spesifikasi |
-|---|---|---|
-| E1 | **Chain shot** | Selongsong brass (r 0.26, h 0.92) menghadap arah gerak. Jejak pita api 18 titik, menyempit ke ekor, inti putih → oranye, aditif. Filamen ungu saat combo ≥ 20. |
-| E2 | **Ricochet impact** | Flare radial 0,12 s · 16 percik searah normal · busur ungu 0,25 s · dinding menyala lokal lalu meredam 0,3 s · hitstop 40 ms · shake kecil. |
-| E3 | **Hujan tracer** | Batang tipis merah, satu MultiMesh, cap 160 aktif, umur 0,55 s. Menuju **sekitar** pemain, bukan tepat ke pemain — tembakan yang bertemu di satu titik terbaca sebagai corong, bukan hujan. |
-| E4 | **Ledakan** | Inti putih-kuning → kulit oranye → asap, ~0,8 s. Cincin kejut di lantai dengan radius **persis sama** dengan radius ledakan di simulasi; pemain belajar jangkauan drum dari cincin itu. Melempar musuh. |
-| E5 | **Chain lightning** | Busur zig-zag 7 segmen dari titik pantul ke tengah lorong. Berkedip, bukan memudar — petir yang memudar terbaca sebagai asap. < 0,2 s, maks 6 aktif. |
-| E6 | **Combo burst** | Angka chrome-cyan besar di kanan atas, outline gelap tebal, punch scale saat naik, memutih saat combo tinggi. Milestone: flash + shake + stinger. |
-
-**Aturan yang membatalkan semua efek di atas:** kalau sebuah efek menutupi
-lintasan peluru lebih dari 0,15 detik, efek itu dipotong. *Readability beats
-beauty.*
-
----
-
-## 5. Post-processing
-
-| Efek | Nilai | Alasan |
-|---|---|---|
-| Glow | threshold 0,60 · intensitas 1,15 · bloom 0,28 | semua neon di gambar "mekar" |
-| Tonemap | ACES, exposure 1,10, white 6 | inti ledakan hampir putih tanpa jadi bidang rata |
-| Fog | `#2A1340`, densitas 0,022 | ujung lorong larut, bukan dipotong |
-| Vignette/saturasi | saturasi 1,08 · kontras 1,05 | memusatkan mata ke lorong |
-| Chromatic aberration | maks 0,25, hanya saat bullet-time | aksen, bukan gaya tetap |
+| # | Efek | Deskripsi terbaca | Catatan implementasi |
+| --- | --- | --- | --- |
+| E1 | Aliran peluru pemain | dua pita rapat kapsul biru-putih naik dari hidung, sedikit melebar | kapsul additive, ~8/detik/pita, pendar biru |
+| E2 | Semburan mesin | 4 nozzle, lidah api putih-oranye, pita biru memanjang ke bawah | selalu menyala, berdenyut |
+| E3 | Laser radial bos | ~12 berkas merah memancar dari inti bos ke segala arah | garis tebal + inti putih, berdenyut |
+| E4 | Peluru musuh | kapsul oranye-merah jatuh, kadang berekor | arah turun, lebih lambat dari peluru pemain |
+| E5 | Rudal | titik api dengan **ekor asap putih panjang melengkung** | ini yang memberi gambar rasa kacau; wajib ada |
+| E6 | Ledakan bola api | bola oranye-putih dengan asap mengepul, beberapa serentak | inti terang, tepi berasap, umur ~0.6 s |
+| E7 | Kubah perisai heksagonal | bola biru transparan bermotif heksagon mengelilingi musuh | dua terlihat; menandai musuh yang kebal |
+| E8 | Penanda target | lingkaran bidik tipis cyan di depan jet | mengunci musuh terdekat |
+| E9 | Asap kota | kolom asap tegak dari daratan terbakar | lambat, parallax jauh |
+| E10 | Kilau/bloom | semua sumber cahaya mekar kuat | pipeline bloom yang sudah ada tetap dipakai |
 
 ---
 
-## 6. Aturan anti-plastik
+## 5. HUD (tata letak terbaca)
 
-Dunia ini pernah terbaca seperti mainan blok. Penyebabnya bukan jumlah
-poligon dan bukan gaya rendah-poli — melainkan enam hal yang bisa ditulis,
-diuji, dan karena itu tidak boleh kembali:
+| Posisi | Elemen |
+| --- | --- |
+| Kiri atas | potret pilot kotak + **dua bar**: HP merah, shield biru |
+| Tengah atas | bar **BOSS** merah + nama "Dreadnought Leviathan" |
+| Kanan atas | `SCORE 2,487,360` kecil di atas, tombol jeda bundar |
+| Kanan, di bawah skor | **`COMBO x156`** emas miring, angka jauh lebih besar dari label |
+| Kiri bawah | kolom 4 tombol bundar: rudal `12`, bom biru `8`, perisai `3`, bidik |
+| Kanan bawah | **radar bundar** dengan blip merah dan sapuan |
 
-| # | Aturan | Kenapa |
-|---|---|---|
-| A1 | **Tidak ada warna rata pada benda besar.** Setiap permukaan punya sambungan, gradien, atau garis. | Warna rata tidak punya permukaan. Dinding magenta polos adalah pita plastik; dinding berpanel adalah bangunan. |
-| A2 | **Logam butuh pantulan.** Material metalness tinggi tanpa environment map menjadi siluet hitam. | Logam hanyalah permukaan yang memantulkan sekitarnya. Tanpa sekitar, ia tidak punya apa-apa untuk ditampilkan. Web memakai env map prosedural; Godot memakai sky-nya sendiri. |
-| A3 | **Proporsi dewasa, bukan chibi.** Kepala rig diskalakan 0,74. | Rasio 4-kepala adalah bahasa bentuk mainan konstruksi, dan tidak ada material yang bisa menyelamatkannya. Key art memakai ~7 kepala. |
-| A4 | **Siluet tinggi-ramping untuk benda teknis.** Kubah dan bentuk gemuk dilarang di lantai arena. | Pylon rasio 5:1 terbaca sebagai alat; kubah pendek terbaca sebagai jamur, berapa pun cahayanya. |
-| A5 | **Satu bahasa warna untuk kerumunan.** Merah-oranye, dibedakan hanya oleh siluet dan nilai. | Delapan skema warna fantasi melebur jadi bubur cokelat-hijau di kejauhan. Satu bahasa warna terbaca sebagai pasukan. |
-| A6 | **Pengulangan tekstur tidak boleh menjadi motif.** Panel dinding satu per 7 unit, bukan per 2,5. | Pengulangan rapat selalu berubah jadi pola; pola terbaca sebagai permukaan cetakan, bukan arsitektur. |
-
-Berlaku juga untuk HUD: nyawa adalah segmen perisai neon, bukan hati merah
-mengkilap. Satu elemen antarmuka bergaya permen cukup untuk menarik seluruh
-adegan kembali ke wilayah mainan.
-
-**Batas yang jujur:** badan pemain masih rig ksatria KayKit, dan mesh-nya
-ter-*merge* jadi satu objek, jadi helm berjambul tidak bisa disembunyikan
-sebagian. Cat, proporsi, dan senjata sudah diganti; bentuk dasarnya baru bisa
-diperbaiki oleh model sci-fi sungguhan (roadmap M1).
+Gaya: bingkai tipis cyan, isi gelap tembus pandang, tipografi kondensat.
 
 ---
 
-## 7. Yang sengaja TIDAK diambil dari gambar
+## 6. Aturan anti-plastik (tetap berlaku)
 
-1. **Vortex sebagai gameplay.** Ia dekorasi latar. Gravity well yang
-   sesungguhnya adalah rintangan kecil di lantai; memberi dua benda arti
-   gameplay yang sama hanya membingungkan.
-2. **Kepadatan tracer seperti di gambar** (ratusan). Dibatasi 160 dan dibuat
-   terbaca lewat panjang streak, bukan lewat jumlah.
-3. **Puing melayang** hanya di latar, tidak pernah punya collider.
-4. **Kamera menengok / dutch angle.** Merusak prediksi sudut pantul, yang
-   merupakan seluruh isi permainan ini.
+| # | Aturan |
+| --- | --- |
+| A1 | Tidak ada isian rata di permukaan besar — selalu gradien, panel, atau noise |
+| A2 | Logam butuh env map; metalness tinggi tanpa environment = hitam |
+| A3 | Proporsi dewasa; kendaraan ramping, bukan gemuk mainan |
+| A4 | Satu bahasa bentuk untuk satu faksi |
+| A5 | Pengulangan tekstur tidak lebih rapat dari ~7 unit dunia |
+| A6 | HUD memakai garis neon tipis, bukan ikon mengilap |
+
+---
+
+## 7. Bloom (post-processing)
+
+Ditulis tangan di `js/render3d.js` karena three.js r128 yang di-vendor tidak
+membawa `EffectComposer`/`UnrealBloomPass`:
+
+| Tahap | Isi | Nilai |
+| --- | --- | --- |
+| scene RT | resolusi penuh, `LinearEncoding` | — |
+| bright pass | luminansi, `smoothstep(t, t+0.35, l)` | ambang **0.74** |
+| blur | gaussian 9 ketuk, separable H/V, 2 putaran | setengah resolusi |
+| composite | additive + ACES + vignette + sRGB manual | kekuatan **0.85**, exposure **0.92**, vignette **0.42** |
+
+Tiga aturan yang mahal dipelajari:
+
+1. RT scene harus `LinearEncoding`; kalau ditandai sRGB, warnanya dikonversi
+   dua kali dan adegan pucat.
+2. Composite wajib `pow(c, 1/2.2)` **sendiri** — `ShaderMaterial` buatan
+   sendiri tidak ikut jalur encoding otomatis three.js.
+3. Ambang rendah membuat lantai ikut mekar dan hitam terangkat jadi abu.
+
+Ambang perlu **dinaikkan lagi** untuk key art baru: di sana yang mekar hanya
+api, peluru, dan inti bos — langit siang hari tidak mekar.
+
+Jatuh-balik: kalau render target gagal dibuat, `renderWithBloom()` kembali ke
+`renderer.render()` langsung.

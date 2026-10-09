@@ -1,147 +1,94 @@
-# 01 — Roadmap: dari sekarang ke key art
+# 01 — Roadmap: pivot ke key art yang sebenarnya
 
-Basis: [`00-art-bible.md`](00-art-bible.md). Target utama: build Godot di
-`godot/`. Prototipe web (`index.html` + `js/render3d.js`) dipertahankan
-sebagai **satu-satunya alat verifikasi visual** di lingkungan tanpa GPU, dan
-karena itu wajib ikut setiap perubahan framing dan palet.
+Basis: [`00-art-bible.md`](00-art-bible.md) v4.0, ditulis dari
+`docs/images/keyart-master.jpg`.
 
-**Aturan yang tidak dinegosiasikan**
+## Kenapa roadmap ini ditulis ulang total
 
-1. `godot/scripts/sim/` adalah aturan main dan determinisme. Rombakan visual
-   tidak boleh menyentuhnya. Setiap PR yang mengubahnya harus punya alasan
-   gameplay yang ditulis, bukan alasan tampilan.
+Roadmap sebelumnya (M1–M6 "neon lane") dibangun di atas art bible yang ditulis
+**tanpa file gambarnya ada di disk**. Setelah file key art ditemukan kembali di
+remote, isinya ternyata genre yang berbeda: bukan lorong neon ungu dengan
+prajurit berjalan, melainkan **shoot-'em-up udara vertikal** — jet tempur di
+atas kota pesisir terbakar, melawan dreadnought terbang.
+
+Jadi: M1–M6 lama **dibatalkan**. Yang di bawah ini menggantikannya.
+
+### Yang tetap dipakai dari pekerjaan sebelumnya
+
+| Aset | Alasan tetap hidup |
+| --- | --- |
+| Pipeline bloom di `js/render3d.js` | Key art baru justru lebih bergantung pada mekar cahaya |
+| `tools/look_audit.js` | Satu-satunya cara melihat hasil di lingkungan tanpa GPU |
+| `tools/render3d_test.js` | Kerangka uji framing; isi asersinya diganti angka baru |
+| Sim di `godot/scripts/sim/` | Aturan main dan determinisme tidak bergantung genre tampilan |
+| Aturan anti-plastik A1–A6 | Tidak bergantung genre |
+
+### Yang mati
+
+Lorong 12 unit, dinding magenta, kisi lantai, kerumunan jauh, pelataran,
+vortex ungu, framing anchor 0,87 / horizon 0,14, dan palet `3.0.0-neon`.
+
+---
+
+## Aturan yang tidak dinegosiasikan
+
+1. `godot/scripts/sim/` adalah aturan main. Rombakan visual tidak menyentuhnya.
 2. Setiap milestone berakhir pada build yang bisa dimainkan dan uji hijau.
 3. Angka warna dan framing hanya hidup di `Config/arena_config.json`.
 4. Efek yang menutupi lintasan peluru > 0,15 s dipotong.
+5. **Setiap milestone diverifikasi dengan tangkapan layar yang dibandingkan
+   langsung ke `docs/images/keyart-master.jpg`.** Aturan ini yang hilang
+   sebelumnya, dan karenanya pekerjaan tiga putaran meleset.
 
 ---
 
-## Garis dasar hari ini
+## N1 — Framing dan langit (pondasi)
 
-Sudah berdiri dan terverifikasi:
+- [ ] Selesaikan ulang kamera: jangkar pemain X 0,50 · Y 0,72 · tinggi 20% ·
+      cakrawala 0,33 · pitch 25–30° ke bawah · roll 0.
+- [ ] Ganti `scene.background` dan backdrop: langit senja bergradien
+      `#2E3E4E` → `#F8D496` dengan lapisan awan kumulus.
+- [ ] Bidang laut `#67738B` dengan pantulan api, bergulir menjauh.
+- [ ] Naikkan ambang bloom: hanya api, peluru, dan inti bos yang mekar.
+- [ ] Perbarui asersi `tools/render3d_test.js` ke angka jangkar baru.
 
-| Bagian | Keadaan |
-|---|---|
-| Framing kamera | Diselesaikan dari key art, lorong 12 unit, follow-x parsial, dolly combo |
-| Palet | 13 kunci per varian + `artDirection`, lima ruangan neon |
-| Lantai | Pelat logam + kisi cyan + pantulan basah + panas combo |
-| Dinding | Slab magenta emissive + hit pulse 4 slot |
-| Latar | Kota + kabut + vortex prosedural (Godot saja) |
-| Pemain | Satu badan, 1,35×, kilatan biru |
-| VFX | Jejak api, busur petir, cincin kejut, hujan tracer |
-| HUD | Combo chrome kanan atas, POWER, pod kaca |
-| Feel | Hitstop 40/90 ms, shake +20% |
-| Uji | `smoke.tscn` lulus 5 varian · determinisme 5/5 identik · gdlint bersih |
+## N2 — Jet pemain
 
-Jarak yang tersisa ke key art, diurutkan dari yang paling terlihat:
+- [ ] Ganti badan prajurit dengan jet: putih-abu `#D8DEE9`, panel `#4A5A7E`,
+      aksen `#2BB8FF`, sayap delta, empat nozzle.
+- [ ] Semburan mesin (E2): api putih-oranye + pita biru, berdenyut.
+- [ ] Roll ringan saat bergerak menyamping; tidak pernah memiringkan kamera.
 
-1. Bentuk dasar badan pemain masih rig ksatria KayKit (mesh ter-merge, helm
-   berjambul tidak bisa dilepas sebagian). Cat, proporsi, dan senjatanya
-   sudah diganti; sisanya menunggu model sci-fi CC0.
-2. Musuh yang mati karena ledakan tidak terlempar; mereka hanya jatuh.
-3. ~~Prototipe web belum punya latar kota, kerumunan jauh, maupun hujan
-   tracer.~~ **Selesai** — lihat M3.
-4. Belum ada tingkat kualitas; glow dan pantulan selalu menyala.
-5. Balance belum disetel ulang setelah lorong menyempit 20 → 12.
+## N3 — Dunia bawah
 
----
+- [ ] Dua tepi daratan kiri-kanan, koridor tengah selalu laut terbuka.
+- [ ] Gedung terbakar + kolom asap tegak (E9).
+- [ ] Parallax tiga lapis mengikuti kecepatan maju.
 
-## M1 — Prajurit (perbedaan nomor satu) — **SELESAI**
+## N4 — Musuh dan bos
 
-**Masalah:** key art menempatkan satu zirah hard-surface biru-putih sebagai
-jangkar komposisi. Yang ada sekarang adalah ksatria fantasi berpedang.
+- [ ] Helikopter serang dan drone: siluet gelap, aksen merah, formasi.
+- [ ] Bos dreadnought di puncak layar dengan inti menyala (E3 laser radial).
+- [ ] Kubah perisai heksagonal (E7) sebagai penanda kebal.
 
-- [x] `PlayerSkin`: override material seluruh mesh rig pemain — badan
-      `playerSteel`, pelat `playerDeep`, emisi rim `playerCyan`.
-- [x] Buang pedang dan perisai dari soket pemain; pasang senjata sebagai
-      bentuk prosedural sederhana (balok + laras + inti menyala) sampai ada
-      model CC0 yang benar.
-- [ ] Pose: stance kaki lebar saat diam. *(ditunda: butuh klip baru, bukan
-      material — nilainya kecil dibanding biayanya)*
-- [x] Rim light: satu OmniLight3D cyan beraura kecil mengikuti pemain, cukup
-      untuk memisahkan siluet dari lantai gelap.
-- [x] Tumpahan cahaya di lantai sekeliling kaki, menggantikan pantulan quad —
-      pada jarak kamera ini keduanya tidak bisa dibedakan dan yang ini gratis.
+## N5 — Efek serangan
 
-**Lulus kalau:** pada screenshot web dan pada `smoke.tscn`, pemain terbaca
-sebagai prajurit sci-fi biru-putih, bukan ksatria. Tidak ada emas tersisa.
-→ **Terbukti** di `screenshots/qa-gameplay.png`: badan baja biru dengan
-senapan, tanpa satu piksel emas. Godot memakai fresnel sungguhan
-(`shaders/player_armor.gdshader`), web memakai emissive tetap — perbedaan
-yang tidak terbaca pada ukuran layar ini.
+- [ ] E1 aliran peluru biru dua pita.
+- [ ] E4 peluru musuh jatuh.
+- [ ] E5 rudal dengan ekor asap melengkung — ini penyumbang terbesar rasa kacau.
+- [ ] E6 bola api dengan asap mengepul.
+- [ ] E8 penanda bidik cyan.
+- [ ] Anggaran: partikel aktif ≤ 200, 60 fps ponsel menengah, lantai 30 fps.
 
----
+## N6 — HUD
 
-## M2 — Kerumunan hidup
+- [ ] Potret pilot + bar HP merah / shield biru (kiri atas).
+- [ ] Bar BOSS bernama (tengah atas).
+- [ ] SCORE + jeda (kanan atas), `COMBO x156` emas miring di bawahnya.
+- [ ] Empat tombol bundar berhitung di kiri bawah.
+- [ ] Radar bundar dengan blip merah di kanan bawah.
 
-- [x] **Death pop:** musuh yang mati oleh `explosion` terlempar — impuls
-      visual murni di `CharacterPool.drop_corpse`, sim tetap menghapus unit
-      pada tick yang sama. Balistik gravitasi 26 (bukan 9,8: pada skala 2x
-      gravitasi sungguhan terbaca seperti gerak lambat), mendarat tanpa
-      memantul, jungkir sebanding tenaga lemparan. Sisi Godot saja —
-      prototipe web tidak menerima daftar peristiwa dari simulasi, jadi ia
-      tidak tahu kematian mana yang disebabkan ledakan. **Itu pekerjaan
-      pertama M3.**
-- [ ] Musuh yang terkena pantulan tersentak ke arah normal pantul.
-- [ ] Warna kerumunan memudar ke kabut mengikuti jarak (sekarang hanya
-      kerumunan jauh yang melakukannya).
-- [ ] Gerbang spawn berdenyut saat gelombang baru masuk.
+## N7 — Balance dan audio
 
-**Lulus kalau:** satu ledakan drum di tengah kerumunan menghasilkan gerakan,
-bukan sekadar unit yang hilang.
-
----
-
-## M3 — Paritas web — **sebagian besar SELESAI**
-
-Prototipe web adalah satu-satunya mata yang kita punya di sandbox ini; kalau
-ia tertinggal dua generasi, kita kehilangan kemampuan memverifikasi apa pun.
-
-- [x] Port latar: kota + kabut + vortex sebagai quad bertekstur kanvas di z=150. Geometrinya DIHITUNG, bukan dikira: horizon jatuh di baris 146 dari 256, dan tepi bawahnya dihapus dengan gradien alfa supaya larut ke lantai berkabut.
-- [x] Port kerumunan jauh: 220 InstancedMesh di z 44..96, melebar ke belakang, warna melebur ke kabut.
-- [x] Port hujan tracer: kolam 120 batang aditif, laju dari jumlah musuh, menuju SEKITAR pemain.
-- [x] Port jejak api: pita 18 titik yang menyempit ke ekor, inti putih→oranye, ekor ungu saat combo ≥ 20. Busur petir dipicu oleh pembalikan arah peluru — renderer tidak pernah bertanya apa pun pada simulasi.
-- [x] `tools/look_audit.js` (baru): memotret adegan PENUH — musuh dekat, tracer hidup, tutorial sudah dibuang. `qa_screenshot.js` memotret empat detik setelah mulai, yang selalu menghasilkan lorong kosong dan menyembunyikan justru hal yang perlu dinilai.
-- [ ] Teruskan `events` simulasi ke renderer web (prasyarat death pop di web).
-
-**Lulus kalau:** screenshot web berdampingan dengan key art terbaca sebagai
-game yang sama.
-
----
-
-## M4 — Tingkat kualitas & performa
-
-- [ ] Tiga tingkat: `low` (tanpa glow, tanpa pantulan lantai, tracer 48),
-      `mid` (glow 1 pass, tracer 96), `high` (sekarang).
-- [ ] Pemilihan otomatis dari probe FPS tiga detik pertama, bisa ditimpa di
-      layar setup.
-- [ ] Target: 60 fps pada profil ponsel menengah, lantai 30 fps.
-
----
-
-## M5 — Balance ulang
-
-Lorong 20 → 12 mengubah semuanya: lebih banyak pantulan per tembakan, musuh
-lebih padat, drum lebih sering berantai.
-
-- [ ] Jalankan `tools/sim_test.js` (bot mahir, 5 seed × 5 varian).
-- [ ] Target lama tetap berlaku: sesi 60–180 detik, kemenangan bot 5–20%.
-- [ ] Perbarui blok `balance` di config dengan hasil **terukur**, bukan
-      tebakan.
-
----
-
-## M6 — Audio neon
-
-- [ ] `bounce_*` jadi lebih metalik/elektrik.
-- [ ] Layer desis untuk busur petir.
-- [ ] Musik bergeser dari synth fantasi ke darksynth (`tools/gen_music.py`
-      sudah prosedural — ganti preset, bukan berkas).
-
----
-
-## Urutan eksekusi
-
-M1 → M2 → M3 memberi lompatan visual terbesar per jam kerja dan sudah cukup
-untuk menilai apakah arahnya benar. M4–M6 adalah pekerjaan pengerasan dan
-sebaiknya menunggu sampai tampilannya tidak berubah lagi.
+- [ ] Tala ulang untuk sesi 60–180 detik, 5–20% kemenangan bot.
+- [ ] Audio: mesin jet, dentum ledakan, nada combo naik.
